@@ -46,6 +46,19 @@ const notConfiguredDelivery = {
   providerHealth: null,
   setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
 };
+const connectedSenderDetails = {
+  state: "connected",
+  missingSettings: [],
+  setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+};
+const notConfiguredSenderDetails = {
+  state: "not_configured",
+  missingSettings: [
+    "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+    "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+  ],
+  setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+};
 const identity = {
   binding: { issuer: "https://access.example", subject: "editor" },
   email: "editor@example.com",
@@ -113,6 +126,7 @@ describe("campaign endpoint", () => {
       testDelivery,
       bulkDelivery,
       delivery: connectedDelivery,
+      senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
       listTestRecipients: mocks.listTestRecipients,
     });
@@ -862,6 +876,7 @@ describe("campaign delivery readiness", () => {
         },
         setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
       },
+      senderDetails: connectedSenderDetails,
     });
     expect(mocks.listCampaigns).not.toHaveBeenCalled();
   });
@@ -892,6 +907,7 @@ describe("campaign delivery readiness", () => {
       testDelivery,
       bulkDelivery,
       delivery: notConfiguredDelivery,
+      senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
       listTestRecipients: mocks.listTestRecipients,
     });
@@ -903,6 +919,153 @@ describe("campaign delivery readiness", () => {
     expect(await response.json()).toEqual({ campaigns: [] });
   });
 
+  describe("while the sender details are not configured", () => {
+    beforeEach(() => {
+      mocks.loadContext.mockResolvedValue({
+        identity,
+        application,
+        testDelivery,
+        bulkDelivery,
+        delivery: connectedDelivery,
+        senderDetails: notConfiguredSenderDetails,
+        readDeliveryHealth: mocks.readDeliveryHealth,
+        listTestRecipients: mocks.listTestRecipients,
+      });
+    });
+
+    it("reports the missing settings under their own heading", async () => {
+      const response = await GET(
+        new Request(
+          "https://foundry.example/api/foundry-cms/campaigns?readiness=delivery",
+        ),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.senderDetails.state).toBe("not_configured");
+      expect(body.senderDetails.missingSettings).toEqual([
+        "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+        "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+      ]);
+      // The two headings stay apart: a sender setting never appears in the
+      // delivery list and the other way round.
+      for (const name of body.senderDetails.missingSettings) {
+        expect(body.delivery.missingSettings).not.toContain(name);
+        expect(name).toMatch(/^FOUNDRY_[A-Z0-9_]+$/u);
+      }
+    });
+
+    it("still lists the campaigns that are already stored", async () => {
+      mocks.listCampaigns.mockResolvedValue([]);
+      const response = await GET(
+        new Request("https://foundry.example/api/foundry-cms/campaigns"),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ campaigns: [] });
+    });
+
+    it("refuses to create a campaign, with the named reason", async () => {
+      const response = await post(
+        {
+          action: "create_standalone",
+          input: {
+            subject: "Spring news",
+            previewText: "What happened this spring",
+            callToAction: { label: "Read", href: "https://example.com" },
+            emailContent: { version: "1.0.0", type: "document", children: [] },
+          },
+        },
+        "campaign-create-without-footer-1",
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "campaign_sender_details_not_configured",
+      });
+      expect(mocks.createStandalone).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["edit", { action: "edit", campaignId, expectedVersion: 1, input: { subject: "Changed", previewText: "Changed", callToAction: { label: "Read", href: "https://example.com" }, emailContent: { version: "1.0.0", type: "document", children: [] } } }],
+      ["create_from_post", { action: "create_from_post", sourcePostRevisionId: "10000000-0000-8000-8000-000000000001" }],
+      ["request_test", { action: "request_test", campaignId, testRecipientIds: ["owner-primary"] }],
+      ["confirm_test_receipt", { action: "confirm_test_receipt", executionId: "40000000-0000-4000-8000-000000000001" }],
+      ["authorize_bulk", { action: "authorize_bulk", campaignId, testExecutionId: "40000000-0000-4000-8000-000000000001" }],
+      ["send_bulk_now", { action: "send_bulk_now", campaignId, authorizationId: "50000000-0000-4000-8000-000000000001" }],
+      ["retry_bulk_send", { action: "retry_bulk_send", campaignId, operationId: "60000000-0000-4000-8000-000000000001" }],
+    ])("refuses %s with the same reason", async (name, body) => {
+      const response = await post(body, `campaign-no-footer-${name}-1`);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "campaign_sender_details_not_configured",
+      });
+    });
+
+    it("refuses an action that is not on the allowed list", async () => {
+      // The gate is an allowlist, so an action absent from it is refused
+      // rather than permitted by omission.
+      const response = await post(
+        {
+          action: "activate_bulk_schedule",
+          campaignId,
+          authorizationId: "50000000-0000-4000-8000-000000000001",
+          resolvedTime: {
+            localDateTime: "2026-01-01T09:00",
+            ianaTimeZone: "America/Vancouver",
+            utcOffsetChoice: "-08:00",
+            executeAtUtc: "2026-01-01T17:00:00.000Z",
+            timeZoneDatabaseVersion: "2026a",
+          },
+        },
+        "campaign-no-footer-activate-1",
+      );
+      expect(response.status).toBe(503);
+      expect(mocks.activateBulkSchedule).not.toHaveBeenCalled();
+    });
+
+    it("still lets an Owner cancel a scheduled send", async () => {
+      mocks.cancelBulkSchedule.mockResolvedValue({
+        schedule: { id: "70000000-0000-4000-8000-000000000001" },
+        replayed: false,
+      });
+      const response = await post(
+        {
+          action: "cancel_bulk_schedule",
+          scheduleId: "70000000-0000-4000-8000-000000000001",
+        },
+        "campaign-cancel-without-footer-1",
+      );
+      expect(response.status).toBe(201);
+      expect(mocks.cancelBulkSchedule).toHaveBeenCalled();
+    });
+
+    it("reports one reason when neither the secrets nor the settings are set", async () => {
+      // A new installation has neither, and both answers would be true. The
+      // sender settings are checked first so the whole product — this API, the
+      // MCP runtime and the scheduled worker — reports one word.
+      mocks.loadContext.mockResolvedValue({
+        identity,
+        application,
+        testDelivery,
+        bulkDelivery,
+        delivery: notConfiguredDelivery,
+        senderDetails: notConfiguredSenderDetails,
+        readDeliveryHealth: mocks.readDeliveryHealth,
+        listTestRecipients: mocks.listTestRecipients,
+      });
+      const response = await post(
+        {
+          action: "request_test",
+          campaignId,
+          testRecipientIds: ["owner-primary"],
+        },
+        "campaign-new-installation-reason-1",
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "campaign_sender_details_not_configured",
+      });
+    });
+  });
+
   describe("while delivery is not configured", () => {
     beforeEach(() => {
       mocks.loadContext.mockResolvedValue({
@@ -911,6 +1074,7 @@ describe("campaign delivery readiness", () => {
         testDelivery,
         bulkDelivery,
         delivery: notConfiguredDelivery,
+        senderDetails: connectedSenderDetails,
         readDeliveryHealth: mocks.readDeliveryHealth,
       });
     });

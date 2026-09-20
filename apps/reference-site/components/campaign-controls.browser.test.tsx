@@ -137,7 +137,9 @@ describe("campaign controls browser acceptance", () => {
    * as a real server would, so nothing in the steps can look finished unless
    * the server says it is.
    */
-  function fakeNewsletterServer(options: { deliveryState?: string } = {}) {
+  function fakeNewsletterServer(
+    options: { deliveryState?: string; senderDetailsState?: string } = {},
+  ) {
     const campaign = {
       id: "20000000-0000-4000-8000-000000000002",
       siteId: createSiteId("site_reference"),
@@ -283,11 +285,24 @@ describe("campaign controls browser acceptance", () => {
           return Response.json({});
         }
         if (url.includes("readiness=delivery")) {
+          const senderDetailsState =
+            options.senderDetailsState ?? "connected";
           return Response.json({
             delivery: {
               state: options.deliveryState ?? "connected",
               missingSettings: [],
               providerHealth: null,
+              setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+            },
+            senderDetails: {
+              state: senderDetailsState,
+              missingSettings:
+                senderDetailsState === "not_configured"
+                  ? [
+                      "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+                      "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+                    ]
+                  : [],
               setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
             },
           });
@@ -517,5 +532,76 @@ describe("campaign controls browser acceptance", () => {
     );
     expect(setupLink!.target).toBe("_blank");
     expect(server.commands).toHaveLength(0);
+  });
+
+  describe("Newsletter without the sender details", () => {
+    it("says what is missing in plain words and offers no way to write an email", async () => {
+      const server = fakeNewsletterServer({
+        senderDetailsState: "not_configured",
+      });
+      const host = mount(server.campaign, server.revision, "owner");
+
+      await vi.waitFor(() =>
+        expect(host.textContent).toContain(
+          "Foundry does not yet have the name and postal address that must " +
+            "appear at the bottom of every email, so no campaign can be " +
+            "written or sent.",
+        ),
+      );
+
+      // Nothing that would store a revision is offered.
+      await vi.waitFor(() =>
+        expect(buttonNamed(host, "New email")!.disabled).toBe(true),
+      );
+      expect(buttonNamed(host, "Edit")!.disabled).toBe(true);
+
+      // The owner reads plain words. The setting names are there for whoever
+      // installs them, behind the disclosure, not on the line.
+      const line = host.querySelector(".connection-status-missing")!;
+      expect(line.textContent).not.toContain("FOUNDRY_CAMPAIGN_LEGAL_NAME");
+
+      const setupLink = Array.from(
+        host.querySelectorAll<HTMLAnchorElement>("a"),
+      ).find((link) => link.textContent === "How to set the sender details");
+      expect(setupLink).toBeDefined();
+      expect(setupLink!.getAttribute("href")).toBe(
+        "https://github.com/Humber-Foundry/foundry-cms/blob/main/" +
+          "docs/operations/brevo-test-delivery-readiness.md",
+      );
+      expect(setupLink!.target).toBe("_blank");
+      expect(server.commands).toHaveLength(0);
+    });
+
+    it("shows the setting names to whoever opens the disclosure", async () => {
+      const server = fakeNewsletterServer({
+        senderDetailsState: "not_configured",
+      });
+      const host = mount(server.campaign, server.revision, "owner");
+
+      // The disclosure's button shows only "?", so it is found by its
+      // accessible name rather than by its text.
+      await vi.waitFor(() =>
+        expect(host.querySelector(".connection-status-missing")).not.toBeNull(),
+      );
+      await userEvent.click(
+        page.getByRole("button", { name: "Which settings are these?" }),
+      );
+      await vi.waitFor(() =>
+        expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_LEGAL_NAME"),
+      );
+      expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_POSTAL_ADDRESS");
+    });
+
+    it("leaves everything working once the settings are set", async () => {
+      const server = fakeNewsletterServer();
+      const host = mount(server.campaign, server.revision, "owner");
+
+      await vi.waitFor(() =>
+        expect(buttonNamed(host, "New email")!.disabled).toBe(false),
+      );
+      expect(host.textContent).not.toContain(
+        "Foundry does not yet have the name and postal address",
+      );
+    });
   });
 });

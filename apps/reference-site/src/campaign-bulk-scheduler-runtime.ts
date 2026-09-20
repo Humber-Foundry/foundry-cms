@@ -12,6 +12,7 @@ import {
 } from "./brevo-campaign-bulk-delivery-adapter";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { createCampaignBulkAudience } from "./campaign-bulk-audience";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import {
   createActiveOwnerCheck,
   createCampaignBulkSourceReader,
@@ -49,6 +50,7 @@ export async function createDurableCampaignBulkDeliveryApplication(
     environment,
     senders,
   );
+  const channelConfiguration = resolveCampaignChannel(environment).channel;
 
   const loadSource = createCampaignBulkSourceReader({
     siteId,
@@ -100,6 +102,7 @@ export async function createDurableCampaignBulkDeliveryApplication(
         bulkConfiguration.providerConfigurationFingerprint,
       senders,
     }),
+    channelConfiguration,
     fingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
@@ -110,6 +113,13 @@ export async function runScheduledCampaignBulkDeliveries(
 ) {
   if (environment.FOUNDRY_DB === undefined) {
     throw new Error("campaign_bulk_delivery_not_configured");
+  }
+  // Nothing may be scheduled or sent while the installation has not set the
+  // sender details and compliance footer, so the worker says so and stops rather
+  // than claiming work it would have to refuse one operation at a time.
+  const channelConfiguration = resolveCampaignChannel(environment).channel;
+  if (channelConfiguration.state !== "configured") {
+    throw new Error(channelConfiguration.reason);
   }
   const application = await createDurableCampaignBulkDeliveryApplication({
     ...environment,

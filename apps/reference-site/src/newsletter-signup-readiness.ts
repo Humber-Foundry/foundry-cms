@@ -1,8 +1,5 @@
 import type { HumanAccessEnvironment } from "./human-access-configuration";
-import {
-  CampaignChannelConfigurationError,
-  readCampaignChannelConfiguration,
-} from "./campaign-channel-configuration";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import {
   emailDeliverySetupGuide,
   isHttpsUrl,
@@ -114,23 +111,20 @@ export function readNewsletterSignupReadiness(
  * The sender identity and legal footer a confirmation message must carry, or
  * `null` when a setting is missing. The domain treats `null` as "do not take
  * this address", which is the whole point of the check.
+ *
+ * The footer comes from the same reading a campaign uses (ADR-0030), so the
+ * confirmation message and a campaign can never carry different words.
  */
 export function readNewsletterConfirmationDelivery(
   environment: NewsletterSignupEnvironment,
 ): Readonly<{ senderIdentityId: string; legalFooter: string }> | null {
-  const readiness = readNewsletterSignupReadiness(environment);
-  if (readiness.state !== "connected") return null;
-  try {
-    const channel = readCampaignChannelConfiguration(
-      environment,
-      environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-    );
-    return Object.freeze({
-      senderIdentityId: channel.senderIdentityId,
-      legalFooter: channel.complianceFooter.content,
-    });
-  } catch (error) {
-    if (error instanceof CampaignChannelConfigurationError) return null;
-    throw error;
+  if (readNewsletterSignupReadiness(environment).state !== "connected") {
+    return null;
   }
+  const { channel } = resolveCampaignChannel(environment);
+  if (channel.state !== "configured") return null;
+  return Object.freeze({
+    senderIdentityId: channel.configuration.senderIdentityId,
+    legalFooter: channel.configuration.complianceFooter.content,
+  });
 }

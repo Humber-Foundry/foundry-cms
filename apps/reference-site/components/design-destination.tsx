@@ -16,10 +16,10 @@ import {
   designFontStack,
   designNeutralPalette,
   designPresets,
-  homePage,
   matchDesignPreset,
   type DesignOptionPreview,
   type SiteDefinition,
+  type SitePage,
   type SiteDefinitionEdit,
 } from "@humber-foundry/site-definition";
 
@@ -155,19 +155,25 @@ function DesignOptionCard({
 
 export function DesignDestination({
   definition,
+  page,
   disabled = false,
   onEdit,
   onEditMany,
 }: {
   /** The working draft. Everything on screen is read from this one value. */
   definition: SiteDefinition;
+  /**
+   * The page whose section styles are listed. Design names no page of its own,
+   * so the editor passes the page it has open.
+   */
+  page: SitePage;
   disabled?: boolean;
   onEdit(edit: SiteDefinitionEdit): void;
   onEditMany(edits: ReadonlyArray<SiteDefinitionEdit>): void;
 }) {
   const groups = useMemo(
-    () => designControlGroups(definition),
-    [definition],
+    () => designControlGroups(definition, page),
+    [definition, page],
   );
   const selectedPreset = useMemo(
     () => matchDesignPreset(definition.design),
@@ -309,11 +315,7 @@ export function DesignDestination({
             aria-hidden="true"
             inert
           >
-            <SiteRenderer
-              definition={definition}
-              page={homePage(definition)}
-              editingSurface
-            />
+            <SiteRenderer definition={definition} page={page} editingSurface />
           </div>
         </div>
       </div>

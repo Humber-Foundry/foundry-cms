@@ -501,7 +501,7 @@ describe("content revision endpoint", () => {
         schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [],
-        composition,
+        compositions: [composition],
       }),
     );
 
@@ -509,9 +509,134 @@ describe("content revision endpoint", () => {
     expect(mocks.save).toHaveBeenCalledWith(
       expect.objectContaining({
         edits: [],
+        compositions: [composition],
+      }),
+    );
+  });
+
+  it("accepts a structural change for a page below the home page", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: { schemaVersion: "1.2.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.2.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    // The slot id names the page. Whether the site holds that page is the
+    // domain's decision, so the endpoint must pass it through rather than
+    // refuse every page but the home page.
+    const compositions = [
+      {
+        slotId: "slot_page_about_sections",
+        components: [
+          {
+            id: "section_about_proof",
+            type: "proof",
+            quote: "Evidence",
+            attribution: "Source",
+            metrics: [],
+          },
+        ],
+      },
+    ];
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [],
+        compositions,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ compositions }),
+    );
+  });
+
+  it("still accepts the single structural change an older tab sends", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: { schemaVersion: "1.2.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.2.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    // A browser tab opened before the release still sends one `composition`.
+    // Refusing it would lose an owner's unsaved structural change with nothing
+    // on screen to say so.
+    const composition = {
+      slotId: "slot_home_sections",
+      components: [
+        {
+          id: "section_new_proof",
+          type: "proof",
+          quote: "Evidence",
+          attribution: "Source",
+          metrics: [],
+        },
+      ],
+    };
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [],
         composition,
       }),
     );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ compositions: [composition] }),
+    );
+  });
+
+  it("rejects a slot identifier that names no page", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [],
+        compositions: [{ slotId: "home.sections", components: [] }],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("rejects two structural changes for the same page", async () => {
+    // Two changes for one page would make the saved result depend on the
+    // order they happened to arrive in.
+    const composition = { slotId: "slot_home_sections", components: [] };
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [],
+        compositions: [composition, composition],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 
   it("rejects a save without copy edits or component composition", async () => {

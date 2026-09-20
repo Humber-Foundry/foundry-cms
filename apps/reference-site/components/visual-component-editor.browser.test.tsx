@@ -6,6 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import {
   createDefaultPageSection,
+  findPageById,
   homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
@@ -30,6 +31,11 @@ import {
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
 import { installedSiteDefinition } from "../foundry/site-definition";
+import {
+  secondPageId,
+  secondPageSectionId,
+  withSecondPage,
+} from "../src/test-support/two-page-site-definition";
 function browserRevision(workspaceId: string) {
   return {
     workspaceId,
@@ -377,6 +383,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: referenceSiteDefinition,
+          page: homePage(referenceSiteDefinition),
           disabled: false,
           onChange: () => undefined,
         }),
@@ -440,6 +447,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: referenceSiteDefinition,
+          page: homePage(referenceSiteDefinition),
           disabled: false,
           iframeEnabled: false,
           onChange: (definition) => {
@@ -500,6 +508,7 @@ describe("visual component editor browser acceptance", () => {
     const config = createVisualComponentConfig(
       () => new Set(["section_contact"]),
       () => referenceSiteDefinition,
+      () => homePage(referenceSiteDefinition),
     );
     expect(Object.keys(config.components.hero.fields!)).toEqual([
       "id",
@@ -547,6 +556,7 @@ describe("visual component editor browser acceptance", () => {
           null,
           createElement(VisualComponentEditor, {
             definition: referenceSiteDefinition,
+            page: homePage(referenceSiteDefinition),
             disabled: false,
             iframeEnabled: false,
             onChange: (definition) => {
@@ -598,6 +608,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: installedSiteDefinition,
+          page: homePage(installedSiteDefinition),
           disabled: false,
           iframeEnabled: false,
           onChange: (definition) => {
@@ -1104,6 +1115,113 @@ describe("visual component editor browser acceptance", () => {
     expect(restoreKeys[5]).toBe(restoreKeys[4]);
   });
 
+  it("sends the next save with a fresh key after a refused idempotency key", async () => {
+    const workspaceId = "workspace_browser_idempotency_conflict";
+    await clearContentEditorOutbox(workspaceId);
+    const refusedMessage = "The save did not finish. Press Save to try again.";
+    const saveKeys: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as Record<string, unknown>)
+          : {};
+      if (
+        init?.method === "POST" &&
+        url.endsWith("/api/foundry-cms/revisions") &&
+        !("operation" in body)
+      ) {
+        saveKeys.push(new Headers(init.headers).get("idempotency-key") ?? "");
+        // The server already holds a receipt for this attempt, but for a
+        // different request than the one being sent. Only the first attempt is
+        // refused; whatever the editor sends next is accepted.
+        if (saveKeys.length === 1) {
+          return Response.json(
+            { error: "idempotency_key_conflict" },
+            { status: 409 },
+          );
+        }
+        return Response.json({
+          ...(browserRevision(workspaceId) as object),
+          revision: 5,
+          previewUrl: "/preview/idempotency-conflict",
+        });
+      }
+      return Response.json({ publication: null });
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-idempotency-conflict",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/idempotency-conflict",
+          activeWorkspaceUrl: "/dash?workspace=idempotency-conflict",
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    await enterEditMode(host);
+    const siteName = Array.from(host.querySelectorAll("input")).find(
+      (input) => input.value === referenceSiteDefinition.site.name,
+    );
+    expect(siteName).toBeDefined();
+    await userEvent.fill(siteName!, "Refused idempotency key");
+
+    for (let index = 0; index < 200 && saveKeys.length < 1; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(saveKeys).toHaveLength(1);
+    expect(saveKeys[0]).not.toBe("");
+    for (
+      let index = 0;
+      index < 200 &&
+      host.querySelector(".editor-message")?.textContent !== refusedMessage;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(host.querySelector(".editor-message")?.textContent).toBe(
+      refusedMessage,
+    );
+
+    const saveButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Save");
+    expect(saveButton).toBeDefined();
+    expect(saveButton!.disabled).toBe(false);
+    await userEvent.click(saveButton!);
+    for (let index = 0; index < 200 && saveKeys.length < 2; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(saveKeys).toHaveLength(2);
+    expect(saveKeys[1]).not.toBe("");
+    // The refused attempt was dropped, so this save asks with its own key. A
+    // retained attempt would re-send the same refused key for ever.
+    expect(saveKeys[1]).not.toBe(saveKeys[0]);
+
+    for (
+      let index = 0;
+      index < 200 && !host.textContent?.includes("All changes are saved.");
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(host.textContent).toContain("All changes are saved.");
+    expect(host.textContent).not.toContain(refusedMessage);
+    expect(
+      Array.from(host.querySelectorAll<HTMLButtonElement>("button")).some(
+        (button) => button.textContent === "Save",
+      ),
+    ).toBe(false);
+    await clearContentEditorOutbox(workspaceId);
+  });
+
   it("distinguishes unavailable publication history from an empty history", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).includes("view=history")
@@ -1153,7 +1271,10 @@ describe("visual component editor browser acceptance", () => {
     const addedProof = createDefaultPageSection(
       "proof",
       "section_recovered_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     await writeContentEditorOutbox({
       workspaceId,
@@ -1166,9 +1287,11 @@ describe("visual component editor browser acceptance", () => {
         },
         {
           path: "slot_home_sections",
-          baseValue: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+          baseValue: JSON.stringify(
+            toPageComposition(homePage(referenceSiteDefinition)),
+          ),
           value: JSON.stringify({
-            ...toPageComposition(referenceSiteDefinition),
+            ...toPageComposition(homePage(referenceSiteDefinition)),
             components: [
               ...homePage(referenceSiteDefinition).sections,
               addedProof,
@@ -1211,7 +1334,10 @@ describe("visual component editor browser acceptance", () => {
     const addedProof = createDefaultPageSection(
       "proof",
       "section_migrated_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     await clearContentEditorOutbox(destinationWorkspaceId);
     await writeContentEditorOutbox({
@@ -1239,10 +1365,10 @@ describe("visual component editor browser acceptance", () => {
           {
             path: "slot_home_sections",
             baseValue: JSON.stringify(
-              toPageComposition(referenceSiteDefinition),
+              toPageComposition(homePage(referenceSiteDefinition)),
             ),
             value: JSON.stringify({
-              ...toPageComposition(referenceSiteDefinition),
+              ...toPageComposition(homePage(referenceSiteDefinition)),
               components: [
                 ...homePage(referenceSiteDefinition).sections,
                 addedProof,
@@ -1570,6 +1696,90 @@ describe("visual component editor browser acceptance", () => {
           }),
         ],
       }),
+    );
+  });
+});
+
+/**
+ * The journey this ticket exists for: the owner opens a page that is not the
+ * home page and adds a section to it, through the real canvas.
+ *
+ * The installed reference site has one page and creating a page is ticket
+ * #159, so the second page comes from the shared test fixture
+ * `two-page-site-definition.ts`. Nothing is added to the published reference
+ * content.
+ */
+describe("editing a page below the home page", () => {
+  const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
+
+  afterEach(() => {
+    while (mountedRoots.length > 0) {
+      const root = mountedRoots.pop()!;
+      flushSync(() => root.unmount());
+    }
+  });
+
+  it("adds a section to the second page and leaves the home page alone", async () => {
+    const twoPages = withSecondPage();
+    const home = homePage(twoPages);
+    const second = findPageById(twoPages, secondPageId)!;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mountedRoots.push(root);
+    let latest: SiteDefinition | null = null;
+
+    flushSync(() => {
+      root.render(
+        createElement(VisualComponentEditor, {
+          definition: twoPages,
+          page: second,
+          disabled: false,
+          iframeEnabled: false,
+          onChange: (definition: SiteDefinition) => {
+            latest = definition;
+          },
+        }),
+      );
+    });
+
+    // The canvas draws the second page, not the home page.
+    let canvasText = "";
+    for (let index = 0; index < 60 && !canvasText.includes("fixture"); index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      canvasText = host.querySelector(".editor-canvas")?.textContent ?? "";
+    }
+    expect(canvasText).toContain("This page proves the fixture");
+
+    // Add a section, exactly as the owner does: open the one menu and choose.
+    const addMenu = host.querySelector<HTMLDetailsElement>(".add-section-menu");
+    expect(addMenu).not.toBeNull();
+    addMenu!.open = true;
+    const choice = [...addMenu!.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("Call to action"),
+    );
+    expect(choice).toBeDefined();
+    await userEvent.click(choice!);
+
+    for (let index = 0; index < 100 && latest === null; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+    expect(latest).not.toBeNull();
+    const changed = latest as unknown as SiteDefinition;
+
+    // The second page gained the section.
+    const changedSecond = findPageById(changed, secondPageId)!;
+    expect(changedSecond.sections.length).toBe(second.sections.length + 1);
+    expect(changedSecond.sections.map(({ id }) => id)).toContain(
+      secondPageSectionId,
+    );
+    expect(
+      changedSecond.sections.some(({ type }) => type === "callToAction"),
+    ).toBe(true);
+
+    // The home page is byte-for-byte what it was.
+    expect(JSON.stringify(findPageById(changed, home.id)!)).toBe(
+      JSON.stringify(home),
     );
   });
 });

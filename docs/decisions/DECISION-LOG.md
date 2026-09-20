@@ -25,7 +25,7 @@
 | [ADR-0018](ADR-0018-public-page-routes.md) | One route serves every page below the home page | Accepted | 2026-09-18 |
 | [ADR-0019](ADR-0019-mcp-dynamic-client-registration.md) | Dynamic client registration, and consent is the only grant | Accepted | 2026-09-18 |
 | [ADR-0020](ADR-0020-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |
-| [ADR-0021](ADR-0021-connection-status-shared-component.md) | One shared component reports whether email and publishing are connected | Accepted | 2026-09-18 |
+| [ADR-0021](ADR-0021-connection-status-shared-component.md) | One shared component reports whether email and publishing are connected | Accepted, amended | 2026-09-18 |
 | [ADR-0022](ADR-0022-navigation-links-to-pages.md) | A link can target a page, by its id, and this widens `SiteHref` without a schema step | Accepted | 2026-09-18 |
 | [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
 | [ADR-0024](ADR-0024-editor-page-selection.md) | The address names the page being edited, and one module answers which page it is | Accepted | 2026-09-18 |
@@ -33,4 +33,6 @@
 | [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted | 2026-09-19 |
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |
 | [ADR-0029](ADR-0029-page-scoped-revision-preview.md) | The revision preview gets one route per page, and the preview's own page-href builder keeps a link inside it | Accepted | 2026-09-20 |
+| [ADR-0030](ADR-0030-campaign-channel-configuration-is-a-value.md) | The campaign channel configuration is a value, and there is no default compliance footer | Accepted | 2026-09-19 |
 | [ADR-0031](ADR-0031-newsletter-signup-pending-request.md) | A newsletter signup is a pending request, not a subscriber | Accepted | 2026-09-19 |
+| [ADR-0032](ADR-0032-page-composition-slot-per-page.md) | Every page has its own section slot, and the editor writes only to the page it has open | Accepted | 2026-09-19 |

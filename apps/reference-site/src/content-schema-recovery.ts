@@ -4,9 +4,10 @@ import {
 import {
   createRichTextDocumentFromPlainText,
   designContract,
+  findPageById,
   homePage,
+  isPageCompositionSlotId,
   listEditableSiteFields,
-  pageCompositionContract,
   toPageComposition,
   type PageSection,
   type SiteDefinition,
@@ -19,6 +20,15 @@ import {
   type StaleRecoveryEdit,
 } from "./content-editor-recovery";
 
+/**
+ * The home page's media manifest path.
+ *
+ * Media recovery is the home page's alone: the screen that offers a recovered
+ * manifest, and the sender that replays it, both read this one path. Carrying
+ * another page's manifest would mean a record no part of that chain can use,
+ * so a page below the home page has no media record. Giving every page one is
+ * its own ticket; this ticket moves the sections, not the photos.
+ */
 export const mediaManifestRecoveryPath = "home.media";
 
 function upgradeLegacyPageComponent(component: unknown): PageSection {
@@ -107,11 +117,9 @@ export function durableSchemaRecoveryEdits(
       ];
     },
   ) satisfies StaleRecoveryEdit[];
-  const baseComposition = toPageComposition(base);
-  const currentComposition = toPageComposition(current);
   const baseMedia = canonicalJson(homePage(base).media ?? []);
   const currentMedia = canonicalJson(homePage(current).media ?? []);
-  const mediaEdits =
+  const mediaEdits: StaleRecoveryEdit[] =
     baseMedia === currentMedia
       ? []
       : [
@@ -121,28 +129,38 @@ export function durableSchemaRecoveryEdits(
             value: currentMedia,
           },
         ];
-  if (
-    JSON.stringify(baseComposition) === JSON.stringify(currentComposition)
-  ) {
-    return [...mediaEdits, ...fieldEdits];
-  }
-  const baseComponentIds = new Set(
-    baseComposition.components.map(({ id }) => id),
-  );
-  return [
-    {
-      path: pageCompositionContract.slot.id,
+  // Every page is compared with its own earlier self, so a structural change
+  // on one page is written under that page's slot id and can only ever be
+  // restored to that page. See ADR-0032.
+  const compositionEdits: StaleRecoveryEdit[] = [];
+  let keptFieldEdits = fieldEdits;
+  for (const currentPage of current.pages) {
+    const basePage = findPageById(base, currentPage.id);
+    if (basePage === undefined) continue;
+    const baseComposition = toPageComposition(basePage);
+    const currentComposition = toPageComposition(currentPage);
+    if (
+      JSON.stringify(baseComposition) === JSON.stringify(currentComposition)
+    ) {
+      continue;
+    }
+    const baseComponentIds = new Set(
+      baseComposition.components.map(({ id }) => id),
+    );
+    compositionEdits.push({
+      path: currentComposition.slotId,
       baseValue: JSON.stringify(baseComposition),
       value: JSON.stringify(currentComposition),
-    },
-    ...mediaEdits,
-    ...excludeCompositionOwnedEdits(
-      fieldEdits,
+    });
+    keptFieldEdits = excludeCompositionOwnedEdits(
+      keptFieldEdits,
+      currentPage,
       currentComposition.components.filter(
         ({ id }) => !baseComponentIds.has(id),
       ),
-    ),
-  ];
+    );
+  }
+  return [...compositionEdits, ...mediaEdits, ...keptFieldEdits];
 }
 
 export function mergeDurableAndOutboxRecoveryEdits(
@@ -167,7 +185,8 @@ function upgradeLegacyComposition(encoded: string): string {
     typeof composition !== "object" ||
     composition === null ||
     !("slotId" in composition) ||
-    composition.slotId !== pageCompositionContract.slot.id ||
+    typeof composition.slotId !== "string" ||
+    !isPageCompositionSlotId(composition.slotId) ||
     !("components" in composition) ||
     !Array.isArray(composition.components)
   ) {
@@ -182,7 +201,7 @@ function upgradeLegacyComposition(encoded: string): string {
 function upgradeLegacyStructuralRecoveryEdit(
   edit: StaleRecoveryEdit,
 ): StaleRecoveryEdit {
-  return edit.path === pageCompositionContract.slot.id
+  return isPageCompositionSlotId(edit.path)
     ? {
         path: edit.path,
         baseValue: upgradeLegacyComposition(edit.baseValue),

@@ -18,12 +18,28 @@ import {
 } from "./campaign-bulk-delivery";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
+  campaignChannelNotConfigured,
+  configuredCampaignChannel,
   createCampaignId,
   createCampaignRevisionId,
   type CampaignActor,
 } from "./campaign";
 
 const siteId = createSiteId("site_reference");
+const bulkChannelConfiguration = configuredCampaignChannel({
+  senderIdentityId: "sender_primary",
+  complianceFooter: {
+    version: "footer-v1",
+    content: "Foundry test footer.",
+    unsubscribePlaceholder:
+      "https://example.test/newsletter/unsubscribe" +
+      "?token={{foundry.unsubscribe.token}}",
+  },
+  audienceDefinition: {
+    id: "canonical-consent-and-suppression",
+    version: 1,
+  },
+});
 const campaignId = createCampaignId("00000000-0000-4000-8000-000000000052");
 const revisionId = createCampaignRevisionId(
   "00000000-0000-4000-8000-000000000053",
@@ -69,7 +85,7 @@ async function source(): Promise<CampaignBulkSource> {
       senderIdentityId: "sender_primary",
       complianceFooter: {
         version: "footer-v1",
-        content: "Legal footer",
+        content: "Compliance footer",
         unsubscribePlaceholder:
           "https://example.test/unsubscribe?token={{foundry.unsubscribe.token}}",
       },
@@ -154,6 +170,8 @@ function fixture(
      * the same value here that its outcomes carry.
      */
     providerCampaignId?: string;
+    /** The installation's sender details and compliance footer, as a value. */
+    channelConfiguration?: typeof bulkChannelConfiguration;
   } = {},
 ) {
   let now = new Date("2026-08-01T00:03:00.000Z");
@@ -202,6 +220,8 @@ function fixture(
   const application = createCampaignBulkDeliveryApplication({
     siteId,
     store,
+    channelConfiguration:
+      options.channelConfiguration ?? bulkChannelConfiguration,
     loadSource: (_campaignId, executionId) =>
       options.loadSource?.(executionId) ?? source(),
     authorizeOwner: async (actor) => {
@@ -1695,5 +1715,100 @@ describe("campaign bulk delivery", () => {
     expect(serialized).not.toContain(recipient.subscriberId);
     expect(reported.sendOperation).not.toHaveProperty("audienceSnapshot");
     expect(reported.sendOperation).not.toHaveProperty("sendArtifact");
+  });
+});
+
+describe("bulk delivery without the sender details", () => {
+  // The compliance footer is stored on the campaign revision and is read by whoever
+  // receives the email. While the installation has not set the settings that
+  // build it, nothing may be authorized, scheduled or sent, and every refusal
+  // uses the same word.
+  const withoutSenderDetails = {
+    channelConfiguration: campaignChannelNotConfigured([
+      "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+    ]),
+  };
+  const reason = "campaign_sender_details_not_configured";
+
+  it("refuses to authorize a send", async () => {
+    const { application } = fixture(withoutSenderDetails);
+    await expect(
+      application.commands.authorize({
+        actor: owner,
+        requestId: "campaign-bulk-authorize-without-footer-1",
+        campaignId,
+        testExecutionId,
+      }),
+    ).rejects.toThrow(reason);
+  });
+
+  it("refuses to activate a schedule", async () => {
+    const { application } = fixture(withoutSenderDetails);
+    await expect(
+      application.commands.activateSchedule({
+        actor: owner,
+        requestId: "campaign-bulk-schedule-without-footer-1",
+        campaignId,
+        authorizationId: "00000000-0000-4000-8000-000000000060",
+        resolvedTime: {
+          localDateTime: "2030-01-01T00:00:00",
+          ianaTimeZone: "UTC",
+          utcOffsetChoice: "+00:00",
+          executeAtUtc: "2030-01-01T00:00:00.000Z",
+          timeZoneDatabaseVersion: "2026a",
+        },
+      }),
+    ).rejects.toThrow(reason);
+  });
+
+  it("refuses to send now and to retry a send", async () => {
+    const { application } = fixture(withoutSenderDetails);
+    await expect(
+      application.commands.sendNow({
+        actor: owner,
+        requestId: "campaign-bulk-send-now-without-footer-1",
+        campaignId,
+        authorizationId: "00000000-0000-4000-8000-000000000060",
+      }),
+    ).rejects.toThrow(reason);
+    await expect(
+      application.commands.retrySend({
+        actor: owner,
+        requestId: "campaign-bulk-retry-without-footer-1",
+        campaignId,
+        operationId: "00000000-0000-4000-8000-000000000061",
+      }),
+    ).rejects.toThrow(reason);
+  });
+
+  it("refuses every scheduled-worker entry point", async () => {
+    const { application } = fixture(withoutSenderDetails);
+    await expect(application.scheduler.claimDue()).rejects.toThrow(reason);
+    await expect(
+      application.scheduler.execute("00000000-0000-4000-8000-000000000062"),
+    ).rejects.toThrow(reason);
+    await expect(application.scheduler.reconcilePending()).rejects.toThrow(
+      reason,
+    );
+  });
+
+  it("still lets an Owner cancel a schedule", async () => {
+    // Cancelling stops a send. An Owner needs it exactly when something about
+    // delivery has stopped working, so it is never refused for this reason.
+    const { application } = fixture(withoutSenderDetails);
+    await expect(
+      application.commands.cancelSchedule({
+        actor: owner,
+        requestId: "campaign-bulk-cancel-without-footer-1",
+        scheduleId: "00000000-0000-4000-8000-000000000063",
+      }),
+    ).rejects.not.toThrow(reason);
+  });
+
+  it("still reads a campaign's state", async () => {
+    const { application } = fixture(withoutSenderDetails);
+    await expect(
+      application.queries.campaignState({ actor: owner, campaignId }),
+    ).resolves.toBeDefined();
   });
 });

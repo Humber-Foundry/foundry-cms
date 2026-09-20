@@ -2,9 +2,9 @@ import type {
   PageSection,
   RegisteredPageSection,
   SiteDefinition,
+  SitePage,
 } from "./index";
 import { isBaseSiteDefinition } from "./index";
-import { homePage } from "./pages";
 import { parseSiteHref } from "./site-href";
 import { designContract } from "./design-tokens";
 import {
@@ -121,12 +121,26 @@ export type PageComponentValidation =
       errors: Readonly<Record<string, string>>;
     }>;
 
+/**
+ * Where a new section is being scaffolded: the whole draft, and the one page
+ * the section is going onto.
+ *
+ * A default section links to another section of the page it lands on, so it
+ * cannot be built from the draft alone. Naming the page here means a caller
+ * cannot silently scaffold onto the home page while the owner is editing
+ * another one. See ADR-0032.
+ */
+export type PageSectionContext = Readonly<{
+  definition: SiteDefinition;
+  page: SitePage;
+}>;
+
 export type PageComponentRegistration = Readonly<{
   type: string;
   label: string;
   editableFields: ReadonlyArray<string>;
   fields: Readonly<Record<string, PageComponentField>>;
-  createDefault(id: string, definition?: SiteDefinition): PageSection;
+  createDefault(id: string, context?: PageSectionContext): PageSection;
   validate(section: unknown): PageComponentValidation;
 }>;
 
@@ -137,7 +151,7 @@ export type PageComponentRegistry = Readonly<{
   createDefault(
     type: string,
     id: string,
-    definition?: SiteDefinition,
+    context?: PageSectionContext,
   ): PageSection;
   validate(section: unknown): PageComponentValidation;
 }>;
@@ -268,7 +282,7 @@ export function createRegisteredPageComponent<
   fields: Fields;
   createDefault(
     id: string,
-    definition?: SiteDefinition,
+    context?: PageSectionContext,
   ): RegisteredPageSection & Readonly<{
     component: Type;
     props: RegisteredPageComponentProps<Fields>;
@@ -386,7 +400,7 @@ function foundationRegistration(
   type: "hero" | "services" | "proof" | "callToAction",
   label: string,
   fields: Readonly<Record<string, PageComponentField>>,
-  createDefault: (id: string, definition?: SiteDefinition) => PageSection,
+  createDefault: (id: string, context?: PageSectionContext) => PageSection,
 ): PageComponentRegistration {
   return Object.freeze({
     type,
@@ -435,11 +449,11 @@ function foundationRegistration(
 function foundationDefault(
   type: "hero" | "services" | "proof" | "callToAction",
   id: string,
-  definition?: SiteDefinition,
+  context?: PageSectionContext,
 ): PageSection {
-  // A default section is scaffolded onto the home page, so it links to a
-  // section of the home page. Ticket #158 gives the editor a selected page.
-  const sections = definition === undefined ? [] : homePage(definition).sections;
+  // A default section links to a section of the page it is going onto, so the
+  // anchor it builds always points at something on that same page.
+  const sections = context === undefined ? [] : context.page.sections;
   const linkTo = (preferred?: string) => {
     const target =
       sections.find((section) => section.type === preferred) ?? sections[0];
@@ -472,7 +486,9 @@ function foundationDefault(
   const existing = sections.find(
     (section) => section.type === "callToAction",
   );
-  const contact = definition?.site.navigation.find((link) => link.href.startsWith("mailto:"));
+  const contact = context?.definition.site.navigation.find((link) =>
+    link.href.startsWith("mailto:"),
+  );
   return {
     id, type, variant: designContract.variants.callToAction.values[0],
     eyebrow: "Next step", title: "Invite the reader to act",
@@ -541,10 +557,10 @@ function registryFromComponents(
     keyFor(section: PageSection) {
       return section.type === "registered" ? section.component : section.type;
     },
-    createDefault(type: string, id: string, definition?: SiteDefinition) {
+    createDefault(type: string, id: string, context?: PageSectionContext) {
       const registration = frozen[type];
       if (registration === undefined) throw new TypeError("page_component_unregistered");
-      return registration.createDefault(id, definition);
+      return registration.createDefault(id, context);
     },
     validate(section: unknown) {
       const key = pageComponentKey(section);

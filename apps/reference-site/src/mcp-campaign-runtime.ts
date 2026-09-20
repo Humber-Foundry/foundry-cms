@@ -7,7 +7,7 @@ import {
   type CampaignApplication,
   type CampaignAudienceDefinition,
   type CampaignAuthor,
-  type CampaignChannelConfiguration,
+  type CampaignChannelConfigurationState,
   type CampaignStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
@@ -23,12 +23,11 @@ import { type SiteId } from "@humber-foundry/site-definition";
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
-import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
-import { createSignedNewsletterDeliveryAdapter } from "./newsletter-unsubscribe-token";
 import {
   HumanAccessConfigurationError,
   readNewsletterDeliverySecret,
@@ -79,7 +78,7 @@ type CampaignInstallationParts = Readonly<{
   store: CampaignStore;
   testDeliveryStore: CampaignTestDeliveryStore;
   adapter: NewsletterDeliveryAdapter;
-  channelConfiguration: CampaignChannelConfiguration;
+  channelConfiguration: CampaignChannelConfigurationState;
   resolveAudience(
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
@@ -104,14 +103,24 @@ async function loadInstallationParts(
   );
   const rendererVersion =
     resolveContentReleaseInputs(environment).rendererVersion;
-  const deliveryAdapter = createSignedNewsletterDeliveryAdapter({
-    unsubscribeUrl: environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-    secret: readNewsletterDeliverySecret(environment),
-  });
-  const channelConfiguration = readCampaignChannelConfiguration(
-    environment,
-    deliveryAdapter.unsubscribePlaceholder,
-  );
+  // This is read before anything else that needs a campaign setting. The
+  // compliance footer is stored on every campaign revision and is read by
+  // whoever receives the email. Foundry never invents one, so an MCP client
+  // may neither write nor read a campaign until the installation sets these
+  // settings, and the reason is the same word the Newsletter page and the
+  // scheduled worker report. Reading it first also keeps a malformed
+  // unsubscribe address from raising a bare URL error out of the address
+  // parser instead of this named reason.
+  const channelConfiguration = resolveCampaignChannel(environment).channel;
+  if (channelConfiguration.state !== "configured") {
+    throw new Error(channelConfiguration.reason);
+  }
+  // The unsubscribe token is signed with this secret at send time. Reading it
+  // here keeps the MCP surface refusing to start without it, as it already
+  // refuses without the Brevo webhook token and the account-scope
+  // fingerprint. It is read after the channel so an installation with no
+  // compliance footer gets the named reason rather than this one.
+  readNewsletterDeliverySecret(environment);
   const store = createD1CampaignStore(database);
   const testDeliveryStore = createD1CampaignTestDeliveryStore(database);
   const subscriberStore = createD1SubscriberLedgerStore(database);
@@ -214,6 +223,7 @@ function bindApplications(
     campaignStore: parts.store,
     store: parts.testDeliveryStore,
     adapter: parts.adapter,
+    channelConfiguration: parts.channelConfiguration,
     authorize,
     identifyActor: () => actorId,
     resolveAudience: parts.resolveAudience,

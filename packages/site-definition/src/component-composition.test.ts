@@ -60,7 +60,7 @@ describe("page component composition", () => {
         id: "section_hero_copy_item_2",
       },
     };
-    const result = applyPageComposition(source, {
+    const result = applyPageComposition(source, homePage(source), {
       slotId: "slot_home_sections",
       components: [
         homePage(source).sections[2],
@@ -95,24 +95,27 @@ describe("page component composition", () => {
   });
 
   it("validates components added and duplicated in the same command", () => {
-    const first = createDefaultPageSection(
-      "proof",
-      "section_added_proof",
-      referenceSiteDefinition,
-    );
+    const first = createDefaultPageSection("proof", "section_added_proof", {
+      definition: referenceSiteDefinition,
+      page: homePage(referenceSiteDefinition),
+    });
     const duplicate = remapPageSectionNestedIds({
       ...structuredClone(first),
       id: "section_added_proof_copy",
     });
 
-    const result = applyPageComposition(referenceSiteDefinition, {
-      slotId: "slot_home_sections",
-      components: [
-        ...homePage(referenceSiteDefinition).sections,
-        first,
-        duplicate,
-      ],
-    });
+    const result = applyPageComposition(
+      referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
+      {
+        slotId: "slot_home_sections",
+        components: [
+          ...homePage(referenceSiteDefinition).sections,
+          first,
+          duplicate,
+        ],
+      },
+    );
 
     expect(result.ok).toBe(true);
   });
@@ -135,10 +138,14 @@ describe("page component composition", () => {
       ],
     };
     const staleComposition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
 
-    expect(applyPageComposition(liveDefinition, staleComposition)).toEqual({
+    expect(applyPageComposition(
+      liveDefinition,
+      homePage(liveDefinition),
+      staleComposition,
+    )).toEqual({
       ok: false,
       errors: {
         "section_hero.variant":
@@ -168,7 +175,7 @@ describe("page component composition", () => {
     const callToAction = createDefaultPageSection(
       "callToAction",
       "section_added_contact",
-      base,
+      { definition: base, page: homePage(base) },
     );
     const withCallToAction = {
       ...base,
@@ -179,13 +186,12 @@ describe("page component composition", () => {
         },
       ],
     } as SiteDefinition;
-    const hero = createDefaultPageSection(
-      "hero",
-      "section_added_hero",
-      withCallToAction,
-    );
+    const hero = createDefaultPageSection("hero", "section_added_hero", {
+      definition: withCallToAction,
+      page: homePage(withCallToAction),
+    });
 
-    const result = applyPageComposition(base, {
+    const result = applyPageComposition(base, homePage(base), {
       slotId: "slot_home_sections",
       components: [proof, callToAction, hero],
     });
@@ -195,7 +201,7 @@ describe("page component composition", () => {
   });
 
   it("round-trips the canonical slot payload with stable component identifiers", () => {
-    expect(toPageComposition(referenceSiteDefinition)).toEqual({
+    expect(toPageComposition(homePage(referenceSiteDefinition))).toEqual({
       slotId: "slot_home_sections",
       components: homePage(referenceSiteDefinition).sections,
     });
@@ -217,7 +223,11 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(definition, toPageComposition(definition)),
+      applyPageComposition(
+        definition,
+        homePage(definition),
+        toPageComposition(homePage(definition,
+      ))),
     ).toEqual({
       ok: true,
       definition,
@@ -239,11 +249,10 @@ describe("page component composition", () => {
         },
       ],
     };
-    const hero = createDefaultPageSection(
-      "hero",
-      "section_client_hero",
-      clientDefinition,
-    );
+    const hero = createDefaultPageSection("hero", "section_client_hero", {
+      definition: clientDefinition,
+      page: homePage(clientDefinition),
+    });
 
     expect(hero).toEqual(
       expect.objectContaining({
@@ -256,7 +265,7 @@ describe("page component composition", () => {
       }),
     );
     expect(
-      applyPageComposition(clientDefinition, {
+      applyPageComposition(clientDefinition, homePage(clientDefinition), {
         slotId: "slot_home_sections",
         components: [hero, proof],
       }),
@@ -301,7 +310,7 @@ describe("page component composition", () => {
     const inserted = createDefaultPageSection(
       "callToAction",
       "section_second_contact",
-      clientDefinition,
+      { definition: clientDefinition, page: homePage(clientDefinition) },
     );
 
     expect(inserted).toEqual(
@@ -313,7 +322,7 @@ describe("page component composition", () => {
       }),
     );
     expect(
-      applyPageComposition(clientDefinition, {
+      applyPageComposition(clientDefinition, homePage(clientDefinition), {
         slotId: "slot_home_sections",
         components: [...homePage(clientDefinition).sections, inserted],
       }).ok,
@@ -322,7 +331,7 @@ describe("page component composition", () => {
 
   it("accepts semantically equal protected scaffolding regardless of object key order", () => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const hero = composition.components[0]!;
     if (hero.type !== "hero") {
@@ -344,7 +353,11 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(referenceSiteDefinition, reordered),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        reordered,
+      ),
     ).toEqual({
       ok: true,
       definition: referenceSiteDefinition,
@@ -353,14 +366,18 @@ describe("page component composition", () => {
 
   it("keeps components referenced by protected links outside removal", () => {
     const composition = {
-      ...toPageComposition(referenceSiteDefinition),
+      ...toPageComposition(homePage(referenceSiteDefinition)),
       components: homePage(referenceSiteDefinition).sections.filter(
         ({ id }) => id !== "section_contact",
       ),
     };
 
     expect(
-      applyPageComposition(referenceSiteDefinition, composition),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        composition,
+      ),
     ).toEqual({
       ok: false,
       errors: {
@@ -402,13 +419,17 @@ describe("page component composition", () => {
       ],
     };
     const composition = {
-      ...toPageComposition(definition),
+      ...toPageComposition(homePage(definition)),
       components: homePage(definition).sections.filter(
         ({ id }) => id !== "contact",
       ),
     };
 
-    expect(applyPageComposition(definition, composition)).toEqual({
+    expect(applyPageComposition(
+      definition,
+      homePage(definition),
+      composition,
+    )).toEqual({
       ok: false,
       errors: {
         "contact.id":
@@ -433,13 +454,17 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(definition, toPageComposition(definition)),
+      applyPageComposition(
+        definition,
+        homePage(definition),
+        toPageComposition(homePage(definition,
+      ))),
     ).toEqual({ ok: true, definition });
   });
 
   it("allows nested human-readable copy while protecting nested identity and links", () => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const hero = composition.components[0]!;
     if (hero.type !== "hero") {
@@ -449,7 +474,11 @@ describe("page component composition", () => {
       "A revised action label";
 
     expect(
-      applyPageComposition(referenceSiteDefinition, composition),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        composition,
+      ),
     ).toEqual({
       ok: true,
       definition: expect.objectContaining({
@@ -532,7 +561,7 @@ describe("page component composition", () => {
     })),
   ])("rejects required rich text with $name", ({ body }) => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const callToAction = composition.components.find(
       (section) => section.type === "callToAction",
@@ -547,7 +576,11 @@ describe("page component composition", () => {
     ).body = body as typeof callToAction.body;
 
     expect(
-      applyPageComposition(referenceSiteDefinition, composition),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        composition,
+      ),
     ).toEqual({
       ok: false,
       errors: {
@@ -580,12 +613,16 @@ describe("page component composition", () => {
     },
   ])("rejects malformed schema content: $name", ({ change, path }) => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     ) as unknown as Record<string, any>;
     change(composition);
 
     expect(
-      applyPageComposition(referenceSiteDefinition, composition),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        composition,
+      ),
     ).toEqual({
       ok: false,
       errors: expect.objectContaining({
@@ -596,7 +633,7 @@ describe("page component composition", () => {
 
   it("rejects nested identifiers that collide with protected IDs outside the page slot", () => {
     const original = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const callToAction = original.components[3]!;
     if (callToAction.type !== "callToAction") {
@@ -618,7 +655,11 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(referenceSiteDefinition, composition),
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        composition,
+      ),
     ).toEqual({
       ok: false,
       errors: {
@@ -630,7 +671,7 @@ describe("page component composition", () => {
 
   it("rejects caller-selected nested identifiers on duplicated components", () => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const proof = composition.components[2]!;
     if (proof.type !== "proof") {
@@ -646,21 +687,25 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(referenceSiteDefinition, {
-        ...composition,
-        components: [
-          ...composition.components.filter(
-            ({ id }) => id !== "section_hero",
-          ),
-          duplicate,
-        ],
-      }).ok,
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        {
+          ...composition,
+          components: [
+            ...composition.components.filter(
+              ({ id }) => id !== "section_hero",
+            ),
+            duplicate,
+          ],
+        },
+      ).ok,
     ).toBe(false);
   });
 
   it("binds duplicate nested identifiers to schema paths, not object key order", () => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const hero = composition.components[0]!;
     if (hero.type !== "hero") {
@@ -683,10 +728,14 @@ describe("page component composition", () => {
     };
 
     expect(
-      applyPageComposition(referenceSiteDefinition, {
-        ...composition,
-        components: [...composition.components, duplicate],
-      }).ok,
+      applyPageComposition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        {
+          ...composition,
+          components: [...composition.components, duplicate],
+        },
+      ).ok,
     ).toBe(false);
   });
 
@@ -746,11 +795,15 @@ describe("page component composition", () => {
     },
   ])("rejects $name", ({ change, path }) => {
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     ) as unknown as Record<string, any>;
     change(composition);
 
-    const result = applyPageComposition(referenceSiteDefinition, composition);
+    const result = applyPageComposition(
+      referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
+      composition,
+    );
 
     expect(result).toEqual({
       ok: false,
