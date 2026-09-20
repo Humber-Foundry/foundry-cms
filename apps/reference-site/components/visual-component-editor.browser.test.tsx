@@ -749,9 +749,11 @@ describe("visual component editor browser acceptance", () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     await enterEditMode(host);
-    const siteName = Array.from(host.querySelectorAll("input")).find(
-      (input) => input.value === referenceSiteDefinition.site.name,
-    );
+    const siteName = Array.from(
+      host.querySelectorAll<HTMLInputElement>(
+        `[data-field-path="${referenceSiteDefinition.site.id}.name"] input`,
+      ),
+    ).at(0);
     expect(siteName).toBeDefined();
     await userEvent.fill(siteName!, "Recovered immediately");
 
@@ -1167,9 +1169,11 @@ describe("visual component editor browser acceptance", () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     await enterEditMode(host);
-    const siteName = Array.from(host.querySelectorAll("input")).find(
-      (input) => input.value === referenceSiteDefinition.site.name,
-    );
+    const siteName = Array.from(
+      host.querySelectorAll<HTMLInputElement>(
+        `[data-field-path="${referenceSiteDefinition.site.id}.name"] input`,
+      ),
+    ).at(0);
     expect(siteName).toBeDefined();
     await userEvent.fill(siteName!, "Refused idempotency key");
 
@@ -1482,10 +1486,8 @@ describe("visual component editor browser acceptance", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
     expect(ownerReady).toBe(true);
-    const ownerSiteName = Array.from(
-      ownerHost.querySelectorAll("input"),
-    ).find(
-      (input) => input.value === referenceSiteDefinition.site.name,
+    const ownerSiteName = ownerHost.querySelector<HTMLInputElement>(
+      `[data-field-path="${referenceSiteDefinition.site.id}.name"] input`,
     );
     expect(ownerSiteName).toBeDefined();
     await userEvent.fill(ownerSiteName!, "Owner tab draft");
@@ -1526,11 +1528,9 @@ describe("visual component editor browser acceptance", () => {
       "Unsaved browser edits were recovered",
     );
     expect(duplicateReady).toBe(true);
-    const duplicateSiteName = Array.from(
-      duplicateHost.querySelectorAll<HTMLInputElement>(
-        ".editor-groups input",
-      ),
-    ).find((input) => input.value === referenceSiteDefinition.site.name);
+    const duplicateSiteName = duplicateHost.querySelector<HTMLInputElement>(
+      `.editor-groups [data-field-path="${referenceSiteDefinition.site.id}.name"] input`,
+    );
     expect(duplicateSiteName).toBeDefined();
     await userEvent.fill(duplicateSiteName!, "Duplicate tab draft");
     let tabRecords = await listContentEditorOutboxRecords(workspaceId);
