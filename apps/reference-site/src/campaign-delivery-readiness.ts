@@ -90,9 +90,10 @@ export type CampaignSenderReadiness = Readonly<{
 
 /**
  * Every campaign identity and compliance setting an installation must hold
- * before Foundry can build the legal footer it stores on a campaign revision.
- * The order is the order the setup document works through them: who the email
- * is from, then the four parts of the footer, then the footer's version mark.
+ * before Foundry can build the compliance footer it stores on a campaign
+ * revision. The order is the order the setup document works through them: who
+ * the email is from, then the four parts of the footer, then the footer's
+ * version mark.
  */
 export const campaignSenderSettingNames = Object.freeze([
   "FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID",
@@ -133,8 +134,8 @@ function isAbsoluteHttpsAddress(value: string | undefined): boolean {
 
 /**
  * Whether each named sender setting is installed and well formed. Each rule
- * matches `readCampaignChannelConfiguration`, so a setting reported as
- * installed here cannot make the channel reader refuse.
+ * matches `resolveCampaignChannel`, so a setting reported as installed here
+ * cannot make the channel reader refuse.
  */
 const campaignSenderSettingChecks: Readonly<
   Record<
@@ -158,8 +159,8 @@ const campaignSenderSettingChecks: Readonly<
 
 /**
  * The names of the sender and footer settings this installation still needs,
- * in setup order. An empty list means the legal footer can be built from the
- * installation's own values.
+ * in setup order. An empty list means the compliance footer can be built from
+ * the installation's own values.
  */
 export function listMissingCampaignSenderSettings(
   environment: HumanAccessEnvironment,

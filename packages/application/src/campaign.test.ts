@@ -646,8 +646,8 @@ describe("campaign authoring and rendering", () => {
   });
 });
 
-describe("campaigns without the sender details and legal footer", () => {
-  // The legal footer is stored on every campaign revision and is read by
+describe("campaigns without the sender details and compliance footer", () => {
+  // The compliance footer is stored on every campaign revision and is read by
   // whoever receives the email. Foundry never invents a legal name, a postal
   // address, a contact address or an unsubscribe address, so while the
   // settings are absent no revision may be created or edited at all. Reading

@@ -85,7 +85,7 @@ async function source(): Promise<CampaignBulkSource> {
       senderIdentityId: "sender_primary",
       complianceFooter: {
         version: "footer-v1",
-        content: "Legal footer",
+        content: "Compliance footer",
         unsubscribePlaceholder:
           "https://example.test/unsubscribe?token={{foundry.unsubscribe.token}}",
       },
@@ -170,7 +170,7 @@ function fixture(
      * the same value here that its outcomes carry.
      */
     providerCampaignId?: string;
-    /** The installation's sender details and legal footer, as a value. */
+    /** The installation's sender details and compliance footer, as a value. */
     channelConfiguration?: typeof bulkChannelConfiguration;
   } = {},
 ) {
@@ -1719,7 +1719,7 @@ describe("campaign bulk delivery", () => {
 });
 
 describe("bulk delivery without the sender details", () => {
-  // The legal footer is stored on the campaign revision and is read by whoever
+  // The compliance footer is stored on the campaign revision and is read by whoever
   // receives the email. While the installation has not set the settings that
   // build it, nothing may be authorized, scheduled or sent, and every refusal
   // uses the same word.

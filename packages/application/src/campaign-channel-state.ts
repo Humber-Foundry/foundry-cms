@@ -14,7 +14,7 @@ export const campaignSenderDetailsNotConfiguredReason =
   "campaign_sender_details_not_configured";
 
 /**
- * Whether one installation has the sender identity and the legal footer it
+ * Whether one installation has the sender identity and the compliance footer it
  * must put at the bottom of every email.
  *
  * This is a value, not an exception. Every caller that builds a campaign

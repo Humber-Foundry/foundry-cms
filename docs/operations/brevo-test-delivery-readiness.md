@@ -69,7 +69,7 @@ While any of them is absent or malformed:
 A missing `FOUNDRY_DB` is different. It is a database fault, not a missing
 delivery setting, so it still stops the request.
 
-## Sender details and the legal footer
+## Sender details and the compliance footer
 
 Every email carries a footer with the sender's legal name, postal address, a
 way to contact them and a way to stop the emails. Foundry never invents any of

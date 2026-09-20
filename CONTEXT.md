@@ -234,6 +234,16 @@ mean a test was delivered. While delivery is not connected, a campaign can
 still be written, saved and cancelled, and every send and test operation is
 refused.
 
+**Sender readiness** — Whether this installation holds every campaign identity
+and compliance setting the compliance footer is built from (which sender the
+email comes from, the legal name, the postal address, the contact address, the
+unsubscribe address and the footer's version mark), and the names of the
+settings it still lacks. It reports setting names only, never a setting value.
+It is separate from delivery readiness because the consequence is different:
+without the delivery secrets a campaign can still be written but not sent;
+without these it cannot be written at all, because Foundry never invents a
+legal name or a postal address. See ADR-0030.
+
 **Publishing readiness** — Whether this installation holds every setting site
 publishing needs (the GitHub App identity, the repository it writes to, the
 public origin, the Cloudflare deployment, and the publication signing

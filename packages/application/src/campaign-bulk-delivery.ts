@@ -775,7 +775,7 @@ function artifactBytes(artifact: CampaignBulkSendArtifact) {
 
 /**
  * The bulk commands that still work while the installation has not set its
- * sender details and legal footer. None of them sends anything:
+ * sender details and compliance footer. None of them sends anything:
  *
  * - `cancelSchedule` stops a send. An Owner needs it exactly when something
  *   about delivery has stopped working.
@@ -791,12 +791,14 @@ function artifactBytes(artifact: CampaignBulkSendArtifact) {
 const bulkCommandsAllowedWithoutSenderDetails = Object.freeze([
   "cancelSchedule",
   "ingestVerifiedEvent",
-]);
+] as const) satisfies ReadonlyArray<
+  keyof CampaignBulkDeliveryApplication["commands"]
+>;
 
 /**
  * Refuse every authorizing, scheduling and sending path with one named reason.
  *
- * The legal footer is stored on the campaign revision and read by whoever
+ * The compliance footer is stored on the campaign revision and read by whoever
  * receives the email. Foundry never invents one, so while the settings are
  * absent nothing may be authorized, scheduled or sent.
  */
@@ -814,7 +816,9 @@ function withoutSenderDetails(
   const commands = Object.fromEntries(
     Object.keys(application.commands).map((name) => [
       name,
-      bulkCommandsAllowedWithoutSenderDetails.includes(name)
+      (
+        bulkCommandsAllowedWithoutSenderDetails as ReadonlyArray<string>
+      ).includes(name)
         ? application.commands[
             name as keyof CampaignBulkDeliveryApplication["commands"]
           ]
@@ -889,7 +893,7 @@ export function createCampaignBulkDeliveryApplication({
   artifactPublisher: CampaignBulkArtifactPublisher;
   adapter: CampaignBulkDeliveryAdapter;
   /**
-   * The sender details and legal footer this installation has set, or the
+   * The sender details and compliance footer this installation has set, or the
    * typed value that says they are absent. While they are absent every command
    * that could authorize, schedule or send is refused with one named reason.
    */

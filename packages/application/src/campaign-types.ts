@@ -410,7 +410,7 @@ export type CampaignApplicationDependencies = Readonly<{
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
   /**
-   * The sender details and legal footer this installation has set, or the
+   * The sender details and compliance footer this installation has set, or the
    * typed value that says they are absent. While they are absent, creating and
    * editing a campaign are refused; reading one still works.
    */

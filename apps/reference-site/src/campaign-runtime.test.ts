@@ -17,8 +17,8 @@ vi.mock("./human-access-environment", () => ({
 import {
   loadCampaignRequestContext,
   readCampaignDeliveryReadiness,
-  resolveCampaignChannelConfiguration,
 } from "./campaign-runtime";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import {
   campaignDeliverySettingNames,
   campaignSenderSettingNames,
@@ -248,7 +248,7 @@ describe("compliance footer without delivery secrets", () => {
     // The footer is stored on every campaign revision and is read by whoever
     // receives the email, so Foundry never stands in for it. It is built the
     // same way whether or not the delivery secrets are installed.
-    const channel = resolveCampaignChannelConfiguration(channelEnvironment);
+    const channel = resolveCampaignChannel(channelEnvironment).channel;
     expect(channel.state).toBe("configured");
     if (channel.state !== "configured") throw new Error("unreachable");
     const { configuration } = channel;
@@ -269,7 +269,7 @@ describe("compliance footer without delivery secrets", () => {
   it("reports a value rather than a placeholder footer when a setting is absent", () => {
     const { FOUNDRY_CAMPAIGN_LEGAL_NAME: _absent, ...rest } =
       channelEnvironment;
-    const channel = resolveCampaignChannelConfiguration(rest);
+    const channel = resolveCampaignChannel(rest).channel;
     expect(channel.state).toBe("not_configured");
     if (channel.state !== "not_configured") throw new Error("unreachable");
     expect(channel.reason).toBe("campaign_sender_details_not_configured");
@@ -287,7 +287,7 @@ describe("compliance footer without delivery secrets", () => {
       rest,
       { ...channelEnvironment, FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: "not a url" },
     ]) {
-      const channel = resolveCampaignChannelConfiguration(environment);
+      const channel = resolveCampaignChannel(environment).channel;
       expect(channel.state).toBe("not_configured");
       if (channel.state !== "not_configured") throw new Error("unreachable");
       expect(channel.missingSettings).toEqual([
@@ -435,5 +435,45 @@ describe("campaign request context without the sender details", () => {
         (async () => refusal())(),
       ).rejects.toThrow("campaign_sender_details_not_configured");
     }
+  });
+});
+
+describe("local development", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("NODE_ENV", "development");
+    mocks.loadHuman.mockResolvedValue({
+      state: "authorized",
+      identity,
+      membership: { id: "membership-local-owner" },
+      application: {
+        queries: {
+          requireCapability: async () => ({ id: "membership-local-owner" }),
+          listActiveOwnerIdsForTestDelivery: async () => [],
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses a footer that announces itself and can never be sent", async () => {
+    // Local development is the one place a footer is not built from an
+    // installation's own settings. It must be impossible to mistake it for a
+    // real legal name or postal address, and impossible to send.
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.delivery.state).toBe("local_development");
+    expect(context.senderDetails.state).toBe("local_development");
+    // Every provider adapter is the fail-closed one, so nothing goes out.
+    await expect(context.readDeliveryHealth()).resolves.toEqual({
+      state: "unavailable",
+      credential: "unknown",
+      senderIdentity: "unknown",
+    });
+    // The settings themselves are never read in development, so no real
+    // value can leak into the development footer.
+    expect(mocks.loadEnvironment).not.toHaveBeenCalled();
   });
 });

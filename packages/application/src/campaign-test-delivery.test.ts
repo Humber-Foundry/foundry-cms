@@ -1814,7 +1814,7 @@ describe("campaign test delivery", () => {
 });
 
 describe("campaign test delivery without the sender details", () => {
-  // A test is a real email with the legal footer at the bottom of it. While
+  // A test is a real email with the compliance footer at the bottom of it. While
   // the installation has not set the sender details, no test goes out, and
   // the reason is the same word every other path reports.
   it("refuses a test request with one named reason", async () => {

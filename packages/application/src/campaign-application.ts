@@ -73,7 +73,7 @@ export function createCampaignApplication({
   clock = () => new Date(),
   createId = () => crypto.randomUUID(),
 }: CampaignApplicationDependencies): CampaignApplication {
-  // The sender details and legal footer may be absent. Reading a campaign
+  // The sender details and compliance footer may be absent. Reading a campaign
   // still works, so the application is built either way; the create and edit
   // paths below refuse with one named reason instead. Foundry never stands in
   // a placeholder footer, because the footer is stored on the revision and is
@@ -738,10 +738,10 @@ export function createCampaignApplication({
         }
         currentRevision = await getRevision(campaignId, current.version);
         authored = validateCampaignInput(
-        input,
-        requireConfiguredChannel(),
-        siteCanonicalOrigin,
-      );
+          input,
+          requireConfiguredChannel(),
+          siteCanonicalOrigin,
+        );
       } catch (error) {
         return rejectCommand({
           command,

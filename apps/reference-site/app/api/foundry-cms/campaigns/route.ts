@@ -133,7 +133,7 @@ const actionsAllowedWithoutDelivery = Object.freeze([
 
 /**
  * The commands that still run while the installation has not set its sender
- * details and legal footer.
+ * details and compliance footer.
  *
  * Only cancelling a schedule survives. Writing a campaign stores the legal
  * footer on the revision, so writing is refused too; that is the difference
@@ -451,7 +451,7 @@ export async function GET(request: Request) {
       return Response.json(
         {
           delivery: await readCampaignDeliveryReadiness(context),
-          // The sender details and the legal footer are separate settings from
+          // The sender details and the compliance footer are separate settings from
           // the delivery secrets, with separate consequences, so they get their
           // own heading. This also holds setting names only.
           senderDetails: context.senderDetails,
@@ -618,7 +618,7 @@ export async function POST(request: Request) {
         { status: 503, headers: { "cache-control": "private, no-store" } },
       );
     }
-    // Fail closed again, for a different missing thing. The legal footer is
+    // Fail closed again, for a different missing thing. The compliance footer is
     // stored on every campaign revision and is read by whoever receives the
     // email, so while the installation has not set the settings that build it,
     // a campaign may not even be written.

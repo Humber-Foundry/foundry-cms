@@ -23,15 +23,13 @@ import { type SiteId } from "@humber-foundry/site-definition";
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
-import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
-import { createSignedNewsletterDeliveryAdapter } from "./newsletter-unsubscribe-token";
 import {
   HumanAccessConfigurationError,
-  readNewsletterDeliverySecret,
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
 
@@ -104,20 +102,16 @@ async function loadInstallationParts(
   );
   const rendererVersion =
     resolveContentReleaseInputs(environment).rendererVersion;
-  const deliveryAdapter = createSignedNewsletterDeliveryAdapter({
-    unsubscribeUrl: environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-    secret: readNewsletterDeliverySecret(environment),
-  });
-  const channelConfiguration = readCampaignChannelConfiguration(
-    environment,
-    deliveryAdapter.unsubscribePlaceholder,
-  );
+  // This is read before anything else that needs a campaign setting. The
+  // compliance footer is stored on every campaign revision and is read by
+  // whoever receives the email. Foundry never invents one, so an MCP client
+  // may neither write nor read a campaign until the installation sets these
+  // settings, and the reason is the same word the Newsletter page and the
+  // scheduled worker report. Reading it first also keeps a malformed
+  // unsubscribe address from raising a bare URL error out of the address
+  // parser instead of this named reason.
+  const channelConfiguration = resolveCampaignChannel(environment).channel;
   if (channelConfiguration.state !== "configured") {
-    // The legal footer is stored on every campaign revision and is read by
-    // whoever receives the email. Foundry never invents one, so an MCP client
-    // may neither write nor test a campaign until the installation sets these
-    // settings. The reason is the same word the Newsletter page and the
-    // scheduled worker report.
     throw new Error(channelConfiguration.reason);
   }
   const store = createD1CampaignStore(database);

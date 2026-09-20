@@ -570,6 +570,58 @@ function matchesPreparedAcceptance(
   );
 }
 
+/**
+ * The test-delivery commands that still work while the installation has not
+ * set its sender details and compliance footer.
+ *
+ * The list is empty. A test is a real email and confirming a test receipt
+ * records that one arrived, so neither can be honest while the footer cannot
+ * be built. The list is written out anyway, for the same reason as the bulk
+ * one: it names what stays, so a command added later is refused until someone
+ * allows it here deliberately.
+ *
+ * The `queries` are untouched. Reading grants nothing, and the Newsletter
+ * screen needs them to explain where a campaign has got to.
+ */
+const testCommandsAllowedWithoutSenderDetails = Object.freeze(
+  [] as const,
+) satisfies ReadonlyArray<keyof CampaignTestDeliveryApplication["commands"]>;
+
+/**
+ * Refuse every test-delivery command with one named reason.
+ *
+ * Every command here is asynchronous, so the refusal is a rejected promise. A
+ * synchronous throw would escape a caller that only attaches a catch to the
+ * promise.
+ */
+function withoutSenderDetails(
+  application: CampaignTestDeliveryApplication,
+): CampaignTestDeliveryApplication {
+  async function refuse(): Promise<never> {
+    throw new CampaignValidationError(
+      campaignSenderDetailsNotConfiguredReason,
+    );
+  }
+  const commands = Object.fromEntries(
+    Object.keys(application.commands).map((name) => [
+      name,
+      (
+        testCommandsAllowedWithoutSenderDetails as ReadonlyArray<string>
+      ).includes(name)
+        ? application.commands[
+            name as keyof CampaignTestDeliveryApplication["commands"]
+          ]
+        : refuse,
+    ]),
+    // Every replaced entry throws, so it satisfies any command signature. The
+    // cast is only needed because the keys are walked by name.
+  ) as unknown as CampaignTestDeliveryApplication["commands"];
+  return Object.freeze({
+    commands: Object.freeze(commands),
+    queries: application.queries,
+  });
+}
+
 export function createCampaignTestDeliveryApplication({
   siteId,
   campaignStore,
@@ -595,7 +647,7 @@ export function createCampaignTestDeliveryApplication({
   store: CampaignTestDeliveryStore;
   adapter: NewsletterDeliveryAdapter;
   /**
-   * The sender details and legal footer this installation has set, or the
+   * The sender details and compliance footer this installation has set, or the
    * typed value that says they are absent. A test is a real email, so while
    * they are absent every test request is refused with one named reason.
    */
@@ -742,13 +794,6 @@ export function createCampaignTestDeliveryApplication({
     commandState: { accepted: boolean },
   ) {
     await authorize(actor, "campaign.author");
-    // A test is a real email with the legal footer at the bottom of it. While
-    // the installation has not set its sender details, no test goes out.
-    if (channelConfiguration.state !== "configured") {
-      throw new CampaignValidationError(
-        campaignSenderDetailsNotConfiguredReason,
-      );
-    }
     if (!isCampaignRequestId(requestId)) {
       throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
     }
@@ -1573,7 +1618,7 @@ export function createCampaignTestDeliveryApplication({
     }
   }
 
-  return Object.freeze({
+  const application = Object.freeze({
     commands: Object.freeze({ requestTest, confirmReceipt }),
     queries: Object.freeze({
       async currentEvidence({
@@ -1648,6 +1693,9 @@ export function createCampaignTestDeliveryApplication({
       },
     }),
   });
+  return channelConfiguration.state === "configured"
+    ? application
+    : withoutSenderDetails(application);
 }
 
 export function createInMemoryCampaignTestDeliveryStore():

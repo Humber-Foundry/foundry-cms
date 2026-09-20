@@ -30,7 +30,10 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextRenderer } from "./rich-text-renderer";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
-import { ConnectionStatus } from "./connection-status";
+import {
+  ConnectionStatus,
+  senderDetailsNotSetSentence,
+} from "./connection-status";
 import { HelpTip } from "./help-tip";
 import {
   browserTimeZone,
@@ -121,9 +124,7 @@ type DeliveryReadiness = Readonly<{
 const refusalSentences: Readonly<Record<string, string>> = {
   delivery_not_configured:
     "Email is not connected yet, so nothing can be sent or tested.",
-  campaign_sender_details_not_configured:
-    "Foundry does not yet have the name and postal address that must appear " +
-    "at the bottom of every email, so no email can be written or sent.",
+  campaign_sender_details_not_configured: senderDetailsNotSetSentence,
   bulk_owner_required: "Only the site owner can do this step.",
   not_authorized: "You do not have permission to do this step.",
   bulk_test_required: "Send a test first.",
@@ -939,14 +940,12 @@ export function CampaignControls({
         (
           body: {
             delivery: DeliveryReadiness;
-            senderDetails?: DeliveryReadiness;
+            senderDetails: DeliveryReadiness;
           } | null,
         ) => {
           if (current && body !== null) {
             setDelivery(body.delivery);
-            if (body.senderDetails !== undefined) {
-              setSenderDetails(body.senderDetails);
-            }
+            setSenderDetails(body.senderDetails);
           }
         },
       )
@@ -1064,7 +1063,7 @@ export function CampaignControls({
     }
   }
 
-  // Every email carries a legal footer built from the installation's own
+  // Every email carries a compliance footer built from the installation's own
   // name and postal address. Foundry never invents one, so while they are
   // absent the server refuses to write an email and the screen says so
   // instead of offering a step that always fails.
