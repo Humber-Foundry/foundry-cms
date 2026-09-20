@@ -148,20 +148,22 @@ export function ConnectionStatus({
   }
 
   const missingNames = readiness.missingSettings.join(", ");
+  const namesInline =
+    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
+  const namesBehindDisclosure =
+    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {copy.notConnectedSentence}
-      {readiness.missingSettings.length === 0 ? null : copy
-          .settingNamesShownInline ? (
-        <> Missing: {missingNames}.</>
-      ) : (
+      {namesInline ? <> Missing: {missingNames}.</> : null}
+      {namesBehindDisclosure ? (
         <>
           {" "}
           <HelpTip label={settingNamesLabel}>
             {`Whoever set this site up installs them as ${missingNames}.`}
           </HelpTip>
         </>
-      )}{" "}
+      ) : null}{" "}
       <a
         href={`${documentationBaseAddress}${readiness.setupGuide}`}
         target="_blank"

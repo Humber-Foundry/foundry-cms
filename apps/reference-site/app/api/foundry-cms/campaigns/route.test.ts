@@ -1036,6 +1036,34 @@ describe("campaign delivery readiness", () => {
       expect(response.status).toBe(201);
       expect(mocks.cancelBulkSchedule).toHaveBeenCalled();
     });
+
+    it("reports one reason when neither the secrets nor the settings are set", async () => {
+      // A new installation has neither, and both answers would be true. The
+      // sender settings are checked first so the whole product — this API, the
+      // MCP runtime and the scheduled worker — reports one word.
+      mocks.loadContext.mockResolvedValue({
+        identity,
+        application,
+        testDelivery,
+        bulkDelivery,
+        delivery: notConfiguredDelivery,
+        senderDetails: notConfiguredSenderDetails,
+        readDeliveryHealth: mocks.readDeliveryHealth,
+        listTestRecipients: mocks.listTestRecipients,
+      });
+      const response = await post(
+        {
+          action: "request_test",
+          campaignId,
+          testRecipientIds: ["owner-primary"],
+        },
+        "campaign-new-installation-reason-1",
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "campaign_sender_details_not_configured",
+      });
+    });
   });
 
   describe("while delivery is not configured", () => {

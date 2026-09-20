@@ -30,6 +30,7 @@ import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-s
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
   HumanAccessConfigurationError,
+  readNewsletterDeliverySecret,
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
 
@@ -114,6 +115,12 @@ async function loadInstallationParts(
   if (channelConfiguration.state !== "configured") {
     throw new Error(channelConfiguration.reason);
   }
+  // The unsubscribe token is signed with this secret at send time. Reading it
+  // here keeps the MCP surface refusing to start without it, as it already
+  // refuses without the Brevo webhook token and the account-scope
+  // fingerprint. It is read after the channel so an installation with no
+  // compliance footer gets the named reason rather than this one.
+  readNewsletterDeliverySecret(environment);
   const store = createD1CampaignStore(database);
   const testDeliveryStore = createD1CampaignTestDeliveryStore(database);
   const subscriberStore = createD1SubscriberLedgerStore(database);

@@ -74,13 +74,22 @@ delivery setting, so it still stops the request.
 Every email carries a footer with the sender's legal name, postal address, a
 way to contact them and a way to stop the emails. Foundry never invents any of
 them. The footer is stored on every campaign revision and is read by whoever
-receives the email, so there is no default and no placeholder value anywhere in
-the product.
+receives the email, so there is no default and no placeholder value in any
+installed site.
+
+Local development is the one exception, and it announces itself: the name reads
+"Foundry local development" and the address reads "Local development only". In
+that mode the campaign store is in memory and every provider adapter is the
+fail-closed one, so nothing written there can reach a person. See ADR-0030.
 
 These are the settings that build it, in setup order:
 
 - `FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID` — which Foundry logical sender the
-  email comes from. It must be one of the keys in `FOUNDRY_BREVO_SENDERS_JSON`.
+  email comes from. It must name one of the keys in
+  `FOUNDRY_BREVO_SENDERS_JSON`. Sender readiness checks only that it is set,
+  because the sender mapping is a delivery secret and the two headings stay
+  apart. A name that matches no sender is refused when a test is requested,
+  where the provider's own sender fingerprints are read.
 - `FOUNDRY_CAMPAIGN_LEGAL_NAME` — the name that appears at the bottom of every
   email.
 - `FOUNDRY_CAMPAIGN_POSTAL_ADDRESS` — the postal address that appears at the
@@ -112,17 +121,23 @@ Everything that would create or use a footer is refused with one reason,
   the worker stops with the same reason rather than claiming work.
 - The MCP campaign runtime in
   `apps/reference-site/src/mcp-campaign-runtime.ts` refuses to start with the
-  same reason.
+  same reason. Its read tools stop too. An agent has no screen to read the
+  reason on, so the safe answer there is to stop rather than serve part of the
+  surface.
 - The campaigns API answers HTTP 503 with
   `{"error": "campaign_sender_details_not_configured"}`. It allows only
   `cancel_bulk_schedule`, so an action added later is refused until it is
-  allowed deliberately.
+  allowed deliberately. This check runs before the delivery check above, so a
+  new installation that has neither reads one reason everywhere rather than
+  two.
 
 `cancel_bulk_schedule` stays available for the same reason as above:
 cancelling stops a send.
 
-The MCP campaign surface also still refuses to start without the Brevo webhook
-token and account-scope fingerprint, so it fails closed for delivery too.
+The MCP campaign surface also still refuses to start without the newsletter
+delivery secret, the Brevo webhook token and the account-scope fingerprint, so
+it fails closed for delivery too. The sender settings are read first, so an
+installation missing both reads the sender reason.
 
 ## Delivery readiness report
 

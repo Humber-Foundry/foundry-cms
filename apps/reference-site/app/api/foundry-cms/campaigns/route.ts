@@ -604,6 +604,26 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    // Fail closed. The compliance footer is stored on every campaign revision
+    // and is read by whoever receives the email, so while the installation has
+    // not set the settings that build it, a campaign may not even be written.
+    //
+    // This runs before the delivery gate below. A new installation has neither,
+    // and both answers would be true; this one is checked first so the whole
+    // product reports one reason for one installation. It is also the wider
+    // fault: without these settings nothing can be written at all, while a
+    // missing delivery secret only stops a send.
+    if (
+      context.senderDetails.state === "not_configured" &&
+      !(actionsAllowedWithoutSenderDetails as ReadonlyArray<string>).includes(
+        parsed.action,
+      )
+    ) {
+      return Response.json(
+        { error: "campaign_sender_details_not_configured" },
+        { status: 503, headers: { "cache-control": "private, no-store" } },
+      );
+    }
     // Fail closed: while email delivery is not configured, only the commands
     // that send nothing may run. The reason names the state rather than the
     // missing settings, which the readiness report lists.
@@ -615,21 +635,6 @@ export async function POST(request: Request) {
     ) {
       return Response.json(
         { error: "delivery_not_configured" },
-        { status: 503, headers: { "cache-control": "private, no-store" } },
-      );
-    }
-    // Fail closed again, for a different missing thing. The compliance footer is
-    // stored on every campaign revision and is read by whoever receives the
-    // email, so while the installation has not set the settings that build it,
-    // a campaign may not even be written.
-    if (
-      context.senderDetails.state === "not_configured" &&
-      !(actionsAllowedWithoutSenderDetails as ReadonlyArray<string>).includes(
-        parsed.action,
-      )
-    ) {
-      return Response.json(
-        { error: "campaign_sender_details_not_configured" },
         { status: 503, headers: { "cache-control": "private, no-store" } },
       );
     }

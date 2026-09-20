@@ -92,13 +92,29 @@ the application's `bulkCommandsAllowedWithoutSenderDetails`, and its
 `testCommandsAllowedWithoutSenderDetails`. Each names what still works rather
 than what is blocked, so a command added later is refused until someone allows
 it deliberately. This follows #163's decision after its review found a blocked
-list that failed open. The test list is empty, and is written out anyway so the
-next command added there meets the same gate.
+list that failed open. `refuseCommandsExcept` applies all three the same way.
+The test list is empty, and is written out anyway so the next command added
+there meets the same gate.
 
 Only two commands survive, and neither sends anything: `cancel_bulk_schedule`
 (cancelling stops a send, and an Owner needs it exactly when something has gone
 wrong) and recording a verified provider event (dropping one would lose an
-unsubscribe). Reads are untouched throughout.
+unsubscribe).
+
+`createCampaignApplication` is the exception, and it gates each write command
+on its own rather than through a list. A wrapper there would have to refuse
+`recordRejectedCommand`, which is how a refusal is written down in the first
+place. Its four write commands — create, edit, and the two that record an
+accepted test — all call `requireConfiguredChannel()`.
+
+### 3a. Which reason a new installation reads
+
+A new installation has neither the delivery secrets nor the sender settings,
+and both answers would be true. The API route checks the sender settings
+first, so the whole product reports one reason for one installation, the same
+word the MCP runtime and the scheduled worker report. It is also the wider
+fault: without these settings nothing can be written at all, while a missing
+delivery secret only stops a send.
 
 ### 4. One reading of the settings serves both the screen and the refusal
 
@@ -108,12 +124,21 @@ composing roots call it. The screen can therefore never name a different set
 of missing settings from the one the application refused on, and the rule
 lives in one place rather than in four copies.
 
-### 5. Reading still works
+### 5. Reading still works on the screens a person uses
 
-Listing and reading the campaigns that are already stored is untouched. That
-is what lets the Newsletter page load and say what is missing. A footer that
-was stored while the settings were set stays exactly as the installation wrote
-it; nothing rewrites or re-derives a stored footer.
+On the dashboard and the campaigns API, listing and reading the campaigns that
+are already stored is untouched. That is what lets the Newsletter page load and
+say what is missing. A footer that was stored while the settings were set stays
+exactly as the installation wrote it; nothing rewrites or re-derives a stored
+footer.
+
+The MCP campaign surface is different on purpose. It refuses to start at all,
+so its read tools are unreachable too, exactly as it already refuses to start
+without the Brevo webhook token, the account-scope fingerprint and the
+newsletter delivery secret. An agent has no screen to read the reason on and no
+way to act on it, so the safe answer there is to stop rather than to serve a
+partial surface. ADR-0007 keeps the MCP surface's authority narrow; this keeps
+it closed.
 
 ### 6. Two headings, not one
 
@@ -153,6 +178,8 @@ exactly: **outside local development** there is no default and no placeholder.
 - Adding a campaign command means deciding whether it belongs on the allowed
   list. Until then it is refused, which is the safe direction.
 - The scheduled worker stops rather than claiming work it would refuse one
-  operation at a time. An operator sees one clear reason in the log.
+  operation at a time. `custom-worker.ts` logs the reason code beside
+  `scheduled_campaign_delivery_failed`, so an operator reads which of the two
+  configuration faults it was rather than a bare failure.
 - Anything that builds a campaign application must now pass the state value.
   That is a compile error rather than a silent crash at request time.

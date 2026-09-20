@@ -60,3 +60,37 @@ export function campaignChannelNotConfigured(
     missingSettings: Object.freeze([...missingSettings]),
   });
 }
+
+/**
+ * One application's commands, with every command that is not named in
+ * `allowed` replaced by a refusal.
+ *
+ * `allowed` names what still works rather than what is blocked, so a command
+ * added later is refused until someone allows it here deliberately. A list of
+ * blocked names would let a new command through by omission.
+ *
+ * Every command is asynchronous, so the refusal is a rejected promise. A
+ * synchronous throw would escape a caller that only attaches a catch to the
+ * promise.
+ */
+export function refuseCommandsExcept<Commands extends object>(
+  commands: Commands,
+  allowed: ReadonlyArray<keyof Commands>,
+  raise: () => Error,
+): Commands {
+  async function refuse(): Promise<never> {
+    throw raise();
+  }
+  return Object.freeze(
+    Object.fromEntries(
+      Object.keys(commands).map((name) => [
+        name,
+        (allowed as ReadonlyArray<string>).includes(name)
+          ? commands[name as keyof Commands]
+          : refuse,
+      ]),
+      // Every replaced entry throws, so it satisfies any command signature.
+      // The cast is only needed because the keys are walked by name.
+    ) as unknown as Commands,
+  );
+}

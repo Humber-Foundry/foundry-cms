@@ -9,6 +9,7 @@ import {
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
   campaignSenderDetailsNotConfiguredReason,
+  refuseCommandsExcept,
   type CampaignChannelConfigurationState,
 } from "./campaign-channel-state";
 import type {
@@ -805,37 +806,28 @@ const bulkCommandsAllowedWithoutSenderDetails = Object.freeze([
 function withoutSenderDetails(
   application: CampaignBulkDeliveryApplication,
 ): CampaignBulkDeliveryApplication {
-  // Every command and scheduler entry point here is asynchronous, so the
-  // refusal is a rejected promise. A synchronous throw would escape a caller
-  // that only attaches a catch to the promise.
-  async function refuse(): Promise<never> {
-    throw new CampaignBulkDeliveryError(
-      campaignSenderDetailsNotConfiguredReason,
-    );
-  }
-  const commands = Object.fromEntries(
-    Object.keys(application.commands).map((name) => [
-      name,
-      (
-        bulkCommandsAllowedWithoutSenderDetails as ReadonlyArray<string>
-      ).includes(name)
-        ? application.commands[
-            name as keyof CampaignBulkDeliveryApplication["commands"]
-          ]
-        : refuse,
-    ]),
-    // Every replaced entry throws, so it satisfies any command signature. The
-    // cast is only needed because the keys are walked by name.
-  ) as unknown as CampaignBulkDeliveryApplication["commands"];
+  const raise = () =>
+    new CampaignBulkDeliveryError(campaignSenderDetailsNotConfiguredReason);
   return Object.freeze({
-    commands: Object.freeze(commands),
+    commands: refuseCommandsExcept(
+      application.commands,
+      bulkCommandsAllowedWithoutSenderDetails,
+      raise,
+    ),
     queries: application.queries,
     scheduler: Object.freeze({
-      claimDue: refuse,
-      execute: refuse,
-      reconcilePending: refuse,
+      claimDue: raiseAsync(raise),
+      execute: raiseAsync(raise),
+      reconcilePending: raiseAsync(raise),
     }),
   });
+}
+
+/** A scheduler entry point that always rejects with one named reason. */
+function raiseAsync(raise: () => Error) {
+  return async (): Promise<never> => {
+    throw raise();
+  };
 }
 
 export function createCampaignBulkDeliveryApplication({

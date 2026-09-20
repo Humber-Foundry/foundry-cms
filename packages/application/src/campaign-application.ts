@@ -456,6 +456,10 @@ export function createCampaignApplication({
       targetId = campaign.id,
       commandName = "campaign.request_test",
     }) {
+      // This records that a test was accepted. A test cannot be accepted
+      // while the compliance footer cannot be built, so recording one would
+      // be a false record.
+      requireConfiguredChannel();
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,
@@ -503,6 +507,9 @@ export function createCampaignApplication({
       targetId,
       confirmation,
     }) {
+      // Same reason as above: no test can have been sent, so no receipt for
+      // one can be confirmed.
+      requireConfiguredChannel();
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,

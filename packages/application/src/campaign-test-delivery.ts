@@ -8,6 +8,7 @@ import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
   campaignSenderDetailsNotConfiguredReason,
+  refuseCommandsExcept,
   type CampaignChannelConfigurationState,
 } from "./campaign-channel-state";
 import {
@@ -590,34 +591,19 @@ const testCommandsAllowedWithoutSenderDetails = Object.freeze(
 /**
  * Refuse every test-delivery command with one named reason.
  *
- * Every command here is asynchronous, so the refusal is a rejected promise. A
- * synchronous throw would escape a caller that only attaches a catch to the
- * promise.
+ * The `queries` are untouched. Reading grants nothing, and the Newsletter
+ * screen needs them to explain where a campaign has got to.
  */
 function withoutSenderDetails(
   application: CampaignTestDeliveryApplication,
 ): CampaignTestDeliveryApplication {
-  async function refuse(): Promise<never> {
-    throw new CampaignValidationError(
-      campaignSenderDetailsNotConfiguredReason,
-    );
-  }
-  const commands = Object.fromEntries(
-    Object.keys(application.commands).map((name) => [
-      name,
-      (
-        testCommandsAllowedWithoutSenderDetails as ReadonlyArray<string>
-      ).includes(name)
-        ? application.commands[
-            name as keyof CampaignTestDeliveryApplication["commands"]
-          ]
-        : refuse,
-    ]),
-    // Every replaced entry throws, so it satisfies any command signature. The
-    // cast is only needed because the keys are walked by name.
-  ) as unknown as CampaignTestDeliveryApplication["commands"];
   return Object.freeze({
-    commands: Object.freeze(commands),
+    commands: refuseCommandsExcept(
+      application.commands,
+      testCommandsAllowedWithoutSenderDetails,
+      () =>
+        new CampaignValidationError(campaignSenderDetailsNotConfiguredReason),
+    ),
     queries: application.queries,
   });
 }
