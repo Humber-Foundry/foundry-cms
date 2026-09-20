@@ -356,37 +356,10 @@ async function checkPagesSettingsPanel(page, origin, viewportLabel) {
 }
 
 async function checkDestination(page, origin, name, href, viewportLabel) {
-  if (name === "Settings") {
-    // Settings never reaches Playwright's "networkidle": every dashboard
-    // route's CSS bundle carries the Puck editor's stylesheet
-    // (`@puckeditor/core/puck.css`), which itself `@import`s a font
-    // stylesheet from `https://rsms.me` — the one cross-origin request on
-    // an otherwise same-origin page. `networkidle` waits for that request
-    // to go quiet too, and on a loaded machine that cross-origin fetch can
-    // stall past the 45s timeout while the page itself has already
-    // rendered. Settings pays for this more than the other destinations
-    // because it does the
-    // heaviest server read of any dashboard screen (members, MCP
-    // connections, owner-notification health, campaign context, email and
-    // publishing readiness), which pushes the request later into the
-    // check's time budget. Reproduced by stalling `https://rsms.me/**`
-    // with Playwright request routing: `networkidle` timed out, while
-    // waiting for the "Connected agents" heading after `waitUntil:
-    // "commit"` succeeded in under 200ms.
-    //
-    // So Settings waits for its own content instead of network silence.
-    // This does not loosen any spacing assertion below; it only changes
-    // how the check decides the page is ready to measure.
-    await page.goto(`${origin}${href}`, { waitUntil: "commit", timeout: 45_000 });
-    await page
-      .getByRole("heading", { name: "Connected agents" })
-      .waitFor({ state: "visible", timeout: 45_000 });
-  } else {
-    await page.goto(`${origin}${href}`, {
-      waitUntil: "networkidle",
-      timeout: 45_000,
-    });
-  }
+  await page.goto(`${origin}${href}`, {
+    waitUntil: "networkidle",
+    timeout: 45_000,
+  });
   await page.waitForTimeout(600);
 
   // Settings' "Technical detail" disclosure starts collapsed, so its
@@ -472,6 +445,16 @@ async function main() {
     ]) {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
+      // #215: a dashboard page load must never reach an outside server (the
+      // visual editor's stylesheet used to `@import` a font from one). Every
+      // request made while this context is open is recorded here and
+      // checked against the dashboard's own origin below.
+      const foreignRequests = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).origin !== origin) {
+          foreignRequests.push(request.url());
+        }
+      });
       // The dashboard creates the draft workspace on the server, so Pages,
       // Blog and Design render their real editing surfaces straight away —
       // the same content the owner's own audit measured.
@@ -485,6 +468,12 @@ async function main() {
       }
       await checkPagesSettingsPanel(page, origin, viewportLabel);
       await context.close();
+
+      if (foreignRequests.length > 0) {
+        throw new Error(
+          `dashboard_spacing_foreign_request:${viewportLabel}:${JSON.stringify(foreignRequests)}`,
+        );
+      }
     }
 
     process.stdout.write(

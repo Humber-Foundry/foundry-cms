@@ -94,6 +94,10 @@ describe("Owner MCP connection controls, revoke dialog", () => {
     );
     expect(dialog.textContent).toContain("Revoke this connection?");
     expect(dialog.textContent).toContain("client.example");
+    // Plain words for what happens next (#215) — never the protocol name.
+    expect(dialog.textContent).toContain("will lose access to this site");
+    expect(dialog.textContent).toContain("connect it again later");
+    expect(dialog.textContent).not.toContain("MCP");
     // The dialog is real DOM the test can find — not the browser's native
     // confirm(), which vitest/browser cannot drive at all.
     expect(revokeCalled).toBe(false);
@@ -128,6 +132,9 @@ describe("Owner MCP connection controls, revoke dialog", () => {
         : undefined;
     });
     expect(status.textContent).toContain("Connection revoked");
+    // Plain words here too, never the protocol name (#215).
+    expect(status.textContent).toContain("lost access to this site");
+    expect(status.textContent).not.toContain("MCP");
   });
 
   it("reports failure in place when the revoke request fails", async () => {

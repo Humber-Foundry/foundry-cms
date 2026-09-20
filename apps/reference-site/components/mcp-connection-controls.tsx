@@ -149,8 +149,8 @@ function RevokeConfirmDialog({
         <>
           <h2 id="revoke-confirm-title">Revoke this connection?</h2>
           <p>
-            {mcpConnectionDisplayName(connection.clientId)} will lose access.
-            Its next MCP request will fail.
+            {mcpConnectionDisplayName(connection.clientId)} will lose access
+            to this site at once. You can connect it again later.
           </p>
           <div className="revoke-confirm-actions">
             <button type="button" onClick={onCancel}>
@@ -205,7 +205,9 @@ export function McpConnectionControls({
         );
         return;
       }
-      setMessage("Connection revoked. Its next MCP request will fail.");
+      setMessage(
+        "Connection revoked. The agent lost access to this site at once. You can connect it again later.",
+      );
       router.refresh();
     } catch {
       setMessage(
