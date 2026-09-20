@@ -8,7 +8,10 @@ import type {
   HumanRole,
   MembershipStatus,
 } from "@humber-foundry/application";
-import { availableMembershipStatusActions } from "@humber-foundry/application";
+import {
+  availableMembershipStatusActions,
+  otherHumanRole,
+} from "@humber-foundry/application";
 import { HelpTip } from "./help-tip";
 import {
   membershipStatusDisplayLabel,
@@ -447,13 +450,10 @@ export function MemberAccessPanel({
                   type="button"
                   disabled={mutation.pending || mutation.retryAvailable}
                   onClick={() =>
-                    requestRoleChange(
-                      member,
-                      member.role === "owner" ? "editor" : "owner",
-                    )
+                    requestRoleChange(member, otherHumanRole(member.role))
                   }
                 >
-                  {member.role === "owner" ? "Make Editor" : "Make Owner"}
+                  Make {roleDisplayLabel[otherHumanRole(member.role)]}
                 </button>
               )}
               {availableMembershipStatusActions(member.status).map(

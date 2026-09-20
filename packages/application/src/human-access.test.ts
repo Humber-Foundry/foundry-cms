@@ -9,6 +9,7 @@ import {
   createHumanMembershipId,
   createHumanUserId,
   createHumanAccessApplication,
+  otherHumanRole,
   reconcileHumanAccessEligibility,
   type ExternalHumanIdentity,
   type HumanInvitation,
@@ -632,6 +633,11 @@ describe("human access application", () => {
   });
 
   describe("role change", () => {
+    it("swaps between the two roles, for the Users table's toggle button", () => {
+      expect(otherHumanRole("owner")).toBe("editor");
+      expect(otherHumanRole("editor")).toBe("owner");
+    });
+
     it("lets an Owner promote an Editor to Owner", async () => {
       const editor = activeMembership({
         id: createHumanMembershipId("membership-editor"),
