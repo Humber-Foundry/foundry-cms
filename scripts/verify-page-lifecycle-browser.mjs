@@ -1,12 +1,14 @@
 /**
  * Live acceptance for creating, renaming, duplicating and deleting pages
- * (issue #159).
+ * (issue #159), and for the home page row offering no way to delete it
+ * (issue #206).
  *
  * Runs the real dashboard and walks the whole journey a site owner walks to
- * get a second page: make one from the Pages list, edit it in the canvas,
- * point a navigation item at it with the page picker, follow that link inside
- * the canvas and land on the new page in the editor, open its preview, then
- * take the link away and delete the page.
+ * get a second page: check that the home page row's Delete control is
+ * disabled and explains why, make a page from the Pages list, edit it in the
+ * canvas, point a navigation item at it with the page picker, follow that
+ * link inside the canvas and land on the new page in the editor, open its
+ * preview, then take the link away and delete the page.
  *
  * Following a link inside the canvas is the end-to-end check ADR-0024 left
  * for this ticket, because until now the reference site had one page and a
@@ -182,6 +184,33 @@ async function runJourney(origin, browser, viewport) {
   await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
   const workspaceUrl = page.url();
   await shot("pages-list");
+
+  // --- The home page row offers no way to delete it ---------------------
+  const homeDeleteButton = page.getByRole("button", {
+    name: /^Delete Foundry Reference$/u,
+  });
+  if (!(await homeDeleteButton.isDisabled())) {
+    throw new Error("page_lifecycle_home_delete_not_disabled");
+  }
+  const homeDeleteTip = page.getByRole("button", {
+    name: "Why can't I delete the home page?",
+  });
+  await homeDeleteTip.waitFor({ state: "visible" });
+  await homeDeleteTip.click();
+  const homeDeleteExplanation = page.locator(".help-tip-panel");
+  await homeDeleteExplanation.waitFor({ state: "visible" });
+  const explanationText = await homeDeleteExplanation.innerText();
+  if (!explanationText.includes("The home page cannot be deleted")) {
+    throw new Error(`page_lifecycle_home_delete_not_explained:${explanationText}`);
+  }
+  await assertTapTargets(
+    page.locator(".pages-list-row-actions").first(),
+    viewport,
+    "page_lifecycle_home_row_control_short",
+  );
+  await shot("pages-list-home-delete-explained");
+  // Close the tip so it does not sit open over the rest of the journey.
+  await homeDeleteTip.click();
 
   // --- Create -----------------------------------------------------------
   await page.getByRole("button", { name: "New page" }).click();
