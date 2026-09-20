@@ -2453,6 +2453,13 @@
     grid-template-columns: 1fr;
   }
 
+  /* Same reason: the Users table's three-column override above `@media`
+   * (`.member-access-table .inventory-row`) also outranks the one-column
+   * rule above by specificity, so it needs the same repeat here (#150). */
+  .member-access-table .inventory-row {
+    grid-template-columns: 1fr;
+  }
+
   .inventory-head {
     display: none;
   }
