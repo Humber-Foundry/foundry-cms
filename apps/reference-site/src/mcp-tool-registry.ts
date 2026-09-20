@@ -8,6 +8,10 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
+  mcpMediaFileNameMaxLength,
+  mcpMediaListMaxPageSize,
+  mcpMediaUploadMaxByteLength,
+  mediaContentTypes,
   mcpRestructureScopes,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
@@ -32,6 +36,8 @@ import {
   designContract,
   pageCompositionContract,
   campaignShareImageUrlPattern,
+  pageMediaOccurrenceIdPattern,
+  pageMediaSlots,
   pageSlugMaxLength,
   pageSlugPattern,
   pageStartingLayouts,
@@ -504,6 +510,129 @@ const blogPostCommandInputSchema = {
   },
   required: ["postId", "idempotencyKey"],
 } as const;
+
+/**
+ * The shape of one photo's id. It is the media library's own id shape, so an
+ * address that could never name a photo of this site is refused before the
+ * draft is opened.
+ */
+const mediaAssetIdSchema = {
+  type: "string",
+  minLength: 1,
+  maxLength: 200,
+  pattern: "^asset_[a-z0-9_]+$",
+} as const;
+
+const mediaAssetIdShape = new RegExp(mediaAssetIdSchema.pattern, "u");
+
+function isMediaAssetId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= mediaAssetIdSchema.maxLength &&
+    mediaAssetIdShape.test(value)
+  );
+}
+
+/**
+ * The longest base64 text a photo may arrive as.
+ *
+ * This is the transport bound, not the photo rule. It leaves a little room
+ * above the encoded length of the largest picture allowed, so a photo just
+ * over the limit reaches the application and is refused there with the named
+ * reason `media_too_large`, which says what to do. A picture far over the
+ * limit is refused by the schema instead, before anything is decoded.
+ */
+const mediaUploadBase64MaxLength =
+  Math.ceil((mcpMediaUploadMaxByteLength + 64 * 1024) / 3) * 4;
+
+/**
+ * What every photo tool reports about one photo. It carries no person, no
+ * connection and no address outside this site. See ADR-0037.
+ */
+const mediaAssetResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    assetId: mediaAssetIdSchema,
+    mediaPath: { type: "string", pattern: "^/api/media/asset_[a-z0-9_]+$" },
+    fileName: {
+      type: "string",
+      minLength: 1,
+      maxLength: mcpMediaFileNameMaxLength,
+    },
+    contentType: { enum: [...mediaContentTypes] },
+    byteLength: { type: "integer", minimum: 1 },
+    width: { type: "integer", minimum: 1 },
+    height: { type: "integer", minimum: 1 },
+    createdAt: { type: "string", format: "date-time" },
+  },
+  required: [
+    "assetId",
+    "mediaPath",
+    "fileName",
+    "contentType",
+    "byteLength",
+    "width",
+    "height",
+    "createdAt",
+  ],
+} as const;
+
+function parseMediaListInput(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, ["limit", "cursor"]) ||
+    typeof input.limit !== "number" ||
+    (input.cursor !== null && typeof input.cursor !== "string")
+  ) {
+    return null;
+  }
+  return {
+    limit: input.limit,
+    cursor: input.cursor as string | null,
+  };
+}
+
+function parseMediaUploadInput(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, ["fileName", "bytesBase64", "idempotencyKey"]) ||
+    typeof input.fileName !== "string" ||
+    input.fileName.length < 1 ||
+    input.fileName.length > mcpMediaFileNameMaxLength ||
+    typeof input.bytesBase64 !== "string" ||
+    input.bytesBase64.length < 4 ||
+    input.bytesBase64.length > mediaUploadBase64MaxLength ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  return {
+    fileName: input.fileName,
+    bytesBase64: input.bytesBase64,
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
+function parseMediaPlaceInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["pageId", "slot", "assetId"]);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !isDefinitionIdentifier(input.pageId) ||
+    typeof input.slot !== "string" ||
+    !pageMediaSlots.includes(input.slot as (typeof pageMediaSlots)[number]) ||
+    !isMediaAssetId(input.assetId)
+  ) {
+    return null;
+  }
+  return {
+    ...common,
+    pageId: input.pageId,
+    slot: input.slot as (typeof pageMediaSlots)[number],
+    assetId: input.assetId,
+  };
+}
 
 const canonicalDefinitionResult = {
   type: "object",
@@ -1921,6 +2050,90 @@ const descriptors = {
     annotations,
     execution: taskExecution,
   },
+  "foundry.media.list": {
+    name: "foundry.media.list",
+    description:
+      "List the photos this site already holds, oldest first, with the address to use for each one.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: mcpMediaListMaxPageSize,
+        },
+        cursor: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+      required: ["limit", "cursor"],
+    },
+    outputSchema: toolOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        items: { type: "array", items: mediaAssetResult },
+        nextCursor: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+      required: ["items", "nextCursor"],
+    }),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.media.upload": {
+    name: "foundry.media.upload",
+    description:
+      "Add one photo to this site, sending the picture itself as base64 text.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        fileName: {
+          type: "string",
+          minLength: 1,
+          maxLength: mcpMediaFileNameMaxLength,
+        },
+        bytesBase64: {
+          type: "string",
+          minLength: 4,
+          maxLength: mediaUploadBase64MaxLength,
+          contentEncoding: "base64",
+        },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: ["fileName", "bytesBase64", "idempotencyKey"],
+    },
+    outputSchema: toolOutputSchema(mediaAssetResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.media.place": {
+    name: "foundry.media.place",
+    description:
+      "Put one of this site's photos in a page's main or secondary picture slot, as a new immutable revision.",
+    inputSchema: pageToolInputSchema({
+      pageId: pageIdSchema,
+      slot: { enum: [...pageMediaSlots] },
+      assetId: mediaAssetIdSchema,
+    }),
+    outputSchema: toolOutputSchema({
+      ...draftMutationResult,
+      properties: {
+        ...draftMutationResult.properties,
+        occurrenceId: {
+          type: "string",
+          pattern: pageMediaOccurrenceIdPattern.source,
+        },
+        previewArtifact: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      },
+      required: [
+        ...draftMutationResult.required,
+        "occurrenceId",
+        "previewArtifact",
+      ],
+    }),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
   "foundry.design.patch": {
     name: "foundry.design.patch",
     description:
@@ -2627,6 +2840,48 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.listSectionTypes(principal, context);
     },
+    "foundry.media.list": async (principal, input, context) => {
+      const parsed = parseMediaListInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.media.list",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.listMedia!(principal, parsed, context);
+    },
+    "foundry.media.upload": async (principal, input, context) => {
+      const parsed = parseMediaUploadInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.media.upload",
+          // The picture's own bytes never enter a refusal's audit record.
+          isRecord(input)
+            ? { ...input, bytesBase64: undefined }
+            : input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.uploadMedia!(principal, parsed, context);
+    },
+    "foundry.media.place": async (principal, input, context) => {
+      const parsed = parseMediaPlaceInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.media.place",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.placeMedia!(principal, parsed, context);
+    },
     "foundry.design.patch": async (principal, input, context) => {
       const parsed = parseDesignPatchInput(input);
       if (parsed === null) {
@@ -2993,6 +3248,15 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         application.archiveBlogPost !== undefined;
       return Object.entries(descriptors)
         .filter(([name]) => {
+          // Every photo tool reads or writes this site's own media library,
+          // which is draft work: a photo is added and placed inside a draft a
+          // person reviews. See ADR-0037.
+          if (name.startsWith("foundry.media.")) {
+            return (
+              supportsDrafts &&
+              principal.scopes.includes(mcpContentDraftScope)
+            );
+          }
           if (
             name.startsWith("foundry.workspace.") ||
             name.startsWith("foundry.page.") ||
@@ -3100,6 +3364,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         (
           name.startsWith("foundry.workspace.") ||
           name.startsWith("foundry.page.") ||
+          name.startsWith("foundry.media.") ||
           name === "foundry.content.patch" ||
           name === "foundry.design.patch" ||
           name === "foundry.preview.prepare"

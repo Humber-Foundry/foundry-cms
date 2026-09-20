@@ -43,10 +43,15 @@ describe("mcpAgentNeverDoes", () => {
     expect(text).not.toContain("blog post from nothing");
   });
 
-  it("still says an agent cannot upload a photo", () => {
-    // Uploading is #172. Until it ships, the consent screen has to say so.
+  it("no longer claims an agent cannot add a photo", () => {
+    // `foundry.media.upload` shipped in #172, so the old sentence would now
+    // claim less than an agent can do. The screen says where an added photo
+    // stops instead: the photo library and a draft, never the live site
+    // without the owner's approval. See ADR-0037.
     const text = mcpAgentNeverDoes.join(" ").toLowerCase();
-    expect(text).toContain("cannot upload a photo");
+    expect(text).not.toContain("cannot upload a photo");
+    expect(text).toContain("photo library");
+    expect(text).toContain("after you approve that draft");
   });
 
   it("says a live post only comes off the site with the owner's approval", () => {

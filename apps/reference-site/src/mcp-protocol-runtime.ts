@@ -24,7 +24,7 @@ import {
   isRecord,
   isRequestId,
   jsonResponse,
-  readBoundedText,
+  readBoundedBody,
   readsJsonMediaType,
   rpcError,
   rpcResult,
@@ -42,6 +42,40 @@ export {
 } from "@humber-foundry/application";
 
 const rpcBodyLimitBytes = 256 * 1024;
+
+/**
+ * The one tool whose request may be larger than every other request, and the
+ * ceiling that applies to it.
+ *
+ * `foundry.media.upload` carries a photo's own bytes as base64, because no
+ * MCP tool accepts a web address to fetch. Two things keep the larger ceiling
+ * narrow. A connection without the content draft permission is held to the
+ * ordinary limit before its body is read at all, because no such connection
+ * can add a photo. A connection that has it is read this far, and its body is
+ * still refused above the ordinary limit unless the request really is one
+ * call of that tool. See ADR-0037.
+ */
+const mediaUploadToolName = "foundry.media.upload";
+const rpcMediaUploadBodyLimitBytes = 6 * 1024 * 1024;
+
+/**
+ * Whether the parsed request is one call of the photo upload tool. Anything
+ * else — a different tool, a different method, a malformed request — keeps
+ * the ordinary body limit.
+ */
+function isMediaUploadCall(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.jsonrpc === "2.0" &&
+    // An upload asks for an answer, so it carries a request id. A
+    // notification-shaped body cannot claim the larger ceiling.
+    isRequestId(value.id) &&
+    value.method === "tools/call" &&
+    isRecord(value.params) &&
+    value.params.name === mediaUploadToolName
+  );
+}
+
 const rpcMaximumDepth = 32;
 const knownMethods = new Set([
   "initialize",
@@ -951,11 +985,33 @@ export function createMcpProtocolRuntime({
       let value: unknown;
       let bodyFailure: Response | null = null;
       try {
-        value = JSON.parse(
-          await context.run(() =>
-            readBoundedText(request, rpcBodyLimitBytes, context.signal),
+        // Only a connection the Owner gave the content draft permission can
+        // add a photo, so only that connection's request is read past the
+        // ordinary limit. Every other connection is refused at 256 KiB
+        // before the body is read. See ADR-0037.
+        const mayUploadPhoto = principal.scopes.includes(
+          mcpContentDraftScope,
+        );
+        const body = await context.run(() =>
+          readBoundedBody(
+            request,
+            mayUploadPhoto
+              ? rpcMediaUploadBodyLimitBytes
+              : rpcBodyLimitBytes,
+            context.signal,
           ),
         );
+        if (body.byteLength > rpcBodyLimitBytes) {
+          // A large body is read only so the one tool that may carry a photo
+          // can be recognised. Anything else is refused, and the parse
+          // happens once.
+          value = JSON.parse(body.text);
+          if (!isMediaUploadCall(value)) {
+            throw new RequestBodyLimitError();
+          }
+        } else {
+          value = JSON.parse(body.text);
+        }
       } catch (error) {
         if (error instanceof RequestBodyLimitError) {
           value = null;

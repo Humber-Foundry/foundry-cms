@@ -139,6 +139,29 @@ export function pageMediaOccurrenceId(
 }
 
 /**
+ * The page a media occurrence id names, or `undefined` when this site has no
+ * such page.
+ *
+ * Two pages claim one occurrence id only when a page below the home page takes
+ * the page id `home`. Nothing in the schema forbids that id, and
+ * `occurrence_home_hero` and `occurrence_home_detail` are the home page's own
+ * reserved pair, so the home page wins that tie. Without this the home page
+ * could not hold a photo at all on such a site. See ADR-0026.
+ */
+export function findPageByMediaOccurrenceId(
+  definition: SiteDefinition,
+  occurrenceId: string,
+): SitePage | undefined {
+  const claiming = definition.pages.filter((page) =>
+    pageMediaSlots.some(
+      (slot) => pageMediaOccurrenceId(page, slot) === occurrenceId,
+    ),
+  );
+  if (claiming.length <= 1) return claiming[0];
+  return claiming.find((page) => page.slug === homePageSlug);
+}
+
+/**
  * The identifier of one page's section slot: the place the visual editor adds,
  * moves and removes sections in.
  *

@@ -36,7 +36,10 @@ export * from "./rich-text";
 
 declare const siteIdBrand: unique symbol;
 
-export { bindSiteMediaOccurrence } from "./media";
+export {
+  bindSiteMediaOccurrence,
+  SiteMediaOccurrencePageError,
+} from "./media";
 export {
   mediaAssetIdFromImageAddress,
   mediaAssetIdFromPublishedPath,

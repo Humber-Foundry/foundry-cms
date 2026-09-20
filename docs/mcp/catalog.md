@@ -116,7 +116,7 @@ Stable error codes:
 | `APPROVAL_STALE` | Approval fingerprint no longer matches | New preview/review |
 | `WRONG_ARTIFACT_KIND` | Email/campaign artifact passed to publication scheduler | No |
 | `PUBLICATION_BUSY` | Another production publication owns the lease | After `retryAfterMs` |
-| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay |
+| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay, unless the tool records a mutation receipt: such a tool stores its refusal against the key it carried and replays it word for word, so that retry needs a new key. The refusal's own sentence says which |
 | `RESULT_UNKNOWN` | Outcome reconciliation in progress | Poll status |
 | `RATE_LIMITED` | Connection/site budget exceeded | After `retryAfterMs` |
 | `CONNECTION_REVOKED` | D1 grant inactive | Owner reconnects |
@@ -142,6 +142,9 @@ Annotations are shown as
 | `foundry.page.delete` | `F / T / T / F` | Remove one page from the draft, as a new immutable revision. |
 | `foundry.page.restructure` | `F / T / T / F` | Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision. |
 | `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their section styles and their editable fields. |
+| `foundry.media.list` | `T / - / - / F` | List the photos this site already holds, oldest first, with the address to use for each one. |
+| `foundry.media.upload` | `F / F / T / F` | Add one photo to this site, sending the picture itself as base64 text. |
+| `foundry.media.place` | `F / T / T / F` | Put one of this site's photos in a page's main or secondary picture slot, as a new immutable revision. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
 | `foundry.blog.create` | `F / F / T / F` | Start a new blog post in the draft, as a new immutable revision. |
 | `foundry.blog.update` | `F / T / T / F` | Rewrite one blog post in the draft, as a new immutable revision. |
@@ -376,6 +379,60 @@ it, the section styles it offers, and the fields `foundry.content.patch` can
 write on it. A field the Site Definition protects is not listed, because
 editing it is always refused.
 
+### Add a photo and put it on a page
+
+`foundry.media.list`, `foundry.media.upload` and `foundry.media.place` all need
+`content.draft`. A photo an agent adds goes into this site's own photo library
+and reaches the public site only when a person approves the draft it sits in.
+See [ADR-0037](../decisions/ADR-0037-mcp-photo-tools.md).
+
+`foundry.media.list` takes a page size and an opaque cursor. It answers with
+each photo's id, this site's own address for it (`/api/media/<assetId>`), its
+file name, its picture type, its size in bytes, its width and height, and when
+it was added. Photos come back in the order the site added them, oldest first,
+so a photo added between two pages never pushes another photo past the reader.
+No photo tool answers with the person or the connection that added a photo, and
+none answers with the picture's bytes.
+
+`foundry.media.upload` takes a file name, the picture itself as base64 text,
+and a retry key. **No tool accepts a web address to fetch**, so the picture
+travels inside the call. A photo must be 4 MiB or smaller: the advertised
+schema bounds the base64 text, and a photo a little over the limit is refused
+with the named reason `media_too_large`, which says to send a smaller copy.
+The picture type and size are read from the bytes themselves, never from what
+the caller claimed, and the picture must be a JPEG, PNG or WebP; anything else
+is refused with `media_not_an_image`. Any other rule the media library keeps is
+refused with `media_upload_refused`. An agent never chooses a photo's id: the
+server mints it from the retry key, so sending the same request twice leaves
+one photo. The result reports the photo exactly as the list does.
+
+One JSON-RPC request may be larger than the ordinary 256 KiB only when it is a
+`foundry.media.upload` call from a connection that holds `content.draft`. Every
+other request, and every request from a connection without that permission, is
+refused above 256 KiB.
+
+`foundry.media.place` takes the draft, the revision the agent read, a page id,
+a slot (`hero` or `detail`), a photo id and a retry key. It puts that photo in
+that page's slot as a new immutable revision, and reports the slot as
+`occurrenceId`. A page the agent made inside the same draft can take a photo,
+because the slot is worked out from the draft's own page list. Placing on a
+page this draft does not hold is refused with `media_page_not_found`, and
+naming a photo this site does not hold with `media_asset_not_found`. A slot
+another change moved first is refused with `media_place_conflict`, and any
+other rule the media library keeps with `media_place_refused`. A refusal that
+names a broken rule carries its `reason`; a stale revision and a busy photo
+library carry their `code` alone, because the code is the whole answer. A
+placement stores its refusal against the retry key it carried and replays that
+refusal word for word, so retrying a busy photo library here needs a new retry
+key, and the refusal says so. An upload stores no such receipt and mints the
+photo id from the retry key, so its own retry keeps the same key and this site
+keeps one photo.
+
+A photo goes into a **post** through the post's own fields rather than through
+this tool: `foundry.blog.create` and `foundry.blog.update` take `mainImage`,
+`seo.shareImage` and body pictures as media paths, and every one of them must
+be a photo the library holds.
+
 ### Write a blog post
 
 ```json
@@ -421,11 +478,11 @@ one post. The result reports it as `postId`.
 Every picture in a post — the header image, the share image and every picture
 in the body — has to be one of this site's own photos, named by its media path
 `/api/media/<assetId>`, and the media library has to hold it. The tool looks
-each one up. An agent can use a photo the library already holds; it cannot add
-one, and it cannot point the site at a picture somewhere else. Any other
-picture is refused with the named reason `blog_media_not_in_library`, and the
-refusal names the field rather than repeating the address. Uploading a photo is
-not an MCP tool.
+each one up. An agent can use a photo the library already holds, and can add
+one first with `foundry.media.upload`; it cannot point the site at a picture
+somewhere else. Any other picture is refused with the named reason
+`blog_media_not_in_library`, and the refusal names the field rather than
+repeating the address.
 
 Other refusals carry the blog's own named `reason`: `slug_already_exists`,
 `post_not_found`, `post_already_exists`, `schema_invalid`, and
