@@ -204,6 +204,11 @@ export function NewsletterSignupForm({
     }
   }
 
+  // Nothing can be typed until the server has said signup works. A field that
+  // looks ready but does nothing is worse than a field that waits.
+  const busy =
+    previewOnly || status.state === "loading" || status.state === "sending";
+
   return (
     <div className="newsletter-signup">
       <h2 className="newsletter-signup-title" id={titleId}>
@@ -238,12 +243,12 @@ export function NewsletterSignupForm({
               value={email}
               aria-describedby={statusId}
               onChange={(event) => setEmail(event.target.value)}
-              disabled={status.state === "sending" || previewOnly}
+              disabled={busy}
             />
             <button
               className="newsletter-signup-button"
               type="submit"
-              disabled={status.state === "sending" || previewOnly}
+              disabled={busy}
             >
               {status.state === "sending" ? "Sending…" : actionLabel}
             </button>

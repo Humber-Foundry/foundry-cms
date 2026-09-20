@@ -168,15 +168,19 @@ export function createD1NewsletterSignupStore(
     },
 
     async expirePendingSignups({ siteId, now }) {
+      // Counted with RETURNING rather than with the reported change count.
+      // Settling a request fires a trigger that deletes its confirmation job,
+      // and that deleted row is counted as a change too.
       const result = await database
         .prepare(
           `UPDATE newsletter_signup_requests
            SET state = 'expired', email = NULL, settled_at = ?2
-           WHERE site_id = ?1 AND state = 'pending' AND expires_at <= ?2`,
+           WHERE site_id = ?1 AND state = 'pending' AND expires_at <= ?2
+           RETURNING id`,
         )
         .bind(siteId, now)
-        .run();
-      return { expired: result.meta.changes ?? 0 };
+        .all<{ id: string }>();
+      return { expired: result.results.length };
     },
 
     async claimDueConfirmationJobs({

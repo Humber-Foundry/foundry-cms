@@ -667,11 +667,13 @@
   line-height: 1.08;
 }
 
+/* One size for every word below the heading. Colour separates the lead
+   paragraph and the consent sentence from the field label. */
 .newsletter-signup-body {
   max-width: 36rem;
   margin: 0 0 2rem;
   color: var(--ink-soft);
-  font-size: clamp(1rem, 1.5vw, 1.18rem);
+  font-size: 1rem;
   line-height: 1.5;
 }
 
