@@ -460,3 +460,247 @@ describe("deletePage", () => {
     ).toBeUndefined();
   });
 });
+
+describe("restructurePage", () => {
+  /** A draft with one page of its own, built from a starting point. */
+  async function draftWithPage() {
+    const application = await openDraft();
+    const created = await createPage(application, {
+      startingLayout: "what_you_offer",
+    });
+    return { application, pageId: created.pageId, baseRevision: 1 };
+  }
+
+  function restructure(
+    application: Awaited<ReturnType<typeof openDraft>>,
+    input: Partial<
+      Parameters<(typeof application)["commands"]["restructurePage"]>[0]
+    >,
+  ) {
+    return application.commands.restructurePage({
+      ...commandInputs,
+      baseRevision: 1,
+      idempotencyKey: "restructure-the-page-01",
+      pageId: "page_missing",
+      operations: [],
+      ...input,
+    });
+  }
+
+  const sectionTypes = (definition: unknown, pageId: string) =>
+    findPageById(definition as never, pageId)!.sections.map(
+      ({ type }) => type,
+    );
+
+  it("adds a section to the page and answers with the page it changed", async () => {
+    const { application, pageId } = await draftWithPage();
+    const result = await restructure(application, {
+      pageId,
+      operations: [{ op: "add", sectionType: "proof", position: 1 }],
+    });
+    expect(result.pageId).toBe(pageId);
+    expect(result.replayed).toBe(false);
+    expect(result.revision.revision).toBe(2);
+    expect(sectionTypes(result.revision.definition, pageId)).toEqual([
+      "hero",
+      "proof",
+      "services",
+      "callToAction",
+    ]);
+  });
+
+  it("removes, moves and copies sections in one request", async () => {
+    const { application, pageId } = await draftWithPage();
+    const result = await restructure(application, {
+      pageId,
+      operations: [
+        { op: "remove", sectionId: `${pageId}_services` },
+        { op: "duplicate", sectionId: `${pageId}_hero` },
+        { op: "move", sectionId: `${pageId}_call_to_action`, position: 0 },
+      ],
+    });
+    expect(sectionTypes(result.revision.definition, pageId)).toEqual([
+      "callToAction",
+      "hero",
+      "hero",
+    ]);
+  });
+
+  it("gives a section the page already held the arrangement that was chosen", async () => {
+    const { application, pageId } = await draftWithPage();
+    const result = await restructure(application, {
+      pageId,
+      operations: [
+        {
+          op: "set_variant",
+          sectionId: `${pageId}_hero`,
+          variant: "focused",
+        },
+      ],
+    });
+    const section = findPageById(result.revision.definition, pageId)!
+      .sections[0]!;
+    expect(section.type === "hero" && section.variant).toBe("focused");
+  });
+
+  it("gives a section it adds the arrangement that was chosen", async () => {
+    const { application, pageId } = await draftWithPage();
+    const result = await restructure(application, {
+      pageId,
+      operations: [
+        {
+          op: "add",
+          sectionType: "proof",
+          position: 3,
+          variant: "panel",
+        },
+      ],
+    });
+    const section = findPageById(result.revision.definition, pageId)!
+      .sections[3]!;
+    expect(section.type === "proof" && section.variant).toBe("panel");
+  });
+
+  it("writes one new revision only, however many operations it carries", async () => {
+    const { application, pageId } = await draftWithPage();
+    const result = await restructure(application, {
+      pageId,
+      operations: [
+        { op: "add", sectionType: "proof", position: 3 },
+        { op: "move", sectionId: `${pageId}_proof`, position: 0 },
+      ],
+    });
+    expect(result.revision.revision).toBe(2);
+  });
+
+  it("changes nothing on any other page", async () => {
+    const { application, pageId } = await draftWithPage();
+    const before = homePage(
+      (await application.queries.getCurrent()).definition,
+    );
+    const result = await restructure(application, {
+      pageId,
+      operations: [{ op: "remove", sectionId: `${pageId}_services` }],
+    });
+    expect(homePage(result.revision.definition)).toEqual(before);
+  });
+
+  it("makes no second change when the same request is sent twice", async () => {
+    const { application, pageId } = await draftWithPage();
+    const first = await restructure(application, {
+      pageId,
+      operations: [{ op: "add", sectionType: "proof", position: 1 }],
+    });
+    const second = await restructure(application, {
+      pageId,
+      operations: [{ op: "add", sectionType: "proof", position: 1 }],
+    });
+    expect(second.replayed).toBe(true);
+    expect(second.revision.revision).toBe(first.revision.revision);
+  });
+
+  it("refuses a page that is not in the draft", async () => {
+    const { application } = await draftWithPage();
+    const error = await refusal(() =>
+      restructure(application, {
+        pageId: "page_aaaaaaaaaaaaaaaaaaaa",
+        operations: [{ op: "add", sectionType: "proof", position: 0 }],
+      }),
+    );
+    expect(error).toBeInstanceOf(ContentPageOperationError);
+    expect((error as ContentPageOperationError).code).toBe("page_not_found");
+  });
+
+  it("refuses a section that is not on the page, with its own reason", async () => {
+    const { application, pageId } = await draftWithPage();
+    const error = await refusal(() =>
+      restructure(application, {
+        pageId,
+        operations: [{ op: "remove", sectionId: "not_a_section" }],
+      }),
+    );
+    expect((error as ContentPageOperationError).code).toBe(
+      "page_section_not_found",
+    );
+  });
+
+  it("refuses an arrangement the section type does not offer", async () => {
+    const { application, pageId } = await draftWithPage();
+    const error = await refusal(() =>
+      restructure(application, {
+        pageId,
+        operations: [
+          {
+            op: "set_variant",
+            sectionId: `${pageId}_hero`,
+            variant: "cards",
+          },
+        ],
+      }),
+    );
+    expect((error as ContentPageOperationError).code).toBe(
+      "page_section_variant_unknown",
+    );
+  });
+
+  it("refuses to leave a page with no sections at all", async () => {
+    const { application, pageId } = await draftWithPage();
+    const error = await refusal(() =>
+      restructure(application, {
+        pageId,
+        operations: [
+          { op: "remove", sectionId: `${pageId}_hero` },
+          { op: "remove", sectionId: `${pageId}_services` },
+          { op: "remove", sectionId: `${pageId}_call_to_action` },
+        ],
+      }),
+    );
+    expect(error).not.toBeInstanceOf(ContentPageOperationError);
+    expect(Object.values(error.fields).join(" ")).toContain("components");
+  });
+
+  it("refuses to remove a section a new button on the page links to", async () => {
+    // A new opening section links to the page's own next-step section, so
+    // taking that section away in the same request would leave a dead button.
+    const { application, pageId } = await draftWithPage();
+    const error = await refusal(() =>
+      restructure(application, {
+        pageId,
+        operations: [
+          { op: "add", sectionType: "hero", position: 0 },
+          { op: "remove", sectionId: `${pageId}_call_to_action` },
+        ],
+      }),
+    );
+    expect(Object.values(error.fields).join(" ")).toContain(
+      "referenced by protected page scaffolding",
+    );
+  });
+
+  it("refuses a request that read an older revision", async () => {
+    const { application, pageId } = await draftWithPage();
+    await restructure(application, {
+      pageId,
+      operations: [{ op: "add", sectionType: "proof", position: 0 }],
+    });
+    await expect(
+      restructure(application, {
+        pageId,
+        baseRevision: 1,
+        idempotencyKey: "restructure-the-page-02",
+        operations: [{ op: "add", sectionType: "proof", position: 0 }],
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+  });
+
+  it("refuses someone who is not this draft's editor", async () => {
+    const { application, pageId } = await draftWithPage();
+    await expect(
+      restructure(application, {
+        pageId,
+        actorId: outsiderActorId,
+        operations: [{ op: "add", sectionType: "proof", position: 0 }],
+      }),
+    ).rejects.toBeInstanceOf(ContentWorkspaceAccessError);
+  });
+});

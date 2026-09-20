@@ -20,12 +20,15 @@ import {
   findPageByCompositionSlotId,
   homePage,
   isSiteDefinitionWithPageComponents,
+  pageCompositionSlotId,
   pageFieldPath,
+  planPageSectionRestructure,
   sectionVariantFieldPath,
   type BlogPost,
   type BlogPostId,
   type PageComposition,
   type PageComponentRegistry,
+  type PageSectionOperation,
   type SiteDefinition,
   type SiteDefinitionEdit,
   type SitePage,
@@ -284,6 +287,21 @@ export type DuplicatePageCommand = PageMutationCommand &
 
 export type DeletePageCommand = PageMutationCommand &
   Readonly<{ pageId: string }>;
+
+/**
+ * Change which sections one page holds, in which order, and how they are
+ * arranged.
+ *
+ * It takes the same five things every other page operation takes, plus the
+ * page and the list of section operations. The operations themselves are
+ * planned by `planPageSectionRestructure` and written through the same page
+ * composition boundary the editor writes through. See ADR-0035.
+ */
+export type RestructurePageCommand = PageMutationCommand &
+  Readonly<{
+    pageId: string;
+    operations: ReadonlyArray<PageSectionOperation>;
+  }>;
 
 /**
  * The page id a create or a duplicate mints for this request.
@@ -1061,6 +1079,62 @@ export function createContentRevisionApplication({
     }
   }
 
+  /**
+   * One base definition with every submitted page composition written onto its
+   * own page, and then every field edit applied.
+   *
+   * This is the one write path for a structure change. The dashboard reaches
+   * it through `save`, and `restructurePage` reaches it directly, so both are
+   * refused by `applyPageComposition` and `applySiteDefinitionEdits` for the
+   * same reasons and in the same words.
+   *
+   * Each composition names its page through its slot id, so a save that
+   * carries two pages writes each one onto its own page and cannot move a
+   * section from one page to another.
+   */
+  function composedAndEditedDefinition(
+    baseDefinition: SiteDefinition,
+    compositions: ReadonlyArray<PageComposition>,
+    edits: ReadonlyArray<SiteDefinitionEdit>,
+  ): SiteDefinition {
+    let composedDefinition = baseDefinition;
+    for (const composition of compositions) {
+      const page = findPageByCompositionSlotId(
+        composedDefinition,
+        composition.slotId,
+      );
+      if (page === undefined) {
+        // Either this site has no such page, or two pages claim the slot and
+        // there is no single right answer. Both are refused, because writing
+        // the sections onto a guessed page would change a page the owner never
+        // edited.
+        throw new ContentRevisionValidationError({
+          [composition.slotId]:
+            "This site has no one page for these sections.",
+        });
+      }
+      const composed = applyPageComposition(
+        composedDefinition,
+        page,
+        compositionWithStoredSectionStyles(page, composition, edits),
+        pageComponents,
+      );
+      if (!composed.ok) {
+        throw new ContentRevisionValidationError(composed.errors);
+      }
+      composedDefinition = composed.definition;
+    }
+    const edited = applySiteDefinitionEdits(
+      composedDefinition,
+      edits,
+      isDefinition,
+    );
+    if (!edited.ok) {
+      throw new ContentRevisionValidationError(edited.errors);
+    }
+    return edited.definition;
+  }
+
   async function saveDefinitionMutation(command: SaveContentRevisionCommand) {
     if (command.actorId !== actorId) {
       throw new ContentWorkspaceAccessError();
@@ -1092,51 +1166,12 @@ export function createContentRevisionApplication({
             ? {}
             : { compositions: command.compositions }),
         },
-        mutate(baseDefinition) {
-          // Each composition names its page through its slot id, so a save
-          // that carries two pages writes each one onto its own page and
-          // cannot move a section from one page to another.
-          let composedDefinition = baseDefinition;
-          for (const composition of command.compositions ?? []) {
-            const page = findPageByCompositionSlotId(
-              composedDefinition,
-              composition.slotId,
-            );
-            if (page === undefined) {
-              // Either this site has no such page, or two pages claim the
-              // slot and there is no single right answer. Both are refused,
-              // because writing the sections onto a guessed page would change
-              // a page the owner never edited.
-              throw new ContentRevisionValidationError({
-                [composition.slotId]:
-                  "This site has no one page for these sections.",
-              });
-            }
-            const composed = applyPageComposition(
-              composedDefinition,
-              page,
-              compositionWithStoredSectionStyles(
-                page,
-                composition,
-                command.edits,
-              ),
-              pageComponents,
-            );
-            if (!composed.ok) {
-              throw new ContentRevisionValidationError(composed.errors);
-            }
-            composedDefinition = composed.definition;
-          }
-          const edited = applySiteDefinitionEdits(
-            composedDefinition,
+        mutate: (baseDefinition) =>
+          composedAndEditedDefinition(
+            baseDefinition,
+            command.compositions ?? [],
             command.edits,
-            isDefinition,
-          );
-          if (!edited.ok) {
-            throw new ContentRevisionValidationError(edited.errors);
-          }
-          return edited.definition;
-        },
+          ),
         ...(blogPostIds.length === 0
           ? {}
           : {
@@ -1449,6 +1484,45 @@ export function createContentRevisionApplication({
             pageId: command.pageId,
           },
           (base) => removePageFromDefinition(base, command.pageId, isDefinition),
+        );
+      },
+      async restructurePage(
+        command: RestructurePageCommand,
+      ): Promise<PageMutationResult> {
+        await store.requireAccess(actorId);
+        assertMutationCommand(command);
+        return runPageMutation(
+          command,
+          command.pageId,
+          {
+            ...pageRequestIdentity("restructure_page", command),
+            pageId: command.pageId,
+            operations: command.operations,
+          },
+          (base) => {
+            const page = findPageById(base, command.pageId);
+            if (page === undefined) {
+              throw new PageLifecycleError("page_not_found", {
+                pageId: "That page is not in this draft any more.",
+              });
+            }
+            const plan = planPageSectionRestructure(
+              base,
+              page,
+              command.operations,
+              pageComponents,
+            );
+            return composedAndEditedDefinition(
+              base,
+              [{ slotId: pageCompositionSlotId(page), components: plan.sections }],
+              Object.entries(plan.variantChanges).map(
+                ([sectionId, variant]) => ({
+                  path: pageFieldPath(page, sectionVariantFieldPath(sectionId)),
+                  value: variant,
+                }),
+              ),
+            );
+          },
         );
       },
       async createBlogPost(command: CreateBlogPostCommand) {

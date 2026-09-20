@@ -1139,7 +1139,10 @@ describe("production MCP HTTP runtime", () => {
       };
     };
     expect(remainingToolsBody.result).toEqual({
-      tools: [expect.objectContaining({ name: "foundry.content.get" })],
+      tools: [
+        expect.objectContaining({ name: "foundry.content.get" }),
+        expect.objectContaining({ name: "foundry.section.list" }),
+      ],
     });
     expect(JSON.stringify(toolsBody)).not.toMatch(
       /subscriber|recipient|bulk.send|human.role/iu,
@@ -2392,6 +2395,7 @@ describe("production MCP HTTP runtime", () => {
         kind: "page",
         contentId: homePage(referenceSiteDefinition).id,
       },
+      "foundry.section.list": {},
     } as const;
     for (const descriptor of descriptors) {
       const input = validInputs[descriptor.name as keyof typeof validInputs];

@@ -2,6 +2,7 @@ import {
   designContract,
   listEditableSiteFields,
   serializeRichTextDocument,
+  type PageSectionOperation,
   type RichTextDocument,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -309,6 +310,35 @@ export type McpDuplicatePageInput = McpPageMutationInput &
 export type McpDeletePageInput = McpPageMutationInput &
   Readonly<{ pageId: string }>;
 
+export type McpRestructurePageInput = McpPageMutationInput &
+  Readonly<{
+    pageId: string;
+    operations: ReadonlyArray<PageSectionOperation>;
+  }>;
+
+/**
+ * The draft scopes one restructure needs.
+ *
+ * Changing which sections a page holds is a content change, so every
+ * restructure needs the content draft scope. Naming an arrangement is choosing
+ * a design value, so a request that names one needs the design draft scope as
+ * well. The request is read for this before anything is loaded, so an agent
+ * that lacks the scope is told which scope it lacks rather than being refused
+ * afterwards. See ADR-0035.
+ */
+export function mcpRestructureScopes(
+  operations: ReadonlyArray<PageSectionOperation>,
+): ReadonlyArray<string> {
+  const namesAnArrangement = operations.some(
+    (operation) =>
+      operation.op === "set_variant" ||
+      (operation.op === "add" && operation.variant !== undefined),
+  );
+  return namesAnArrangement
+    ? [mcpContentDraftScope, mcpDesignDraftScope]
+    : [mcpContentDraftScope];
+}
+
 /**
  * The named reason for a page refusal the draft raised without a page
  * lifecycle code of its own. A rename is two ordinary field edits, so the
@@ -316,6 +346,14 @@ export type McpDeletePageInput = McpPageMutationInput &
  * reads those sentences in the message and this word in `reason`.
  */
 const pageFieldsRefusedReason = "page_fields_refused";
+
+/**
+ * The named reason for a restructure the page composition boundary refused
+ * without a page lifecycle code of its own, such as a section list that is
+ * empty or a section another section's button still links to. The message
+ * carries the boundary's own sentences.
+ */
+const pageSectionsRefusedReason = "page_sections_refused";
 
 /**
  * The three named reasons a content edit is refused for: the draft has no
@@ -328,13 +366,23 @@ const contentFieldFormatReason = "content_field_format_mismatch";
 const designFieldNotContentReason = "design_field_not_content";
 
 /**
+ * The two named reasons a design change is refused for: the draft has no
+ * design setting at that path, or the setting does not offer that value.
+ */
+const designSettingNotFoundReason = "design_setting_not_found";
+const designValueNotRegisteredReason = "design_value_not_registered";
+
+/**
  * Turn a refused page operation into the tool error an agent acts on.
  *
  * The sentences come from the draft itself, which is the one place the page
  * rules are written (ADR-0033), so an agent and a site owner read the same
  * words. `reason` carries the stable code a program branches on.
  */
-function pageRefusal(error: ContentRevisionValidationError): McpReadError {
+function pageRefusal(
+  error: ContentRevisionValidationError,
+  fallbackReason: string = pageFieldsRefusedReason,
+): McpReadError {
   const sentences = Object.values(error.fields).join(" ");
   return new McpReadError(
     "VALIDATION_FAILED",
@@ -343,7 +391,7 @@ function pageRefusal(error: ContentRevisionValidationError): McpReadError {
       reason:
         error instanceof ContentPageOperationError
           ? error.code
-          : pageFieldsRefusedReason,
+          : fallbackReason,
     },
   );
 }
@@ -448,12 +496,21 @@ function designEdits(
     if (
       field === undefined ||
       field.format !== "plainText" ||
-      field.values === undefined ||
-      !field.values.includes(operation.value)
+      field.values === undefined
     ) {
+      // The draft's own field list is the answer, so a section on a page the
+      // agent made in this draft can have its arrangement chosen (ADR-0035).
       throw new McpReadError(
         "VALIDATION_FAILED",
-        "The design command is outside the registered design contract.",
+        `This draft has no design setting at ${path}.`,
+        { reason: designSettingNotFoundReason },
+      );
+    }
+    if (!field.values.includes(operation.value)) {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        `The design setting ${path} does not offer the value ${operation.value}.`,
+        { reason: designValueNotRegisteredReason },
       );
     }
     return { path, value: operation.value };
@@ -532,11 +589,15 @@ export function createMcpDraftApplication({
     context,
     run,
     replayedPageId,
+    requiredScopes = [mcpContentDraftScope],
+    refusalReason = pageFieldsRefusedReason,
   }: {
     principal: McpConnectionPrincipal;
     operation: string;
     input: Input;
     context: McpExecutionContext;
+    requiredScopes?: ReadonlyArray<string>;
+    refusalReason?: string;
     run(
       application: ContentRevisionApplication,
       command: PageMutationCommand,
@@ -550,7 +611,7 @@ export function createMcpDraftApplication({
       principal,
       operation,
       auditInput: input,
-      requiredScopes: [mcpContentDraftScope],
+      requiredScopes,
       context,
       joinedAudit: true,
       recordJoinedFailure: recordJoinedFailure(
@@ -616,7 +677,7 @@ export function createMcpDraftApplication({
           );
         } catch (error) {
           if (error instanceof ContentRevisionValidationError) {
-            throw pageRefusal(error);
+            throw pageRefusal(error, refusalReason);
           }
           if (
             error instanceof ContentRevisionConflictError ||
@@ -1110,6 +1171,27 @@ export function createMcpDraftApplication({
           application.commands.deletePage({
             ...command,
             pageId: input.pageId,
+          }),
+        replayedPageId: async () => input.pageId,
+      });
+    },
+    restructurePage(
+      principal: McpConnectionPrincipal,
+      input: McpRestructurePageInput,
+      context: McpExecutionContext,
+    ) {
+      return pageMutation({
+        principal,
+        operation: "foundry.page.restructure",
+        input,
+        context,
+        requiredScopes: mcpRestructureScopes(input.operations),
+        refusalReason: pageSectionsRefusedReason,
+        run: (application, command) =>
+          application.commands.restructurePage({
+            ...command,
+            pageId: input.pageId,
+            operations: input.operations,
           }),
         replayedPageId: async () => input.pageId,
       });

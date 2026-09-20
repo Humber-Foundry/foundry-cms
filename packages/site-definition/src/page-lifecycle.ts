@@ -25,6 +25,7 @@ import {
 } from "./pages";
 import { findPageHrefReferences, parseSiteHref } from "./site-href";
 import { pagePath } from "./seo";
+import { designContract } from "./design-tokens";
 
 /**
  * Why a page operation was refused.
@@ -65,6 +66,10 @@ export type PageLifecycleErrorCode =
   | "page_starting_layout_unknown"
   | "page_is_home"
   | "page_still_linked"
+  | "page_section_not_found"
+  | "page_section_type_unknown"
+  | "page_section_position_invalid"
+  | "page_section_variant_unknown"
   | "schema_invalid";
 
 /** One link that still points at a page, named the way its owner reads it. */
@@ -270,7 +275,7 @@ function sectionIdWord(componentKey: string): string {
  * the same path. `taken` collects the ids already given out, so two sections of
  * the same kind on one page get `..._hero` and `..._hero_2`.
  */
-function freshSectionId(
+export function freshSectionId(
   pageId: string,
   componentKey: string,
   taken: Set<string>,
@@ -652,4 +657,186 @@ export function pageDeleteBlockedMessage(
     pageLinkReferenceName(definition, reference),
   );
   return `${page.title} at ${pagePath(page)} is still linked from: ${names.join(", ")}. Change those links first, then delete the page.`;
+}
+
+/**
+ * One change to the sections of one page.
+ *
+ * The five operations are the whole vocabulary: put a registered section on
+ * the page, take one off, move one, copy one, and choose the arrangement a
+ * section is drawn in. There is no operation that writes a section's words,
+ * because a section's words are editable fields and are written the same way
+ * every other field is.
+ *
+ * `position` is a place in the section list as it stands at that step, counted
+ * from zero. Operations are carried out in the order they are given, so a
+ * caller can add a section and then move it in one request.
+ */
+export type PageSectionOperation =
+  | Readonly<{
+      op: "add";
+      sectionType: string;
+      position: number;
+      variant?: string;
+    }>
+  | Readonly<{ op: "remove"; sectionId: string }>
+  | Readonly<{ op: "move"; sectionId: string; position: number }>
+  | Readonly<{ op: "duplicate"; sectionId: string }>
+  | Readonly<{ op: "set_variant"; sectionId: string; variant: string }>;
+
+/**
+ * What one page will hold after a restructure, and which of the sections it
+ * already held were given a different arrangement.
+ *
+ * The two travel apart because they are written by two different rules. The
+ * section list is a structure change, which the page composition boundary
+ * checks. A variant on a section the page already held is a design value, which
+ * the section's own editable field checks. See ADR-0035.
+ */
+export type PageRestructurePlan = Readonly<{
+  sections: ReadonlyArray<PageSection>;
+  variantChanges: Readonly<Record<string, string>>;
+}>;
+
+/** The arrangements this section type offers, or none for a registered one. */
+function sectionVariantValues(
+  section: PageSection,
+): ReadonlyArray<string> {
+  return section.type === "registered"
+    ? []
+    : designContract.variants[section.type].values;
+}
+
+function withSectionVariant(
+  section: PageSection,
+  variant: string,
+): PageSection {
+  if (!sectionVariantValues(section).includes(variant)) {
+    throw new PageLifecycleError("page_section_variant_unknown", {
+      variant: "That arrangement is not offered for this kind of section.",
+    });
+  }
+  return { ...section, variant } as PageSection;
+}
+
+/**
+ * The sections one page will hold after a list of operations, without writing
+ * anything.
+ *
+ * This is the one place the section operations are written. It builds a new
+ * section only through `createDefaultPageSection` and copies one only through
+ * `remapPageSectionNestedIds`, so a section this plan produces is the same
+ * section the visual editor produces. Whether the result is allowed is decided
+ * afterwards by `applyPageComposition`, which is the boundary the dashboard
+ * goes through as well; nothing here repeats one of its rules.
+ *
+ * A new section is scaffolded against the page as it stands before the whole
+ * request, which is the page `applyPageComposition` compares the scaffold
+ * against.
+ */
+export function planPageSectionRestructure(
+  definition: SiteDefinition,
+  page: SitePage,
+  operations: ReadonlyArray<PageSectionOperation>,
+  registry: PageComponentRegistry = foundationPageComponentRegistry,
+): PageRestructurePlan {
+  const taken = new Set(page.sections.map(({ id }) => id));
+  const sections: PageSection[] = [...page.sections];
+  const indexOf = (sectionId: string): number => {
+    const index = sections.findIndex(({ id }) => id === sectionId);
+    if (index < 0) {
+      throw new PageLifecycleError("page_section_not_found", {
+        sectionId: "That section is not on this page.",
+      });
+    }
+    return index;
+  };
+  const requirePosition = (position: number, highest: number): void => {
+    if (
+      !Number.isSafeInteger(position) ||
+      position < 0 ||
+      position > highest
+    ) {
+      throw new PageLifecycleError("page_section_position_invalid", {
+        position: `Give a position between 0 and ${Math.max(highest, 0)}.`,
+      });
+    }
+  };
+  for (const operation of operations) {
+    if (operation.op === "add") {
+      if (!Object.hasOwn(registry.components, operation.sectionType)) {
+        throw new PageLifecycleError("page_section_type_unknown", {
+          sectionType: "That kind of section is not registered for this site.",
+        });
+      }
+      requirePosition(operation.position, sections.length);
+      const built = createDefaultPageSection(
+        operation.sectionType,
+        freshSectionId(page.id, operation.sectionType, taken),
+        { definition, page },
+        registry,
+      );
+      sections.splice(
+        operation.position,
+        0,
+        operation.variant === undefined
+          ? built
+          : withSectionVariant(built, operation.variant),
+      );
+      continue;
+    }
+    if (operation.op === "remove") {
+      sections.splice(indexOf(operation.sectionId), 1);
+      continue;
+    }
+    if (operation.op === "move") {
+      const index = indexOf(operation.sectionId);
+      requirePosition(operation.position, sections.length - 1);
+      const [moved] = sections.splice(index, 1);
+      sections.splice(operation.position, 0, moved!);
+      continue;
+    }
+    if (operation.op === "duplicate") {
+      // The copy goes straight after the section it came from, the same way a
+      // duplicated page goes straight after the page it came from.
+      const index = indexOf(operation.sectionId);
+      const source = sections[index]!;
+      const copy = remapPageSectionNestedIds({
+        ...structuredClone(source),
+        id: freshSectionId(page.id, registry.keyFor(source), taken),
+      });
+      sections.splice(index + 1, 0, copy);
+      continue;
+    }
+    const index = indexOf(operation.sectionId);
+    sections[index] = withSectionVariant(
+      sections[index]!,
+      operation.variant,
+    );
+  }
+  // A variant on a section the page already held is a design value of a record
+  // both revisions hold, so it is written as an edit to that section's own
+  // field rather than through the composition. A section this request added
+  // carries its variant in the composition, because there is nothing to
+  // compare it with. See ADR-0035.
+  const existingById = new Map(
+    page.sections.map((section) => [section.id, section]),
+  );
+  const variantChanges: Record<string, string> = {};
+  for (const section of sections) {
+    const existing = existingById.get(section.id);
+    if (
+      existing === undefined ||
+      existing.type === "registered" ||
+      section.type === "registered" ||
+      existing.variant === section.variant
+    ) {
+      continue;
+    }
+    variantChanges[section.id] = section.variant;
+  }
+  return Object.freeze({
+    sections: Object.freeze(sections),
+    variantChanges: Object.freeze(variantChanges),
+  });
 }

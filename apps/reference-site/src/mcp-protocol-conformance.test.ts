@@ -115,6 +115,23 @@ const results: Record<string, unknown> = {
   "foundry.page.rename": { ...pageResult, pageId },
   "foundry.page.duplicate": { ...pageResult, pageId },
   "foundry.page.delete": { ...pageResult, pageId },
+  "foundry.page.restructure": { ...pageResult, pageId },
+  "foundry.section.list": {
+    sections: [
+      {
+        sectionType: "hero",
+        label: "Hero",
+        variants: [
+          {
+            value: "editorial",
+            label: "Left aligned",
+            description: "Title and buttons sit against the left margin.",
+          },
+        ],
+        fields: [{ name: "title", label: "Title", format: "plainText" }],
+      },
+    ],
+  },
   "foundry.design.patch": {
     ...draftResult,
     replayed: false,
@@ -262,6 +279,14 @@ const inputs: Record<string, unknown> = {
     idempotencyKey,
     pageId,
   },
+  "foundry.page.restructure": {
+    workspaceId,
+    expectedRevision: 1,
+    idempotencyKey,
+    pageId,
+    operations: [{ op: "add", sectionType: "proof", position: 0 }],
+  },
+  "foundry.section.list": {},
   "foundry.design.patch": {
     workspaceId,
     expectedRevision: 0,
@@ -317,7 +342,7 @@ const inputs: Record<string, unknown> = {
 };
 
 describe("MCP protocol-wrapper emission conformance", () => {
-  it("independently validates protocol-wrapper success and business-error emissions for all 22 descriptors", async () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 24 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {
@@ -339,6 +364,8 @@ describe("MCP protocol-wrapper emission conformance", () => {
       renamePage: emit("foundry.page.rename"),
       duplicatePage: emit("foundry.page.duplicate"),
       deletePage: emit("foundry.page.delete"),
+      restructurePage: emit("foundry.page.restructure"),
+      listSectionTypes: emit("foundry.section.list"),
       patchDesign: emit("foundry.design.patch"),
       preparePreview: emit("foundry.preview.prepare"),
       requestPublication: emit("foundry.publication.request"),

@@ -74,12 +74,13 @@ address as `registration_endpoint` in its authorization-server metadata.
 Before enabling connections, the installation operator must:
 
 - apply every D1 migration in numeric order through
-  `0030_mcp_page_operation_receipts.sql`. The connection surface itself is
+  `0031_mcp_page_restructure_receipts.sql`. The connection surface itself is
   defined by `0017_mcp_readonly_connections.sql`, `0018_mcp_draft_scopes.sql`,
   `0019_mcp_preview_artifacts.sql`, `0020_mcp_mutation_receipts.sql`,
   `0022_blog_post_scheduling_archive.sql`,
-  `0024_mcp_publication_scopes.sql`, `0027_mcp_registered_clients.sql` and
-  `0030_mcp_page_operation_receipts.sql`, but the sequence is cumulative and no
+  `0024_mcp_publication_scopes.sql`, `0027_mcp_registered_clients.sql`,
+  `0030_mcp_page_operation_receipts.sql` and
+  `0031_mcp_page_restructure_receipts.sql`, but the sequence is cumulative and no
   migration in the range may be skipped;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
   random characters; and
