@@ -1,18 +1,31 @@
-import type { SiteDefinition } from "@humber-foundry/site-definition";
-
-function navigationHref(homeHref: string, href: string): string {
-  return href.startsWith("#") ? `${homeHref}${href}` : href;
-}
+import {
+  defaultPageHref,
+  resolveSiteHref,
+  type PageHrefBuilder,
+  type SiteDefinition,
+  type SitePage,
+} from "@humber-foundry/site-definition";
 
 export function SiteHeader({
   definition,
   homeHref = "/",
   blogHref = "/blog",
+  currentPage = null,
+  pageHref,
 }: {
   definition: SiteDefinition;
   homeHref?: string;
   blogHref?: string;
+  /** The page this route renders, or `null` on a route with no page, such as the Blog. */
+  currentPage?: SitePage | null;
+  /**
+   * Builds one page's public path, for a navigation link that targets a page
+   * other than the home page. Defaults to `pagePath`. `homeHref` still wins
+   * for the home page itself, so a preview route's own home address is kept.
+   */
+  pageHref?: PageHrefBuilder;
 }) {
+  const resolvePageHref = defaultPageHref(homeHref, pageHref);
   return (
     <header className="lh-site-header">
       <a className="lh-skip-link" href="#main-content">Skip to main content</a>
@@ -21,7 +34,14 @@ export function SiteHeader({
       </a>
       <nav aria-label="Primary navigation">
         {definition.site.navigation.map((item) => (
-          <a key={item.id} href={navigationHref(homeHref, item.href)}>
+          <a
+            key={item.id}
+            href={resolveSiteHref(definition, item.href, {
+              currentPage,
+              pageHref: resolvePageHref,
+              blogHref,
+            })}
+          >
             {item.label}
           </a>
         ))}

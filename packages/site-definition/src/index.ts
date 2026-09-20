@@ -26,6 +26,7 @@ import {
   pageSlugPattern,
   reservedPageSlugs,
 } from "./pages";
+import { everySiteLink, siteHrefPageId } from "./site-href";
 
 export * from "./rich-text";
 
@@ -55,7 +56,27 @@ export function createSiteId(value: string): SiteId {
   return value as SiteId;
 }
 
-export type SiteHref = `#${string}` | `mailto:${string}`;
+/**
+ * Where a link goes.
+ *
+ * - `#anchor` jumps to a section on the home page. This is the original
+ *   shorthand, kept exactly as every stored definition already wrote it, and
+ *   it always means the home page even when it is read on another page. See
+ *   ADR-0022.
+ * - `mailto:` opens a mail client addressed to the written address.
+ * - `page:<pageId>` opens a page in this site, referenced by its stable id so
+ *   a slug rename (#159) does not break the link.
+ * - `page:<pageId>#<anchor>` opens a section on a page in this site.
+ * - `blog` opens the Blog.
+ *
+ * Read a stored value with `parseSiteHref`; turn one into the address a
+ * browser follows with `resolveSiteHref`. Both live in `site-href.ts`.
+ */
+export type SiteHref =
+  | `#${string}`
+  | `mailto:${string}`
+  | `page:${string}`
+  | "blog";
 
 declare const blogPostIdBrand: unique symbol;
 export type BlogPostId = string & {
@@ -575,10 +596,20 @@ export const siteDefinitionSchema = {
       },
     },
     href: {
+      $comment:
+        "Compatible widening, no schema version step: ADR-0022. The first " +
+        "two patterns are unchanged from 1.7.0, so every stored #anchor and " +
+        "mailto: value stays valid, byte for byte. `page:<pageId>` and " +
+        "`page:<pageId>#<anchor>` reference a page by its stable id; " +
+        "isBaseSiteDefinition rejects one that names no page, because JSON " +
+        "Schema cannot look a value up in another array. `blog` targets the " +
+        "Blog, which always exists.",
       type: "string",
       anyOf: [
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
+        { pattern: "^page:[a-z][a-z0-9_]*(#[a-z][a-z0-9_]*)?$" },
+        { const: "blog" },
       ],
     },
     registeredPageSection: {
@@ -1050,6 +1081,15 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
         }
       });
     });
+    // A `page:` href must name a page that exists. JSON Schema cannot look a
+    // value up in another array, so this is a runtime check, the same way
+    // duplicate page ids and slugs are checked above. See ADR-0022.
+    for (const { link } of everySiteLink(definition)) {
+      const targetId = siteHrefPageId(link.href);
+      if (targetId !== null && !pageIds.has(targetId)) {
+        throw new TypeError("site_href_page_absent");
+      }
+    }
     const postIds = new Set<string>();
     const postSlugs = new Set<string>();
     definition.blog.posts.forEach((post) => {
@@ -1094,3 +1134,4 @@ export * from "./design-presets";
 export * from "./blog";
 export * from "./blog-rendering";
 export * from "./seo";
+export * from "./site-href";
