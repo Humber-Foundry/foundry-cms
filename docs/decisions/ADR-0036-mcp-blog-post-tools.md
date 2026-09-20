@@ -87,6 +87,13 @@ check for restore runs in `restoreArchivedBlogPostAsDraftCommand`, again in the
 `commands.restore` carries the same branch so the command surface stays
 uniform.
 
+`claimRestore` lets another authorized caller take over a restore whose
+previous claimant is no longer an active member. An MCP connection is never a
+membership, so a connection's pending claim always looks abandoned and a
+person can take it over. That is the behaviour we want — a person can always
+take a restore back from an agent — and it costs the agent only a
+`post_restore_conflict` on a request it had not finished.
+
 ### 3. Archiving is content work, and it does not take a live post off the site
 
 `foundry.blog.archive` and `foundry.blog.restore` need `content.draft` and

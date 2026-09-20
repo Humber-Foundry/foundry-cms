@@ -503,15 +503,25 @@ export type McpUpdateBlogPostInput = McpPageMutationInput &
  * somewhere else. See ADR-0036.
  */
 function blogPostMediaFields(post: McpBlogPostContent) {
-  const fields: Array<Readonly<{ field: string; address: string }>> = [];
+  const fields: Array<
+    Readonly<{ field: string; assetId: string | null }>
+  > = [];
   const collectImage = (field: string, image: SeoShareImage | null) => {
-    if (image !== null) fields.push({ field, address: image.url });
+    if (image !== null) {
+      fields.push({
+        field,
+        assetId: mediaAssetIdFromPublishedPath(image.url),
+      });
+    }
   };
   collectImage("mainImage", post.mainImage);
   collectImage("seo.shareImage", post.seo.shareImage);
   post.body.children.forEach((block, index) => {
     if (block.type === "image") {
-      fields.push({ field: `body.children.${index}`, address: block.src });
+      fields.push({
+        field: `body.children.${index}`,
+        assetId: mediaAssetIdFromPublishedPath(block.src),
+      });
     }
   });
   return fields;
@@ -525,10 +535,7 @@ async function requireOwnMediaReferences(
   // A post often uses the same photo twice, as its header and its share
   // picture, so each photo is looked up once however often it appears.
   const assetIds = new Set(
-    fields.flatMap(({ address }) => {
-      const assetId = mediaAssetIdFromPublishedPath(address);
-      return assetId === null ? [] : [assetId];
-    }),
+    fields.flatMap(({ assetId }) => (assetId === null ? [] : [assetId])),
   );
   const held = new Map(
     await Promise.all(
@@ -538,8 +545,7 @@ async function requireOwnMediaReferences(
       ),
     ),
   );
-  for (const { field, address } of fields) {
-    const assetId = mediaAssetIdFromPublishedPath(address);
+  for (const { field, assetId } of fields) {
     // The refusal names the field rather than repeating the address, so
     // nothing a caller wrote is echoed back into a client's screen.
     if (assetId === null || held.get(assetId) !== true) {

@@ -450,13 +450,13 @@ const pageMutationResult = {
 } as const;
 /**
  * What an agent writes into one blog post. It is the Site Definition's own
- * blog post shape, minus the three fields the blog owns rather than the
- * writer: the post's id, its revision number and whether it is on the site. A
+ * blog post shape, minus the four fields the blog owns rather than the
+ * writer: `id`, `revision`, `collectionState` and `targetVisibility`. A
  * post's tags are `seo.keywords`, which is where the blog keeps them.
  *
- * Every picture in a post has to be one of this site's own photos. That is
- * the draft's answer, not the schema's, so the refusal names the address it
- * turned down. See ADR-0036.
+ * Every picture in a post has to be a photo the media library already holds.
+ * That is the draft's answer, not the schema's, so the refusal names the
+ * field it turned down. See ADR-0036.
  */
 const blogPostContentSchema = {
   type: "object",

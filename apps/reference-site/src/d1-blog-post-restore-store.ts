@@ -10,7 +10,7 @@ import { createBlogPostAuditEventId } from "./d1-blog-post-operation-audit";
 import {
   contentAuthoritySql,
   mcpAuthorityBinds,
-} from "./d1-blog-post-operations-store";
+} from "./d1-blog-post-content-authority";
 
 export function createD1BlogPostRestoreInitializationExtension(input: {
   database: D1DatabaseBinding;
