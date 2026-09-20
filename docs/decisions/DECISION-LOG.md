@@ -31,3 +31,4 @@
 | [ADR-0024](ADR-0024-editor-page-selection.md) | The address names the page being edited, and one module answers which page it is | Accepted | 2026-09-18 |
 | [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted | 2026-09-19 |
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |
+| [ADR-0032](ADR-0032-page-composition-slot-per-page.md) | Every page has its own section slot, and the editor writes only to the page it has open | Accepted | 2026-09-19 |

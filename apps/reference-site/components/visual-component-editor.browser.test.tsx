@@ -6,6 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import {
   createDefaultPageSection,
+  findPageById,
   homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
@@ -30,6 +31,11 @@ import {
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
 import { installedSiteDefinition } from "../foundry/site-definition";
+import {
+  secondPageId,
+  secondPageSectionId,
+  withSecondPage,
+} from "../src/test-support/two-page-site-definition";
 function browserRevision(workspaceId: string) {
   return {
     workspaceId,
@@ -1583,6 +1589,90 @@ describe("visual component editor browser acceptance", () => {
           }),
         ],
       }),
+    );
+  });
+});
+
+/**
+ * The journey this ticket exists for: the owner opens a page that is not the
+ * home page and adds a section to it, through the real canvas.
+ *
+ * The installed reference site has one page and creating a page is ticket
+ * #159, so the second page comes from the shared test fixture
+ * `two-page-site-definition.ts`. Nothing is added to the published reference
+ * content.
+ */
+describe("editing a page below the home page", () => {
+  const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
+
+  afterEach(() => {
+    while (mountedRoots.length > 0) {
+      const root = mountedRoots.pop()!;
+      flushSync(() => root.unmount());
+    }
+  });
+
+  it("adds a section to the second page and leaves the home page alone", async () => {
+    const twoPages = withSecondPage();
+    const home = homePage(twoPages);
+    const second = findPageById(twoPages, secondPageId)!;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mountedRoots.push(root);
+    let latest: SiteDefinition | null = null;
+
+    flushSync(() => {
+      root.render(
+        createElement(VisualComponentEditor, {
+          definition: twoPages,
+          page: second,
+          disabled: false,
+          iframeEnabled: false,
+          onChange: (definition: SiteDefinition) => {
+            latest = definition;
+          },
+        }),
+      );
+    });
+
+    // The canvas draws the second page, not the home page.
+    let canvasText = "";
+    for (let index = 0; index < 60 && !canvasText.includes("fixture"); index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      canvasText = host.querySelector(".editor-canvas")?.textContent ?? "";
+    }
+    expect(canvasText).toContain("This page proves the fixture");
+
+    // Add a section, exactly as the owner does: open the one menu and choose.
+    const addMenu = host.querySelector<HTMLDetailsElement>(".add-section-menu");
+    expect(addMenu).not.toBeNull();
+    addMenu!.open = true;
+    const choice = [...addMenu!.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("Call to action"),
+    );
+    expect(choice).toBeDefined();
+    await userEvent.click(choice!);
+
+    for (let index = 0; index < 100 && latest === null; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+    expect(latest).not.toBeNull();
+    const changed = latest as unknown as SiteDefinition;
+
+    // The second page gained the section.
+    const changedSecond = findPageById(changed, secondPageId)!;
+    expect(changedSecond.sections.length).toBe(second.sections.length + 1);
+    expect(changedSecond.sections.map(({ id }) => id)).toContain(
+      secondPageSectionId,
+    );
+    expect(
+      changedSecond.sections.some(({ type }) => type === "callToAction"),
+    ).toBe(true);
+
+    // The home page is byte-for-byte what it was.
+    expect(JSON.stringify(findPageById(changed, home.id)!)).toBe(
+      JSON.stringify(home),
     );
   });
 });

@@ -1,6 +1,7 @@
 # ADR-0024: The address names the page being edited, and one module answers which page it is
 
-- **Status:** Accepted
+- **Status:** Accepted; section 6 superseded by
+  [ADR-0032](ADR-0032-page-composition-slot-per-page.md)
 - **Date:** 2026-09-18
 
 ## Context
@@ -64,7 +65,7 @@ naming another page is left out. The draft still holds every page's fields and
 still saves them all, so opening a second page never drops the first page's
 edits.
 
-### 6. The canvas stays on the home page until #158
+### 6. The canvas stays on the home page until #158 (superseded by ADR-0032)
 
 The visual canvas still builds itself from the home page. Until #158 moves it,
 the editor shows the canvas on the home page alone. On any other page the owner
