@@ -49,14 +49,19 @@ occurrences, and it is kept for the same reason: the home page's identifiers
 are already in stored drafts and published files, so renaming them would make
 every stored home-page recovery record unreadable.
 
-A page id never changes, so a slug rename leaves the identifier alone. Two
-pages can never share a slot id.
+A page id never changes, so a slug rename leaves the identifier alone.
 
 `findPageByCompositionSlotId(definition, slotId)` reads the identifier back.
 That is all a stored record needs: it names its own page, so it is restored to
 the page it was made on after a reload, a page switch, or a crash. A record
 written when the CMS held one page carries `slot_home_sections` and still
 resolves to the home page.
+
+Two pages would claim one slot only if a page below the home page took the
+page id `home`. Nothing in the schema forbids that id, so the lookup refuses to
+answer when two pages claim one slot rather than picking whichever comes first.
+The caller then reports a conflict and the owner decides. Ticket #159 mints
+page ids; it should not mint `home`.
 
 ### 2. Every composition function takes the page
 
@@ -90,9 +95,17 @@ saved elsewhere keeps each page's local order within that page alone. A
 comparison of the home page alone would miss both an incoming change to
 another page and the owner's own unsaved change to one.
 
-The undo and redo stacks hold whole drafts, as they did before. Opening
-another page is a fresh visit to the editor, so each page is undone and redone
-from its own starting point.
+The undo and redo stacks hold whole drafts, as they did before, because a
+site-wide field — the site name, a navigation label — is edited from any page
+and must be undoable from the page it was edited on. Opening another page
+reloads the editor, so a stack only ever holds the steps taken during this
+visit to this page.
+
+One case crosses pages: a structural change restored from a stored record for
+a page the owner is not looking at is a step in that stack, so an Undo takes it
+back again. That is the same rule the home page has always had — Undo takes
+back the last thing that happened — and the owner sees the restoration
+reported when it happens.
 
 ### 5. The unfinished-canvas message is gone
 
@@ -116,6 +129,12 @@ page is the home page, which is what it showed before.
 MCP read surface, the SEO share-image rule and the site technical detail panel.
 Each of those genuinely means the home page, or is a surface a later ticket
 moves: MCP page tools are ticket #161.
+
+Media recovery stays on the home page. The screen that offers a recovered
+media manifest and the sender that replays it both read one path, `home.media`,
+so a record for another page would be one nothing in that chain can use. A page
+below the home page therefore has no media record, exactly as before this
+change. Giving every page one is its own ticket.
 
 Ticket #159 adds creating, renaming, duplicating and deleting pages. A new page
 gets its slot id from its page id with no further work. A deleted page's stored

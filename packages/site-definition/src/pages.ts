@@ -151,8 +151,12 @@ export function pageMediaOccurrenceId(
  *
  * Every other page's slot id is built from its own page id:
  * `slot_<pageId>_sections`. A page id never changes, so a slug rename leaves
- * the identifier alone. Two pages can never share a slot id, so a structural
- * change stored for one page can never be applied to another.
+ * the identifier alone.
+ *
+ * Two pages would share a slot id only if a page below the home page took the
+ * page id `home`. Nothing in the schema forbids that id, so
+ * `findPageByCompositionSlotId` refuses to answer when two pages claim one
+ * slot, rather than picking whichever comes first.
  */
 export function pageCompositionSlotId(page: SitePage): string {
   return page.slug === homePageSlug
@@ -166,8 +170,9 @@ export const pageCompositionSlotIdPattern = /^slot_[a-z][a-z0-9_]*_sections$/u;
 /**
  * Whether a field path names a page's section slot rather than one field.
  *
- * A field path always holds a dot — `section_hero.title`, or a page id in
- * front of it — and a slot id never does, so the two can never be confused.
+ * The shape is `slot_<name>_sections`, which holds no dot. Every field path
+ * holds one — `section_hero.title`, or a page id in front of it — so a slot id
+ * and a field path can never be read for each other.
  */
 export function isPageCompositionSlotId(path: string): boolean {
   return pageCompositionSlotIdPattern.test(path);
@@ -175,25 +180,25 @@ export function isPageCompositionSlotId(path: string): boolean {
 
 /**
  * The page a section-slot identifier names, or `undefined` when this site has
- * no such page.
+ * no such page, or when more than one page claims that slot.
  *
  * A stored draft holds a structural change under its slot id alone. This is
  * how the editor reads that identifier back and finds the page the change
  * belongs to, so a recovered change is restored to the page it was made on.
+ *
+ * Two pages claim one slot only when a page below the home page has the page
+ * id `home`. There is then no single right answer, so this gives none: the
+ * caller reports a conflict and the owner decides, which is safe. Picking the
+ * first match would write one page's sections onto another without a word.
  */
 export function findPageByCompositionSlotId(
   definition: SiteDefinition,
   slotId: string,
 ): SitePage | undefined {
-  return definition.pages.find((page) => pageCompositionSlotId(page) === slotId);
-}
-
-/**
- * The media manifest's field path on one page. The home page keeps
- * `home.media`, for the same reason its slot id and field paths are unprefixed.
- */
-export function pageMediaFieldPath(page: SitePage): string {
-  return page.slug === homePageSlug ? "home.media" : `${page.id}.media`;
+  const claiming = definition.pages.filter(
+    (page) => pageCompositionSlotId(page) === slotId,
+  );
+  return claiming.length === 1 ? claiming[0] : undefined;
 }
 
 /**

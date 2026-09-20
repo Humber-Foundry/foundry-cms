@@ -5,9 +5,9 @@ import {
   createRichTextDocumentFromPlainText,
   designContract,
   findPageById,
+  homePage,
   isPageCompositionSlotId,
   listEditableSiteFields,
-  pageMediaFieldPath,
   toPageComposition,
   type PageSection,
   type SiteDefinition,
@@ -21,16 +21,15 @@ import {
 } from "./content-editor-recovery";
 
 /**
- * The home page's media manifest path. Kept as an export because it is the one
- * a stored record written before a site had more than one page carries. Use
- * `pageMediaFieldPath(page)` for the path of any one page.
+ * The home page's media manifest path.
+ *
+ * Media recovery is the home page's alone: the screen that offers a recovered
+ * manifest, and the sender that replays it, both read this one path. Carrying
+ * another page's manifest would mean a record no part of that chain can use,
+ * so a page below the home page has no media record. Giving every page one is
+ * its own ticket; this ticket moves the sections, not the photos.
  */
 export const mediaManifestRecoveryPath = "home.media";
-
-/** Whether a record holds a page's media manifest rather than one field. */
-export function isMediaManifestRecoveryPath(path: string): boolean {
-  return path === mediaManifestRecoveryPath || path.endsWith(".media");
-}
 
 function upgradeLegacyPageComponent(component: unknown): PageSection {
   if (
@@ -118,24 +117,26 @@ export function durableSchemaRecoveryEdits(
       ];
     },
   ) satisfies StaleRecoveryEdit[];
+  const baseMedia = canonicalJson(homePage(base).media ?? []);
+  const currentMedia = canonicalJson(homePage(current).media ?? []);
+  const mediaEdits: StaleRecoveryEdit[] =
+    baseMedia === currentMedia
+      ? []
+      : [
+          {
+            path: mediaManifestRecoveryPath,
+            baseValue: baseMedia,
+            value: currentMedia,
+          },
+        ];
   // Every page is compared with its own earlier self, so a structural change
   // on one page is written under that page's slot id and can only ever be
   // restored to that page. See ADR-0032.
-  const mediaEdits: StaleRecoveryEdit[] = [];
   const compositionEdits: StaleRecoveryEdit[] = [];
   let keptFieldEdits = fieldEdits;
   for (const currentPage of current.pages) {
     const basePage = findPageById(base, currentPage.id);
     if (basePage === undefined) continue;
-    const baseMedia = canonicalJson(basePage.media ?? []);
-    const currentMedia = canonicalJson(currentPage.media ?? []);
-    if (baseMedia !== currentMedia) {
-      mediaEdits.push({
-        path: pageMediaFieldPath(currentPage),
-        baseValue: baseMedia,
-        value: currentMedia,
-      });
-    }
     const baseComposition = toPageComposition(basePage);
     const currentComposition = toPageComposition(currentPage);
     if (

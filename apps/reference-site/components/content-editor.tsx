@@ -2012,7 +2012,8 @@ export function ContentEditor({
     : "";
 
   if (!showCanvas) {
-    // Design, and a page whose canvas is not ready: a toolbar and the fields.
+    // Design, which edits the whole site and shows no canvas: a toolbar
+    // and the fields.
     return (
       <section className="content-editor" aria-label={heading}>
         <div className="editor-toolbar" role="group" aria-label="Draft controls">

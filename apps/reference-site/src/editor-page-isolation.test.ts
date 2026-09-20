@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyPageComposition,
+  findPageByCompositionSlotId,
   findPageById,
   homePage,
   pageCompositionSlotId,
@@ -351,5 +352,116 @@ describe("the undo history covers every page", () => {
     expect(sectionsOf(redone.workingDefinition, secondPageId)).toBe(
       sectionsOf(added.definition, secondPageId),
     );
+  });
+});
+
+describe("a slot identifier resolves to one page or to none", () => {
+  it("refuses to answer when two pages claim the same slot", () => {
+    // Nothing in the schema stops a page below the home page taking the page
+    // id `home`, which would build the home page's own slot id. There is then
+    // no right answer, so the lookup gives none and the caller reports a
+    // conflict. Picking the first match would write one page's sections onto
+    // another without a word.
+    const clashing = withSecondPage({ id: "home", slug: "about" });
+    expect(pageCompositionSlotId(clashing.pages[1]!)).toBe("slot_home_sections");
+    expect(
+      findPageByCompositionSlotId(clashing, "slot_home_sections"),
+    ).toBeUndefined();
+
+    const record: StaleRecoveryEdit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(toPageComposition(home)),
+      value: JSON.stringify(toPageComposition(home)),
+    };
+    expect(applyStructuralRecovery(clashing, record).ok).toBe(false);
+  });
+
+  it("answers normally when each page has its own slot", () => {
+    expect(findPageByCompositionSlotId(twoPages, "slot_home_sections")?.id).toBe(
+      home.id,
+    );
+    expect(
+      findPageByCompositionSlotId(twoPages, pageCompositionSlotId(second))?.id,
+    ).toBe(secondPageId);
+  });
+});
+
+describe("a structure changed elsewhere is reported against its own page", () => {
+  it("names the page that changed, and leaves the other page usable", () => {
+    // The owner has an unsaved structural change on the second page. A
+    // revision saved elsewhere changes the second page differently. The
+    // trouble belongs to the second page, not to the home page.
+    const locallyChanged = withSecondPage({
+      sections: [
+        second.sections[0]!,
+        { ...second.sections[0]!, id: `${secondPageSectionId}_mine` },
+      ],
+    });
+    const elsewhere = withSecondPage({
+      sections: [
+        second.sections[0]!,
+        { ...second.sections[0]!, id: `${secondPageSectionId}_theirs` },
+      ],
+    });
+    const state = {
+      ...createContentEditorState({ definition: twoPages, revision: 2 }),
+      workingDefinition: locallyChanged,
+      status: "dirty" as const,
+    };
+
+    const merged = contentEditorReducer(state, {
+      type: "externalRevision",
+      definition: elsewhere,
+      revision: 3,
+    });
+
+    expect(merged.status).toBe("conflict");
+    expect(Object.keys(merged.errors)).toEqual([
+      pageCompositionSlotId(second),
+    ]);
+    expect(Object.keys(merged.errors)).not.toContain("slot_home_sections");
+  });
+
+  it("does not call one page conflicted because another page changed elsewhere", () => {
+    // The owner's unsaved change is on the second page; the revision saved
+    // elsewhere changed the home page. The two do not overlap, so there is no
+    // conflict to report.
+    const locallyChanged = withSecondPage({
+      sections: [
+        second.sections[0]!,
+        { ...second.sections[0]!, id: `${secondPageSectionId}_mine` },
+      ],
+    });
+    const elsewhere: SiteDefinition = {
+      ...twoPages,
+      pages: [
+        { ...home, sections: [...home.sections].reverse() },
+        second,
+      ],
+    };
+    const state = {
+      ...createContentEditorState({ definition: twoPages, revision: 2 }),
+      workingDefinition: locallyChanged,
+      status: "dirty" as const,
+    };
+
+    const merged = contentEditorReducer(state, {
+      type: "externalRevision",
+      definition: elsewhere,
+      revision: 3,
+    });
+
+    expect(merged.errors).toEqual({});
+    // Both changes survive: theirs on the home page, the owner's on the second.
+    expect(
+      findPageById(merged.workingDefinition, home.id)!.sections.map(
+        ({ id }) => id,
+      ),
+    ).toEqual([...home.sections].reverse().map(({ id }) => id));
+    expect(
+      findPageById(merged.workingDefinition, secondPageId)!.sections.map(
+        ({ id }) => id,
+      ),
+    ).toContain(`${secondPageSectionId}_mine`);
   });
 });

@@ -561,6 +561,51 @@ describe("content revision endpoint", () => {
     );
   });
 
+  it("still accepts the single structural change an older tab sends", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: { schemaVersion: "1.2.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.2.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    // A browser tab opened before the release still sends one `composition`.
+    // Refusing it would lose an owner's unsaved structural change with nothing
+    // on screen to say so.
+    const composition = {
+      slotId: "slot_home_sections",
+      components: [
+        {
+          id: "section_new_proof",
+          type: "proof",
+          quote: "Evidence",
+          attribution: "Source",
+          metrics: [],
+        },
+      ],
+    };
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [],
+        composition,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ compositions: [composition] }),
+    );
+  });
+
   it("rejects a slot identifier that names no page", async () => {
     const response = await POST(
       request({

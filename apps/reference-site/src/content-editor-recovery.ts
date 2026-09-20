@@ -17,23 +17,6 @@ import {
 import { canonicalJson } from "@humber-foundry/application";
 import { installedPageComponentRegistry } from "../foundry/page-components";
 
-/**
- * The page a stored structural record belongs to, or `undefined` when this
- * draft holds no such page.
- *
- * The record names its page through its own path, which is that page's section
- * slot id. Nothing else is stored, so a record written before a reload, a page
- * switch or a crash goes back to the page it was made on. A record written
- * when the CMS held one page carries `slot_home_sections` and still resolves
- * to the home page. See ADR-0032.
- */
-export function compositionRecoveryPage(
-  definition: SiteDefinition,
-  path: string,
-): SitePage | undefined {
-  return findPageByCompositionSlotId(definition, path);
-}
-
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
 const maximumRecoveredEdits = 500;
 
@@ -190,7 +173,12 @@ export function applyStructuralRecovery(
 ):
   | Readonly<{ ok: true; definition: SiteDefinition }>
   | Readonly<{ ok: false }> {
-  const page = compositionRecoveryPage(definition, edit.path);
+  // The record names its page through its own path, which is that page's
+  // section slot id. Nothing else is stored, so a record written before a
+  // reload, a page switch or a crash goes back to the page it was made on. A
+  // record written when the CMS held one page carries `slot_home_sections` and
+  // still resolves to the home page. See ADR-0032.
+  const page = findPageByCompositionSlotId(definition, edit.path);
   // A record whose page this draft no longer holds is left for the caller to
   // report as a conflict. Restoring it onto some other page would move the
   // owner's sections to a page they never edited.
@@ -333,7 +321,7 @@ export function planStructuralFirstRecovery(
   ];
   let projectedDefinition = definition;
   for (const edit of orderedEdits) {
-    const page = compositionRecoveryPage(projectedDefinition, edit.path);
+    const page = findPageByCompositionSlotId(projectedDefinition, edit.path);
     if (page === undefined) {
       continue;
     }

@@ -450,17 +450,21 @@ function parseSaveBody(
     isPageCompositionSlotId(entry.slotId) &&
     "components" in entry &&
     Array.isArray(entry.components);
+  // A browser tab opened before this release still sends one `composition`.
+  // It is read as a list of one, so an owner mid-edit at the moment of release
+  // does not silently lose their unsaved structural change.
+  const submitted =
+    candidate.compositions ??
+    (candidate.composition === undefined ? undefined : [candidate.composition]);
   const compositions =
-    candidate.compositions === undefined
+    submitted === undefined
       ? undefined
-      : Array.isArray(candidate.compositions) &&
-          candidate.compositions.every(isComposition) &&
+      : Array.isArray(submitted) &&
+          submitted.every(isComposition) &&
           new Set(
-            (candidate.compositions as PageComposition[]).map(
-              ({ slotId }) => slotId,
-            ),
-          ).size === candidate.compositions.length
-        ? (candidate.compositions as PageComposition[])
+            (submitted as PageComposition[]).map(({ slotId }) => slotId),
+          ).size === submitted.length
+        ? (submitted as PageComposition[])
         : undefined;
   if (
     candidate.edits.length === 0 &&
@@ -468,7 +472,7 @@ function parseSaveBody(
   ) {
     return { ok: false };
   }
-  if (candidate.compositions !== undefined && compositions === undefined) {
+  if (submitted !== undefined && compositions === undefined) {
     return {
       ok: false,
       fields: {
