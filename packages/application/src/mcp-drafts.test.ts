@@ -23,12 +23,16 @@ import {
   createMcpReadApplication,
   createPublishedSiteBundle,
   createSiteApplication,
+  McpMediaValidationError,
   McpReadError,
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpMediaListMaxPageSize,
+  mcpMediaUploadMaxByteLength,
   mcpRestructureScopes,
   sha256CanonicalJson,
+  type McpMediaAsset,
   type McpMutationFailure,
   type ContentRevisionApplication,
   type ContentWorkspaceId,
@@ -78,8 +82,30 @@ function fixture(scopes: ReadonlyArray<string>) {
   >();
   let deploymentCurrent = true;
   // The photos this site's media library already holds. An agent may name
-  // one of these in a blog post and no other picture at all.
-  const mediaLibrary = new Set<string>(["asset_open_day"]);
+  // one of these in a blog post, place one on a page, and no other picture.
+  const mediaLibrary = new Map<string, McpMediaAsset>([
+    [
+      "asset_open_day",
+      {
+        assetId: "asset_open_day",
+        mediaPath: "/api/media/asset_open_day",
+        fileName: "open-day.jpg",
+        contentType: "image/jpeg",
+        byteLength: 20_480,
+        width: 1_600,
+        height: 900,
+        createdAt: now,
+      },
+    ],
+  ]);
+  // Every occurrence this draft's media side holds, and the revision each is
+  // at. The content revision store requires the occurrence head to be there
+  // already, exactly as the dashboard's own Photos page arranges.
+  const occurrenceRevisions = new Map<string, number>();
+  const occurrenceReceipts = new Map<string, number>();
+  const uploads: Array<
+    Readonly<{ fileName: string; byteLength: number; idempotencyKey: string }>
+  > = [];
   const read = createMcpReadApplication({
     site: createSiteApplication({
       siteId: referenceSiteDefinition.site.id,
@@ -214,6 +240,86 @@ function fixture(scopes: ReadonlyArray<string>) {
       async mediaLibraryHoldsAsset({ assetId }) {
         return mediaLibrary.has(assetId);
       },
+      async listMediaAssets() {
+        return [...mediaLibrary.values()];
+      },
+      async uploadMediaAsset({ fileName, source, idempotencyKey }) {
+        uploads.push({
+          fileName,
+          byteLength: source.byteLength,
+          idempotencyKey,
+        });
+        // The real runtime reads the type and the size from the bytes. This
+        // stub stands in for that: a picture it cannot read is refused with
+        // the same named reason.
+        if (source[0] !== 0xff || source[1] !== 0xd8) {
+          throw new McpMediaValidationError(
+            "media_not_an_image",
+            "That file is not a JPEG, PNG or WebP picture.",
+          );
+        }
+        const assetId = `asset_${idempotencyKey.replace(/[^a-z0-9]/gu, "")}`;
+        const asset: McpMediaAsset = {
+          assetId,
+          mediaPath: `/api/media/${assetId}`,
+          fileName,
+          contentType: "image/jpeg",
+          byteLength: source.byteLength,
+          width: 1_200,
+          height: 800,
+          createdAt: now,
+        };
+        mediaLibrary.set(assetId, asset);
+        return asset;
+      },
+      async placeMediaOccurrence({
+        workspaceId,
+        occurrenceId,
+        assetId,
+        idempotencyKey,
+      }) {
+        const asset = mediaLibrary.get(assetId);
+        if (asset === undefined) {
+          throw new McpMediaValidationError(
+            "media_asset_not_found",
+            "This site holds no photo with that id.",
+          );
+        }
+        // The real media library answers a repeated request from its own
+        // receipt, so the same call twice leaves one occurrence revision.
+        const key = `${workspaceId}:${occurrenceId}`;
+        const receiptKey = `${key}:${idempotencyKey}`;
+        const recorded = occurrenceReceipts.get(receiptKey);
+        const revision =
+          recorded ?? (occurrenceRevisions.get(key) ?? 0) + 1;
+        occurrenceRevisions.set(key, revision);
+        occurrenceReceipts.set(receiptKey, revision);
+        return {
+          occurrenceId,
+          revision,
+          asset: {
+            assetId: asset.assetId,
+            width: asset.width,
+            height: asset.height,
+            contentType: "image/jpeg" as const,
+          },
+        };
+      },
+      cursors: {
+        async encode(binding) {
+          return `cursor:${binding.offset}`;
+        },
+        async decode(cursor) {
+          const offset = Number(cursor.replace("cursor:", ""));
+          if (!Number.isInteger(offset)) throw new Error("bad cursor");
+          return {
+            siteId: activePrincipal.siteId,
+            actorId: activePrincipal.actorId,
+            query: "media:all",
+            offset,
+          };
+        },
+      },
       humanReviewUrl(previewId) {
         return `https://foundry.example/dash/review/${previewId}`;
       },
@@ -261,6 +367,8 @@ function fixture(scopes: ReadonlyArray<string>) {
     setActivePrincipal(next: McpConnectionPrincipal) {
       activePrincipal = next;
     },
+    mediaLibrary,
+    uploads,
     workspaces,
   };
 }
@@ -2645,6 +2753,472 @@ describe("MCP page and blog acceptance journey", () => {
       ),
     );
     expect(preview.previewId).toBeTruthy();
+    // The preview is where the agent stops. Nothing here approves it.
+    expect(preview.humanReviewUrl).toContain(preview.previewId);
+  });
+});
+
+describe("MCP photo tools", () => {
+  // Two bytes of a JPEG header, then filler. The real runtime reads the type
+  // from the bytes; the fixture's stub reads the same two bytes.
+  function jpegBase64(byteLength: number) {
+    const bytes = new Uint8Array(byteLength);
+    bytes[0] = 0xff;
+    bytes[1] = 0xd8;
+    return base64Of(bytes);
+  }
+
+  function base64Of(bytes: Uint8Array) {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  async function openedDraft(key: string) {
+    const fixtureValue = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        fixtureValue.activePrincipal,
+        { expectedRevision: 0, idempotencyKey: key },
+        context,
+      ),
+    );
+    return { fixtureValue, workspaceId: opened.workspaceId };
+  }
+
+  it("lists this site's photos a page at a time and names no person", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    // A second photo, so there is a page boundary to cross.
+    value.mediaLibrary.set("asset_workshop", {
+      assetId: "asset_workshop",
+      mediaPath: "/api/media/asset_workshop",
+      fileName: "workshop.png",
+      contentType: "image/png",
+      byteLength: 40_960,
+      width: 800,
+      height: 600,
+      createdAt: "2026-07-29T20:00:00.000Z",
+    });
+
+    const firstPage = resultOf<{
+      items: ReadonlyArray<Record<string, unknown>>;
+      nextCursor: string | null;
+    }>(
+      await value.application.listMedia(
+        value.activePrincipal,
+        { limit: 1, cursor: null },
+        context,
+      ),
+    );
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.items[0]).toEqual({
+      assetId: "asset_open_day",
+      mediaPath: "/api/media/asset_open_day",
+      fileName: "open-day.jpg",
+      contentType: "image/jpeg",
+      byteLength: 20_480,
+      width: 1_600,
+      height: 900,
+      createdAt: "2026-07-29T20:00:00.000Z",
+    });
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = resultOf<{
+      items: ReadonlyArray<{ assetId: string }>;
+      nextCursor: string | null;
+    }>(
+      await value.application.listMedia(
+        value.activePrincipal,
+        { limit: 1, cursor: firstPage.nextCursor },
+        context,
+      ),
+    );
+    expect(secondPage.items.map(({ assetId }) => assetId)).toEqual([
+      "asset_workshop",
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it("refuses a page size outside the bound and a cursor from elsewhere", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    await expect(
+      value.application.listMedia(
+        value.activePrincipal,
+        { limit: 0, cursor: null },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      value.application.listMedia(
+        value.activePrincipal,
+        { limit: mcpMediaListMaxPageSize + 1, cursor: null },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      value.application.listMedia(
+        value.activePrincipal,
+        { limit: 10, cursor: "not-a-cursor" },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("needs the content draft permission to read or add a photo", async () => {
+    const value = fixture([mcpInitialScope]);
+    await expect(
+      value.application.listMedia(
+        value.activePrincipal,
+        { limit: 10, cursor: null },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope],
+    });
+    await expect(
+      value.application.uploadMedia(
+        value.activePrincipal,
+        {
+          fileName: "workshop.jpg",
+          bytesBase64: jpegBase64(64),
+          idempotencyKey: "media-upload-scope-1",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope],
+    });
+  });
+
+  it("adds a photo a blog post can then name", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-upload-1",
+    );
+    const uploaded = resultOf<{ assetId: string; mediaPath: string }>(
+      await fixtureValue.application.uploadMedia(
+        fixtureValue.activePrincipal,
+        {
+          fileName: "workshop.jpg",
+          bytesBase64: jpegBase64(2_048),
+          idempotencyKey: "media-upload-blog-1",
+        },
+        context,
+      ),
+    );
+    expect(uploaded.mediaPath).toBe(`/api/media/${uploaded.assetId}`);
+    // The very same photo is now one the blog accepts, which is the rule
+    // ADR-0036 kept and this tool is the way through it.
+    const created = resultOf<{ postId: string }>(
+      await fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "media-upload-blog-post-1",
+          post: {
+            slug: "workshop",
+            title: "The workshop",
+            excerpt: "A look inside.",
+            seo: {
+              title: "The workshop",
+              description: "A look inside.",
+              keywords: ["workshop"],
+              shareImage: null,
+            },
+            mainImage: { url: uploaded.mediaPath, alt: "The workshop" },
+            body: createRichTextDocumentFromPlainText("Come and see."),
+          },
+        },
+        context,
+      ),
+    );
+    expect(created.postId).toBeTruthy();
+  });
+
+  it("refuses bytes that are not a picture, and a picture too big to carry", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    await expect(
+      value.application.uploadMedia(
+        value.activePrincipal,
+        {
+          fileName: "notes.txt",
+          bytesBase64: base64Of(new TextEncoder().encode("plain words")),
+          idempotencyKey: "media-upload-not-image",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "media_not_an_image",
+    });
+
+    await expect(
+      value.application.uploadMedia(
+        value.activePrincipal,
+        {
+          fileName: "huge.jpg",
+          bytesBase64: "A".repeat(
+            Math.ceil(((mcpMediaUploadMaxByteLength + 1_024) * 4) / 3 / 4) * 4,
+          ),
+          idempotencyKey: "media-upload-too-large",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "media_too_large",
+    });
+    // Nothing that large ever reached the media library.
+    expect(
+      value.uploads.some(({ fileName }) => fileName === "huge.jpg"),
+    ).toBe(false);
+  });
+
+  it("keeps the picture's own bytes out of the audit record", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    await value.application.uploadMedia(
+      value.activePrincipal,
+      {
+        fileName: "workshop.jpg",
+        bytesBase64: jpegBase64(512),
+        idempotencyKey: "media-upload-audit-1",
+      },
+      context,
+    );
+    const recorded = value.auditEvents.find(
+      ({ operation }) => operation === "foundry.media.upload",
+    );
+    expect(recorded).toBeDefined();
+    expect(JSON.stringify(recorded)).not.toContain(jpegBase64(512));
+  });
+
+  it("places a photo on a page the agent made, not on the home page", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-place-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const page = resultOf<{ pageId: string; revision: number }>(
+      await fixtureValue.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "media-place-page-1",
+          title: "Workshop",
+          slug: "workshop",
+          startingLayout: "introduction",
+        },
+        context,
+      ),
+    );
+    const placed = resultOf<{
+      occurrenceId: string;
+      revision: number;
+      previewArtifact: string;
+    }>(
+      await fixtureValue.application.placeMedia(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: page.revision,
+          idempotencyKey: "media-place-1-000000",
+          pageId: page.pageId,
+          slot: "hero",
+          assetId: "asset_open_day",
+        },
+        context,
+      ),
+    );
+    expect(placed.occurrenceId).toBe(`occurrence_${page.pageId}_hero`);
+    expect(placed.revision).toBe(page.revision + 1);
+    expect(placed.previewArtifact).toMatch(/^[0-9a-f]{64}$/u);
+
+    const { definition } = await fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent();
+    expect(findPageById(definition, page.pageId)!.media).toEqual([
+      {
+        occurrenceId: `occurrence_${page.pageId}_hero`,
+        revision: 1,
+        asset: {
+          assetId: "asset_open_day",
+          width: 1_600,
+          height: 900,
+          contentType: "image/jpeg",
+        },
+        crop: null,
+      },
+    ]);
+    // The home page is untouched: ADR-0026 gives every page its own slots.
+    expect(homePage(definition).media ?? []).not.toContainEqual(
+      expect.objectContaining({
+        occurrenceId: `occurrence_${page.pageId}_hero`,
+      }),
+    );
+  });
+
+  it("refuses a photo this site does not hold and a page this draft does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-place-2",
+    );
+    await expect(
+      fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "media-place-missing-asset",
+          pageId: homePage(referenceSiteDefinition).id,
+          slot: "hero",
+          assetId: "asset_somewhere_else",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "media_asset_not_found",
+    });
+
+    await expect(
+      fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "media-place-missing-page",
+          pageId: "page_not_here",
+          slot: "hero",
+          assetId: "asset_open_day",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "media_page_not_found",
+    });
+  });
+
+  it("repeats the first refusal when the same placement is sent again", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-place-3",
+    );
+    const request = {
+      workspaceId,
+      expectedRevision: 0,
+      idempotencyKey: "media-place-replayed-1",
+      pageId: homePage(referenceSiteDefinition).id,
+      slot: "hero" as const,
+      assetId: "asset_somewhere_else",
+    };
+    await expect(
+      fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    ).rejects.toMatchObject({ reason: "media_asset_not_found" });
+    await expect(
+      fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "media_asset_not_found",
+      replayed: true,
+    });
+  });
+
+  it("answers a repeated placement from its receipt instead of placing again", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-place-4",
+    );
+    const request = {
+      workspaceId,
+      expectedRevision: 0,
+      idempotencyKey: "media-place-once-000",
+      pageId: homePage(referenceSiteDefinition).id,
+      slot: "detail" as const,
+      assetId: "asset_open_day",
+    };
+    const first = resultOf<{ occurrenceId: string; revision: number }>(
+      await fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    const second = resultOf<{
+      occurrenceId: string;
+      revision: number;
+      replayed: boolean;
+    }>(
+      await fixtureValue.application.placeMedia(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    expect(second.occurrenceId).toBe(first.occurrenceId);
+    expect(second.revision).toBe(first.revision);
+    expect(second.replayed).toBe(true);
+  });
+
+  it("carries an uploaded photo onto a page and into a preview", async () => {
+    // The acceptance criterion of issue #172: an agent adds a photo, puts it
+    // on a page in the draft, and hands a person the preview it appears in.
+    const { fixtureValue, workspaceId } = await openedDraft(
+      "open-media-journey-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const uploaded = resultOf<{ assetId: string }>(
+      await fixtureValue.application.uploadMedia(
+        principalValue,
+        {
+          fileName: "workshop.jpg",
+          bytesBase64: jpegBase64(4_096),
+          idempotencyKey: "media-journey-upload-1",
+        },
+        context,
+      ),
+    );
+    const placed = resultOf<{ revision: number }>(
+      await fixtureValue.application.placeMedia(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "media-journey-place-1",
+          pageId: homePage(referenceSiteDefinition).id,
+          slot: "hero",
+          assetId: uploaded.assetId,
+        },
+        context,
+      ),
+    );
+    const { definition } = await fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent();
+    expect(
+      (homePage(definition).media ?? []).find(
+        ({ occurrenceId }) => occurrenceId === "occurrence_home_hero",
+      )?.asset.assetId,
+    ).toBe(uploaded.assetId);
+
+    const preview = resultOf<{ previewId: string; humanReviewUrl: string }>(
+      await fixtureValue.application.preparePreview(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: placed.revision,
+          idempotencyKey: "media-journey-preview-1",
+        },
+        context,
+      ),
+    );
     // The preview is where the agent stops. Nothing here approves it.
     expect(preview.humanReviewUrl).toContain(preview.previewId);
   });

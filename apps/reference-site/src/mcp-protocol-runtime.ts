@@ -24,7 +24,7 @@ import {
   isRecord,
   isRequestId,
   jsonResponse,
-  readBoundedText,
+  readBoundedBody,
   readsJsonMediaType,
   rpcError,
   rpcResult,
@@ -42,6 +42,35 @@ export {
 } from "@humber-foundry/application";
 
 const rpcBodyLimitBytes = 256 * 1024;
+
+/**
+ * The one tool whose request may be larger than every other request, and the
+ * ceiling that applies to it.
+ *
+ * `foundry.media.upload` carries a photo's own bytes as base64, because no
+ * MCP tool accepts a web address to fetch. Every other request keeps the
+ * small limit: the body is read up to this ceiling, and a body above the
+ * ordinary limit is refused unless the parsed request really is one call of
+ * that tool. See ADR-0037.
+ */
+const mediaUploadToolName = "foundry.media.upload";
+const rpcMediaUploadBodyLimitBytes = 6 * 1024 * 1024;
+
+/**
+ * Whether the parsed request is one call of the photo upload tool. Anything
+ * else — a different tool, a different method, a malformed request — keeps
+ * the ordinary body limit.
+ */
+function isMediaUploadCall(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.jsonrpc === "2.0" &&
+    value.method === "tools/call" &&
+    isRecord(value.params) &&
+    value.params.name === mediaUploadToolName
+  );
+}
+
 const rpcMaximumDepth = 32;
 const knownMethods = new Set([
   "initialize",
@@ -951,11 +980,20 @@ export function createMcpProtocolRuntime({
       let value: unknown;
       let bodyFailure: Response | null = null;
       try {
-        value = JSON.parse(
-          await context.run(() =>
-            readBoundedText(request, rpcBodyLimitBytes, context.signal),
+        const body = await context.run(() =>
+          readBoundedBody(
+            request,
+            rpcMediaUploadBodyLimitBytes,
+            context.signal,
           ),
         );
+        value = JSON.parse(body.text);
+        if (
+          body.byteLength > rpcBodyLimitBytes &&
+          !isMediaUploadCall(value)
+        ) {
+          throw new RequestBodyLimitError();
+        }
       } catch (error) {
         if (error instanceof RequestBodyLimitError) {
           value = null;

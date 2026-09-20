@@ -8,6 +8,7 @@ import {
   findPageById,
   mintedPageId,
   removePageFromDefinition,
+  SiteMediaOccurrencePageError,
   PageLifecycleError,
   type PageLifecycleErrorCode,
   type PageLinkReference,
@@ -1776,10 +1777,21 @@ export function createContentRevisionApplication({
         ) {
           throw new ContentRevisionStaleError();
         }
-        const definition = bindSiteMediaOccurrence(
-          base.definition,
-          command.occurrence,
-        );
+        // The occurrence id names the page the photo goes on. A draft that
+        // holds no such page cannot take the photo, so it is refused here
+        // rather than written onto some other page. See ADR-0026.
+        let definition;
+        try {
+          definition = bindSiteMediaOccurrence(
+            base.definition,
+            command.occurrence,
+          );
+        } catch (error) {
+          if (!(error instanceof SiteMediaOccurrencePageError)) throw error;
+          throw new ContentRevisionValidationError({
+            occurrenceId: "This draft has no page for that photo slot.",
+          });
+        }
         const nextRevision: ContentRevision = {
           workspaceId,
           revision: command.baseRevision + 1,

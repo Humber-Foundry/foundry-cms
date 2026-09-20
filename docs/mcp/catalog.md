@@ -142,6 +142,9 @@ Annotations are shown as
 | `foundry.page.delete` | `F / T / T / F` | Remove one page from the draft, as a new immutable revision. |
 | `foundry.page.restructure` | `F / T / T / F` | Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision. |
 | `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their section styles and their editable fields. |
+| `foundry.media.list` | `T / - / - / F` | List the photos this site already holds, with the address to use for each one. |
+| `foundry.media.upload` | `F / F / T / F` | Add one photo to this site, sending the picture itself as base64 text. |
+| `foundry.media.place` | `F / T / T / F` | Put one of this site's photos in a page's main or secondary picture slot, as a new immutable revision. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
 | `foundry.blog.create` | `F / F / T / F` | Start a new blog post in the draft, as a new immutable revision. |
 | `foundry.blog.update` | `F / T / T / F` | Rewrite one blog post in the draft, as a new immutable revision. |

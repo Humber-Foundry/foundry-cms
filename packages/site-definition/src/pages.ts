@@ -139,6 +139,27 @@ export function pageMediaOccurrenceId(
 }
 
 /**
+ * The page a media occurrence id names, or `undefined` when this site has no
+ * such page, or when more than one page claims that occurrence.
+ *
+ * Two pages would claim one occurrence id only if a page below the home page
+ * took the page id `home`. Nothing in the schema forbids that id, so this
+ * refuses to answer rather than picking whichever comes first, the same way
+ * `findPageByCompositionSlotId` does. See ADR-0026.
+ */
+export function findPageByMediaOccurrenceId(
+  definition: SiteDefinition,
+  occurrenceId: string,
+): SitePage | undefined {
+  const claiming = definition.pages.filter((page) =>
+    pageMediaSlots.some(
+      (slot) => pageMediaOccurrenceId(page, slot) === occurrenceId,
+    ),
+  );
+  return claiming.length === 1 ? claiming[0] : undefined;
+}
+
+/**
  * The identifier of one page's section slot: the place the visual editor adds,
  * moves and removes sections in.
  *

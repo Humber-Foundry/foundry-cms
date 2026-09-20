@@ -68,6 +68,17 @@ const canonicalRevision = {
 
 const pageResult = { ...draftResult, replayed: false, previewArtifact };
 
+const mediaAsset = {
+  assetId: "asset_conformance",
+  mediaPath: "/api/media/asset_conformance",
+  fileName: "conformance.jpg",
+  contentType: "image/jpeg",
+  byteLength: 2_048,
+  width: 1_200,
+  height: 800,
+  createdAt: observedAt,
+};
+
 const results: Record<string, unknown> = {
   "foundry.site.get": {
     siteId: referenceSiteDefinition.site.id,
@@ -131,6 +142,14 @@ const results: Record<string, unknown> = {
         fields: [{ name: "title", label: "Title", format: "plainText" }],
       },
     ],
+  },
+  "foundry.media.list": { items: [mediaAsset], nextCursor: null },
+  "foundry.media.upload": mediaAsset,
+  "foundry.media.place": {
+    ...draftResult,
+    replayed: false,
+    previewArtifact,
+    occurrenceId: "occurrence_home_hero",
   },
   "foundry.design.patch": {
     ...draftResult,
@@ -287,6 +306,20 @@ const inputs: Record<string, unknown> = {
     operations: [{ op: "add", sectionType: "proof", position: 0 }],
   },
   "foundry.section.list": {},
+  "foundry.media.list": { limit: 10, cursor: null },
+  "foundry.media.upload": {
+    fileName: "conformance.jpg",
+    bytesBase64: "/9j/4AAQ",
+    idempotencyKey,
+  },
+  "foundry.media.place": {
+    workspaceId,
+    expectedRevision: 1,
+    idempotencyKey,
+    pageId,
+    slot: "hero",
+    assetId: "asset_conformance",
+  },
   "foundry.design.patch": {
     workspaceId,
     expectedRevision: 0,
@@ -342,7 +375,7 @@ const inputs: Record<string, unknown> = {
 };
 
 describe("MCP protocol-wrapper emission conformance", () => {
-  it("independently validates protocol-wrapper success and business-error emissions for all 29 descriptors", async () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 32 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {
@@ -366,6 +399,9 @@ describe("MCP protocol-wrapper emission conformance", () => {
       deletePage: emit("foundry.page.delete"),
       restructurePage: emit("foundry.page.restructure"),
       listSectionTypes: emit("foundry.section.list"),
+      listMedia: emit("foundry.media.list"),
+      uploadMedia: emit("foundry.media.upload"),
+      placeMedia: emit("foundry.media.place"),
       patchDesign: emit("foundry.design.patch"),
       preparePreview: emit("foundry.preview.prepare"),
       requestPublication: emit("foundry.publication.request"),

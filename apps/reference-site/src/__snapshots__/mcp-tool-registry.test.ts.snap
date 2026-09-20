@@ -179,6 +179,50 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "List the photos this site already holds, with the address to use for each one.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "cd7f0bfa89b68f33e214628eb81a528bd8236c5d24d03cca1c882bb45b532a1b",
+    "name": "foundry.media.list",
+    "outputSchemaSha256": "6ae4c9b175742e1999633888b6013faaf11c1e74f0f48e33197ebc0527184e76",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Add one photo to this site, sending the picture itself as base64 text.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "bcb10e4ffa5a9b87457c140195caec78c2855be844fd13b78d7c8284139b22af",
+    "name": "foundry.media.upload",
+    "outputSchemaSha256": "1e9699425b5cc9d927680c6b60eb9b1a994d0f9f718a8f3f52667810e122ba02",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Put one of this site's photos in a page's main or secondary picture slot, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "d10e52d841c2dfd3387d940f4fc2e5e7a3ab5755b80f5f7ec1f643e187bf2208",
+    "name": "foundry.media.place",
+    "outputSchemaSha256": "e3a9d82b1158d8420d1f0409b73de320fa2cb02238b7fac3584a6132e9e3355c",
+  },
+  {
+    "annotations": {
       "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false,

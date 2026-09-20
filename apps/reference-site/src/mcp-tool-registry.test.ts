@@ -105,6 +105,9 @@ function schemaExample(schema: JsonSchema): unknown {
     if (pattern.includes("workspace_")) return "workspace_conformance";
     if (pattern.includes("site_")) return "site_conformance";
     if (pattern.includes("campaign_")) return `campaign_${"a".repeat(32)}`;
+    if (pattern.includes("/api/media/")) return "/api/media/asset_conformance";
+    if (pattern.includes("asset_")) return "asset_conformance";
+    if (pattern.includes("occurrence_")) return "occurrence_home_hero";
     if (pattern.includes("[0-9a-f]{8}") && pattern.includes("[0-9a-f]{12}"))
       return "11111111-1111-4111-8111-111111111111";
     if (pattern.includes("[0-9a-f]{64}")) return "a".repeat(64);
@@ -292,6 +295,9 @@ describe("MCP draft tool registry", () => {
       "foundry.page.delete",
       "foundry.page.restructure",
       "foundry.section.list",
+      "foundry.media.list",
+      "foundry.media.upload",
+      "foundry.media.place",
       "foundry.blog.create",
       "foundry.blog.update",
       "foundry.blog.archive",
@@ -362,6 +368,12 @@ describe("MCP draft tool registry", () => {
         if (collectionCommands.includes(tool.name)) {
           expect(properties).toContain("postId");
           expect(properties).not.toContain("workspaceId");
+        } else if (tool.name === "foundry.media.upload") {
+          // Adding a photo to the media library writes no draft revision, so
+          // it names no workspace and carries no revision. See ADR-0037.
+          expect(properties).toContain("bytesBase64");
+          expect(properties).not.toContain("workspaceId");
+          expect(properties).not.toContain("expectedRevision");
         } else {
           expect(properties).toContain("expectedRevision");
         }
@@ -829,6 +841,51 @@ describe("MCP campaign and analytics tool registry", () => {
     );
   });
 
+  it("reveals no person and no outside address through any photo tool", () => {
+    // Issue #172 requires proof that no identity is reachable through the new
+    // tools. A photo tool carries the photo and nothing about the person or
+    // connection that added it, and takes no address of any kind. See
+    // ADR-0037.
+    const photoTools = fullRegistry()
+      .list(principal([mcpInitialScope, mcpContentDraftScope]))
+      .filter(({ name }) => name.startsWith("foundry.media."));
+    expect(photoTools.map(({ name }) => name)).toEqual([
+      "foundry.media.list",
+      "foundry.media.upload",
+      "foundry.media.place",
+    ]);
+    for (const tool of photoTools) {
+      for (const schema of [tool.inputSchema, tool.outputSchema]) {
+        // `$defs` is the shared Site Definition dictionary every tool output
+        // carries, so only the tool's own shape is scanned here.
+        const { $defs: _shared, ...own } = schema as Record<string, unknown>;
+        const properties = schemaPropertyNames(own);
+        for (const forbidden of [
+          "createdBy",
+          "actorId",
+          "connectionId",
+          "email",
+          "address",
+          "recipient",
+          "recipients",
+          "subscriber",
+          "subscribers",
+          "member",
+          "owner",
+          "url",
+          "href",
+          "src",
+          "source",
+          "sourceUrl",
+        ]) {
+          expect(properties, `${tool.name} ${forbidden}`).not.toContain(
+            forbidden,
+          );
+        }
+      }
+    }
+  });
+
   it("takes no recipient selection on a test and no raw query on analytics", () => {
     const tools = fullRegistry().list(
       principal([mcpInitialScope, mcpCampaignTestScope, mcpAnalyticsReadScope]),
@@ -1051,6 +1108,9 @@ describe("MCP campaign and analytics tool registry", () => {
           "content.draft, and design.draft as well when the request names " +
           "a section style",
         "foundry.section.list": "site.read",
+        "foundry.media.list": "content.draft",
+        "foundry.media.upload": "content.draft",
+        "foundry.media.place": "content.draft",
         "foundry.design.patch": "design.draft",
         "foundry.preview.prepare": "matching draft scopes",
         "foundry.blog.create": "content.draft",
@@ -1088,7 +1148,7 @@ describe("MCP campaign and analytics tool registry", () => {
         mcpAnalyticsReadScope,
       ]),
     );
-    expect(tools).toHaveLength(29);
+    expect(tools).toHaveLength(32);
 
     for (const tool of tools) {
       const inputSchema = JSON.parse(

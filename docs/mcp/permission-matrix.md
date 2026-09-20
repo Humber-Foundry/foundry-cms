@@ -19,7 +19,7 @@ on the next call. Historical attribution remains.
 | Scope | Grants | Does not grant |
 |---|---|---|
 | `site.read` | Site metadata, schemas, published content and design resources | Drafts, analytics, subscriber data |
-| `content.draft` | Open/read workspaces and create immutable content revisions | Design changes, campaign drafts, approval, publish |
+| `content.draft` | Open/read workspaces, create immutable content revisions, and read, add and place this site's photos | Design changes, campaign drafts, approval, publish |
 | `design.draft` | Read controlled design primitives and create design revisions within schema | Raw CSS/code, component registration |
 | `campaign.draft` | Create, edit and read campaign copy revisions | Audience access, test delivery, bulk send/schedule/authorization |
 | `campaign.test` | Request one test of an exact campaign revision to Owner-configured verified test recipients | Recipient selection/read, audience access, bulk send/schedule/authorization |
@@ -57,6 +57,9 @@ Legend: **A** allowed by application authorization, **H** human-only,
 | Read a prepared preview's review state | A | A | draft scopes for that revision, own preview only | — |
 | Request immediate site/blog publish | A | A | `publication.publish` + valid human approval | — |
 | Schedule site/blog publish | A | A | `publication.schedule` + valid human approval | Executes exact authorization |
+| Read this site's photo library | A | A | `content.draft` | — |
+| Add a photo to this site's photo library | A | A | `content.draft` | — |
+| Put a photo in a page slot in a draft | A | A | `content.draft` | — |
 | Take a post out of the blog, or put one back | A | A | `content.draft` | — |
 | Take a live post off the public site | A | A | — | — |
 | Ask for a blog post to be published at a time | A | A | `publication.schedule` | — |
@@ -84,6 +87,9 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.page.delete` | `content.draft` | None | New immutable revision without that page |
 | `foundry.page.restructure` | `content.draft`, and `design.draft` as well when the request names a section style | None | New immutable revision with that page's sections changed |
 | `foundry.section.list` | `site.read` | None | None |
+| `foundry.media.list` | `content.draft` | None | None |
+| `foundry.media.upload` | `content.draft` | None | New photo in the media library. No draft revision |
+| `foundry.media.place` | `content.draft` | None | New immutable revision with that photo in that page slot |
 | `foundry.design.patch` | `design.draft` | None | New immutable revision |
 | `foundry.preview.prepare` | matching draft scopes | None | Canonical preview artifact |
 | `foundry.blog.create` | `content.draft` | None | New immutable revision holding a new post |

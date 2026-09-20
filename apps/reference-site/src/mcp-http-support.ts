@@ -165,11 +165,25 @@ export async function readBoundedText(
   maximumBytes: number,
   signal?: AbortSignal,
 ) {
+  return (await readBoundedBody(request, maximumBytes, signal)).text;
+}
+
+/**
+ * The request body as text, with the number of bytes it arrived as.
+ *
+ * A caller that applies a second, smaller limit of its own needs the real
+ * byte count, because one character of text is not one byte.
+ */
+export async function readBoundedBody(
+  request: Request,
+  maximumBytes: number,
+  signal?: AbortSignal,
+): Promise<Readonly<{ text: string; byteLength: number }>> {
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
     throw new RequestBodyLimitError();
   }
-  if (request.body === null) return "";
+  if (request.body === null) return { text: "", byteLength: 0 };
   const reader = request.body.getReader();
   const cancelReader = () => {
     void reader.cancel();
@@ -201,7 +215,7 @@ export async function readBoundedText(
     joined.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(joined);
+  return { text: new TextDecoder().decode(joined), byteLength: length };
 }
 
 export function valueDepth(value: unknown, maximumDepth: number): number {

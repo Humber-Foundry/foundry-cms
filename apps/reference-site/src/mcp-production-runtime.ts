@@ -10,11 +10,25 @@ import {
   createMcpReadApplication,
   createPublishedSiteBundle,
   createSiteApplication,
+  isMediaContentType,
+  McpMediaValidationError,
+  MediaOccurrenceConflictError,
+  MediaSiteAccessError,
+  MediaValidationError,
+  type McpConnectionPrincipal,
+  type McpMediaAsset,
+  type MediaAsset,
 } from "@humber-foundry/application";
 
 import { createBlogPostId } from "@humber-foundry/site-definition";
 
-import { createMediaAssetId } from "@humber-foundry/application";
+import {
+  createMediaAssetId,
+  createMediaOccurrenceId,
+} from "@humber-foundry/application";
+
+import { inspectImageSource } from "./image-source-metadata";
+import { loadMediaAssetApplication } from "./media-asset-runtime";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 import { installedPageComponentRegistry } from "../foundry/page-components";
@@ -234,6 +248,82 @@ export function isMcpProductionRequest(request: Request): boolean {
   );
 }
 
+/**
+ * The photo id one upload mints.
+ *
+ * It is made from this site, this connection and the retry key the agent
+ * sent, so a retry after an unknown result mints the same id and leaves one
+ * photo, not two. An agent never chooses a photo's id.
+ */
+async function mcpMediaAssetId(
+  principal: McpConnectionPrincipal,
+  idempotencyKey: string,
+) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(
+      `${principal.siteId}:${principal.actorId}:${idempotencyKey}`,
+    ),
+  );
+  return createMediaAssetId(
+    `asset_${[...new Uint8Array(digest)]
+      .slice(0, 16)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")}`,
+  );
+}
+
+/**
+ * The retry key the media library stores this request under. The library asks
+ * for at least eight characters, and marking the key as an agent's keeps an
+ * agent's retry apart from a person's.
+ */
+function mcpMediaMutationKey(idempotencyKey: string) {
+  return `mcp-media-${idempotencyKey}`;
+}
+
+/** One photo, as an MCP tool reports it. */
+function mcpMediaAssetOf(asset: MediaAsset): McpMediaAsset {
+  return {
+    assetId: asset.assetId,
+    mediaPath: `/api/media/${asset.assetId}`,
+    fileName: asset.fileName,
+    contentType: asset.contentType,
+    byteLength: asset.byteLength,
+    width: asset.width,
+    height: asset.height,
+    createdAt: asset.createdAt,
+  };
+}
+
+/**
+ * Turn a refused media command into a refusal with a named cause. A media
+ * rule the library keeps becomes a validation refusal an agent can act on;
+ * anything else is left alone so it is reported as the failure it is.
+ */
+function mcpMediaRefusal(error: unknown, fallbackReason: string) {
+  if (error instanceof McpMediaValidationError) return error;
+  if (error instanceof MediaValidationError) {
+    return new McpMediaValidationError(
+      fallbackReason,
+      "The media library refused that photo.",
+    );
+  }
+  if (error instanceof MediaOccurrenceConflictError) {
+    return new McpMediaValidationError(
+      "media_place_conflict",
+      "Another change moved that photo slot. Read the draft again and retry.",
+    );
+  }
+  if (error instanceof MediaSiteAccessError) {
+    return new McpMediaValidationError(
+      fallbackReason,
+      "That photo is not available to this connection.",
+    );
+  }
+  return error;
+}
+
 export function createProductionMcpRuntime(
   environment: McpProductionEnvironment,
   context?: Readonly<{ waitUntil(promise: Promise<unknown>): void }>,
@@ -312,6 +402,102 @@ export function createProductionMcpRuntime(
           )) !== null
         );
       },
+      async listMediaAssets({ principal }) {
+        const assets = await createD1MediaAssetStore(database).listAssets(
+          principal.siteId,
+        );
+        return assets.map(mcpMediaAssetOf);
+      },
+      async uploadMediaAsset({
+        principal,
+        fileName,
+        source,
+        idempotencyKey,
+      }) {
+        // The very same upload command the dashboard's own upload runs, with
+        // the picture's real type and size read from the bytes themselves.
+        // Nothing here is a second, looser upload path. See ADR-0037.
+        let metadata;
+        try {
+          metadata = await inspectImageSource(source);
+        } catch {
+          throw new McpMediaValidationError(
+            "media_not_an_image",
+            "That file is not a JPEG, PNG or WebP picture.",
+          );
+        }
+        if (!isMediaContentType(metadata.contentType)) {
+          throw new McpMediaValidationError(
+            "media_not_an_image",
+            "This site stores JPEG, PNG and WebP photos only.",
+          );
+        }
+        const application = await loadMediaAssetApplication(
+          createMcpContentActorId(principal),
+        );
+        try {
+          const asset = await application.commands.upload({
+            actorId: createMcpContentActorId(principal),
+            assetId: await mcpMediaAssetId(principal, idempotencyKey),
+            fileName,
+            contentType: metadata.contentType,
+            byteLength: source.byteLength,
+            width: metadata.width,
+            height: metadata.height,
+            source,
+            idempotencyKey: mcpMediaMutationKey(idempotencyKey),
+          });
+          return mcpMediaAssetOf(asset);
+        } catch (error) {
+          throw mcpMediaRefusal(error, "media_upload_refused");
+        }
+      },
+      async placeMediaOccurrence({
+        principal,
+        workspaceId,
+        occurrenceId,
+        assetId,
+        idempotencyKey,
+      }) {
+        const actorId = createMcpContentActorId(principal);
+        const application = await loadMediaAssetApplication(actorId);
+        const asset = await application.queries.getAsset(
+          createMediaAssetId(assetId),
+        );
+        if (asset === null) {
+          throw new McpMediaValidationError(
+            "media_asset_not_found",
+            "This site holds no photo with that id.",
+          );
+        }
+        const head = await application.queries.getOccurrence(
+          workspaceId,
+          createMediaOccurrenceId(occurrenceId),
+        );
+        try {
+          const placed = await application.commands.replaceOccurrence({
+            actorId,
+            workspaceId,
+            occurrenceId: createMediaOccurrenceId(occurrenceId),
+            assetId: createMediaAssetId(assetId),
+            baseRevision: head?.revision ?? 0,
+            idempotencyKey: mcpMediaMutationKey(idempotencyKey),
+          });
+          return {
+            occurrenceId: placed.occurrenceId,
+            revision: placed.revision,
+            asset: {
+              assetId: asset.assetId,
+              width: asset.width,
+              height: asset.height,
+              contentType: asset.contentType,
+            },
+          };
+        } catch (error) {
+          throw mcpMediaRefusal(error, "media_place_refused");
+        }
+      },
+      cursors,
       humanReviewUrl: (previewId) =>
         mcpPreviewReviewUrl(canonicalOrigin, previewId),
     },

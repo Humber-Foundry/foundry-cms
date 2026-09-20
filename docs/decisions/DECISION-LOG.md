@@ -41,3 +41,4 @@
 | [ADR-0034](ADR-0034-mcp-addresses-every-page.md) | MCP reads and writes every page, and a content field path is checked against the draft rather than against the installed site | Accepted | 2026-09-20 |
 | [ADR-0035](ADR-0035-mcp-page-restructure-and-draft-scoped-variants.md) | An agent changes a page's sections through one operation list, and every section style is checked against the draft | Accepted | 2026-09-20 |
 | [ADR-0036](ADR-0036-mcp-blog-post-tools.md) | An agent writes and files blog posts through the blog's own commands, and a person still decides what the public site shows | Accepted | 2026-09-20 |
+| [ADR-0037](ADR-0037-mcp-photo-tools.md) | An agent adds a photo by sending its bytes, and places it through the media library's own commands | Accepted | 2026-09-20 |

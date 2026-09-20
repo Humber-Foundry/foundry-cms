@@ -2,9 +2,13 @@ import {
   designContract,
   listEditableSiteFields,
   createBlogPostId,
+  findPageById,
   mediaAssetIdFromPublishedPath,
+  pageMediaOccurrenceId,
   serializeRichTextDocument,
   type BlogPost,
+  type PageMediaSlot,
+  type SiteMediaOccurrence,
   type BlogPostSchemaError,
   type PageSectionOperation,
   type RichTextDocument,
@@ -35,9 +39,42 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   type McpConnectionPrincipal,
+  type McpCursorBinding,
+  type McpCursorCodec,
   type McpExecutionContext,
   type McpReadAuditEvent,
 } from "./mcp-read";
+
+/**
+ * One photo in this site's media library, as an agent sees it.
+ *
+ * `mediaPath` is the site's own address for the photo, which is the only
+ * address a blog post may point at. The photo's own bytes are never returned
+ * through MCP, and neither is the person or connection that added it.
+ * See ADR-0037.
+ */
+export type McpMediaAsset = Readonly<{
+  assetId: string;
+  mediaPath: string;
+  fileName: string;
+  contentType: string;
+  byteLength: number;
+  width: number;
+  height: number;
+  createdAt: string;
+}>;
+
+/** What placing a photo in one page slot gives back. */
+export type McpPlacedMediaOccurrence = Readonly<{
+  occurrenceId: string;
+  revision: number;
+  asset: Readonly<{
+    assetId: string;
+    width: number;
+    height: number;
+    contentType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+  }>;
+}>;
 
 /**
  * What a refused MCP draft mutation records and replays.
@@ -101,6 +138,45 @@ export type McpDraftRuntime = Readonly<{
     principal: McpConnectionPrincipal;
     assetId: string;
   }): Promise<boolean>;
+  /**
+   * Every photo this site's media library holds, newest first. The list
+   * carries only what an agent needs to name and size a photo; it carries no
+   * person and no address. See ADR-0037.
+   */
+  listMediaAssets(input: {
+    principal: McpConnectionPrincipal;
+  }): Promise<ReadonlyArray<McpMediaAsset>>;
+  /**
+   * Add one photo to this site's media library.
+   *
+   * The runtime reads the picture's real type and size from the bytes and
+   * then runs the very same upload command the dashboard's own upload runs,
+   * so an agent's photo is held to the same rules. See ADR-0037.
+   */
+  uploadMediaAsset(input: {
+    principal: McpConnectionPrincipal;
+    fileName: string;
+    source: Uint8Array;
+    idempotencyKey: string;
+  }): Promise<McpMediaAsset>;
+  /**
+   * Point one page photo slot at one photo the library already holds, and
+   * answer the new occurrence and the photo's own size. This advances the
+   * media occurrence head the content revision store then requires, exactly
+   * as the dashboard's own Photos page does.
+   */
+  placeMediaOccurrence(input: {
+    principal: McpConnectionPrincipal;
+    workspaceId: ContentWorkspaceId;
+    occurrenceId: string;
+    assetId: string;
+    idempotencyKey: string;
+  }): Promise<McpPlacedMediaOccurrence>;
+  /**
+   * An opaque page marker bound to this site, this connection and this query.
+   * The media list is the only place the draft application paginates.
+   */
+  cursors: McpCursorCodec;
   replayPreview(input: {
     principal: McpConnectionPrincipal;
     workspaceId: ContentWorkspaceId;
@@ -463,10 +539,131 @@ const blogRefusalSentences: Readonly<
 
 /**
  * The named reason a post is refused for naming a picture that is not one of
- * this site's own photos. An agent may point at a photo the media library
- * already holds; uploading a new one is not an MCP tool.
+ * this site's own photos. A post may point only at a photo this site's media
+ * library already holds. An agent that needs a new one adds it with
+ * `foundry.media.upload` first. See ADR-0036 and ADR-0037.
  */
 const blogMediaNotInLibraryReason = "blog_media_not_in_library";
+
+/**
+ * The named reasons a photo tool is refused for.
+ *
+ * `media_not_an_image` covers bytes that are not one of the picture types the
+ * library stores. `media_too_large` covers a picture bigger than one tool call
+ * may carry. `media_upload_refused` covers every other rule the media library
+ * itself keeps. `media_asset_not_found` covers placing a photo this site does
+ * not hold, and `media_page_not_found` covers a page the draft does not hold.
+ * See ADR-0037.
+ */
+const mediaNotAnImageReason = "media_not_an_image";
+const mediaTooLargeReason = "media_too_large";
+const mediaUploadRefusedReason = "media_upload_refused";
+const mediaAssetNotFoundReason = "media_asset_not_found";
+const mediaPageNotFoundReason = "media_page_not_found";
+
+/**
+ * The most picture bytes one `foundry.media.upload` call may carry.
+ *
+ * The photo travels inside the tool call itself, because no MCP tool accepts a
+ * URL to fetch (threat model, "SSRF/open-world abuse"). Four mebibytes covers
+ * every ordinary web photo and bounds what one call can ask the server to hold
+ * in memory. The dashboard's own upload accepts a larger original because a
+ * person sends it over a plain form request, not a JSON-RPC call. See
+ * ADR-0037.
+ */
+export const mcpMediaUploadMaxByteLength = 4 * 1024 * 1024;
+
+/** The most photos one `foundry.media.list` page may carry. */
+export const mcpMediaListMaxPageSize = 100;
+
+/** The longest file name an uploaded photo may carry. */
+export const mcpMediaFileNameMaxLength = 255;
+
+/**
+ * A refusal the media runtime raises with a named cause of its own, so the
+ * tool can report the same reason a program branches on.
+ */
+export class McpMediaValidationError extends Error {
+  constructor(
+    readonly reason: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "McpMediaValidationError";
+  }
+}
+
+/** Which page photo slot a placement names. */
+export type McpMediaSlot = PageMediaSlot;
+
+export type McpPlaceMediaInput = McpPageMutationInput &
+  Readonly<{
+    pageId: string;
+    slot: McpMediaSlot;
+    assetId: string;
+  }>;
+
+/**
+ * Read the picture bytes a caller sent.
+ *
+ * The encoded text is checked for its shape and its length before anything is
+ * decoded, so an oversized or malformed payload is refused rather than turned
+ * into a large buffer first.
+ */
+function decodeMediaUploadBytes(bytesBase64: string): Uint8Array {
+  const encoded = bytesBase64;
+  // Standard base64, padded, no line breaks. Every other text is refused
+  // before it reaches the decoder.
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded) || encoded.length % 4 !== 0) {
+    throw new McpMediaValidationError(
+      mediaNotAnImageReason,
+      "The picture is not base64 text.",
+    );
+  }
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  const byteLength = (encoded.length / 4) * 3 - padding;
+  if (byteLength <= 0) {
+    throw new McpMediaValidationError(
+      mediaNotAnImageReason,
+      "The picture is empty.",
+    );
+  }
+  if (byteLength > mcpMediaUploadMaxByteLength) {
+    throw new McpMediaValidationError(
+      mediaTooLargeReason,
+      `A photo sent through this tool must be ${mcpMediaUploadMaxByteLength} bytes or smaller. Send a smaller copy.`,
+    );
+  }
+  let binary: string;
+  try {
+    binary = atob(encoded);
+  } catch {
+    throw new McpMediaValidationError(
+      mediaNotAnImageReason,
+      "The picture is not base64 text.",
+    );
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+/**
+ * Turn a refused photo command into the tool error an agent acts on. A
+ * refusal the media runtime named keeps its own reason; anything else becomes
+ * one named refusal rather than an unexplained failure.
+ */
+function mediaRefusal(error: unknown): unknown {
+  if (error instanceof McpReadError) return error;
+  if (error instanceof McpMediaValidationError) {
+    return new McpReadError("VALIDATION_FAILED", error.message, {
+      reason: error.reason,
+    });
+  }
+  return error;
+}
 
 /**
  * The named reason a post write is refused for when the draft turned it down
@@ -766,7 +963,7 @@ export function createMcpDraftApplication({
    * the dashboard does.
    *
    * `recordKey` is the name the result reports the record under: `pageId` for
-   * a page, `postId` for a blog post.
+   * a page, `postId` for a blog post, `occurrenceId` for a page photo slot.
    *
    * `replayedRecordId` names the record a stored receipt was for. A receipt
    * records the revision, not the record, so a create and a duplicate rebuild
@@ -786,7 +983,7 @@ export function createMcpDraftApplication({
     namedRefusal = () => null,
   }: DraftRecordMutation<Input> &
     Readonly<{
-      recordKey: "pageId" | "postId";
+      recordKey: "pageId" | "postId" | "occurrenceId";
       run(
         application: ContentRevisionApplication,
         command: PageMutationCommand,
@@ -1507,6 +1704,209 @@ export function createMcpDraftApplication({
           };
         },
         replayedRecordId: async () => input.postId,
+      });
+    },
+    /**
+     * List the photos this site's media library holds.
+     *
+     * The list is a page at a time with an opaque marker, the same way the
+     * published content list is. It names each photo, its type and its size,
+     * and the site's own address for it, which is the address a blog post
+     * must use. It never names who added a photo. See ADR-0037.
+     */
+    listMedia(
+      principal: McpConnectionPrincipal,
+      input: Readonly<{ limit: number; cursor: string | null }>,
+      context: McpExecutionContext,
+    ) {
+      return base.executeScoped({
+        principal,
+        operation: "foundry.media.list",
+        auditInput: input,
+        requiredScopes: [mcpContentDraftScope],
+        context,
+        async run(execution) {
+          if (
+            !Number.isInteger(input.limit) ||
+            input.limit < 1 ||
+            input.limit > mcpMediaListMaxPageSize
+          ) {
+            throw new McpReadError(
+              "VALIDATION_FAILED",
+              `The page size must be between 1 and ${mcpMediaListMaxPageSize}.`,
+            );
+          }
+          const query = "media:all";
+          let offset = 0;
+          if (input.cursor !== null) {
+            const cursor = input.cursor;
+            let binding: McpCursorBinding;
+            try {
+              binding = await execution.run(() =>
+                runtime.cursors.decode(cursor),
+              );
+            } catch {
+              throw new McpReadError(
+                "VALIDATION_FAILED",
+                "The pagination cursor is invalid.",
+              );
+            }
+            if (
+              binding.siteId !== principal.siteId ||
+              binding.actorId !== principal.actorId ||
+              binding.query !== query ||
+              !Number.isInteger(binding.offset) ||
+              binding.offset < 0
+            ) {
+              throw new McpReadError(
+                "VALIDATION_FAILED",
+                "The pagination cursor is invalid.",
+              );
+            }
+            offset = binding.offset;
+          }
+          const allAssets = await execution.run(() =>
+            runtime.listMediaAssets({ principal }),
+          );
+          const items = allAssets.slice(offset, offset + input.limit);
+          const nextOffset = offset + items.length;
+          return {
+            items,
+            nextCursor:
+              nextOffset < allAssets.length
+                ? await execution.run(() =>
+                    runtime.cursors.encode({
+                      siteId: principal.siteId,
+                      actorId: principal.actorId,
+                      query,
+                      offset: nextOffset,
+                    }),
+                  )
+                : null,
+          };
+        },
+      });
+    },
+    /**
+     * Add one photo to this site's media library.
+     *
+     * The picture travels as base64 inside the call, because no MCP tool
+     * accepts a web address to fetch. The runtime reads the real picture type
+     * and size from the bytes themselves, never from what the caller claimed,
+     * and then runs the media library's own upload command. An upload writes
+     * no draft revision, so it keeps its receipt in the media library's own
+     * audit rather than the draft receipt table. See ADR-0037.
+     */
+    uploadMedia(
+      principal: McpConnectionPrincipal,
+      input: Readonly<{
+        fileName: string;
+        bytesBase64: string;
+        idempotencyKey: string;
+      }>,
+      context: McpExecutionContext,
+    ) {
+      return base.executeScoped({
+        principal,
+        operation: "foundry.media.upload",
+        // The picture's own bytes never enter the audit record. The file name
+        // and the retry key identify the request on their own.
+        auditInput: {
+          fileName: input.fileName,
+          idempotencyKey: input.idempotencyKey,
+        },
+        requiredScopes: [mcpContentDraftScope],
+        context,
+        async run(execution) {
+          try {
+            const source = decodeMediaUploadBytes(input.bytesBase64);
+            return await execution.run(() =>
+              runtime.uploadMediaAsset({
+                principal,
+                fileName: input.fileName,
+                source,
+                idempotencyKey: input.idempotencyKey,
+              }),
+            );
+          } catch (error) {
+            throw mediaRefusal(error);
+          }
+        },
+      });
+    },
+    /**
+     * Put one photo in one page's hero or detail slot, inside the draft.
+     *
+     * The photo has to be one this site's media library already holds, and
+     * the page has to be one this draft holds. The result is a new immutable
+     * revision, so the photo shows in the preview a person reviews.
+     */
+    placeMedia(
+      principal: McpConnectionPrincipal,
+      input: McpPlaceMediaInput,
+      context: McpExecutionContext,
+    ) {
+      return draftRecordMutation({
+        principal,
+        operation: "foundry.media.place",
+        input,
+        context,
+        recordKey: "occurrenceId",
+        refusalReason: mediaUploadRefusedReason,
+        async run(application, command) {
+          const current = await application.queries.getCurrent();
+          const page = findPageById(current.definition, input.pageId);
+          if (page === undefined) {
+            throw new McpReadError(
+              "VALIDATION_FAILED",
+              "This draft has no page with that id.",
+              { reason: mediaPageNotFoundReason },
+            );
+          }
+          const occurrenceId = pageMediaOccurrenceId(page, input.slot);
+          let placed: McpPlacedMediaOccurrence;
+          try {
+            placed = await runtime.placeMediaOccurrence({
+              principal,
+              workspaceId: command.workspaceId,
+              occurrenceId,
+              assetId: input.assetId,
+              idempotencyKey: command.idempotencyKey,
+            });
+          } catch (error) {
+            throw mediaRefusal(error);
+          }
+          const saved = await application.commands.saveMediaOccurrence({
+            ...command,
+            occurrence: {
+              occurrenceId:
+                placed.occurrenceId as SiteMediaOccurrence["occurrenceId"],
+              revision: placed.revision,
+              asset: placed.asset,
+              crop: null,
+            },
+          });
+          return {
+            revision: saved,
+            recordId: placed.occurrenceId,
+            // The draft already stood at the saved revision before this call,
+            // so the draft answered from its own receipt rather than writing
+            // a second time.
+            replayed: saved.revision === current.revision,
+          };
+        },
+        replayedRecordId: async (workspaceId) => {
+          const application = await load(principal, workspaceId);
+          const current = await application.queries.getCurrent();
+          const page = findPageById(current.definition, input.pageId);
+          if (page === undefined) {
+            throw new McpReadError(
+              "TEMPORARILY_UNAVAILABLE",
+              "The replayed photo result is unavailable.",
+            );
+          }
+          return pageMediaOccurrenceId(page, input.slot);
+        },
       });
     },
     preparePreview(
