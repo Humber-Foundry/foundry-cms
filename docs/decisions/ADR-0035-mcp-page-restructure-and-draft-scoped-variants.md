@@ -136,7 +136,8 @@ allows, so a refusal is stored and a replayed refusal repeats the first one.
 
 ### 6. An agent can read the section types it may use
 
-`foundry.section.list` answers with every registered section type, the words an
+`foundry.section.list` answers with every section type this installation
+registers, the words an
 owner reads for it, the section styles it offers, and the fields
 `foundry.content.patch` can write on it. It needs `site.read` only, because it
 describes the product rather than any one draft.

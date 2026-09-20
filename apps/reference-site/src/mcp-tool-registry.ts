@@ -8,6 +8,7 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
+  mcpRestructureScopes,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type CampaignId,
@@ -796,30 +797,6 @@ function parseSectionOperation(
     };
   }
   return null;
-}
-
-/**
- * The draft scopes a restructure request asks for, read from the request as it
- * arrived rather than from a parsed one.
- *
- * `mcpRestructureScopes` answers this for a request that parsed. A request
- * that did not parse is still audited, and naming only the content scope there
- * would understate what the caller tried to do.
- */
-function requestedRestructureScopes(
-  input: unknown,
-): ReadonlyArray<string> {
-  const namesASectionStyle =
-    isRecord(input) &&
-    Array.isArray(input.operations) &&
-    input.operations.some(
-      (operation) =>
-        isRecord(operation) &&
-        (operation.op === "set_variant" || operation.variant !== undefined),
-    );
-  return namesASectionStyle
-    ? [mcpContentDraftScope, mcpDesignDraftScope]
-    : [mcpContentDraftScope];
 }
 
 function parseRestructurePageInput(input: unknown) {
@@ -1673,7 +1650,7 @@ const descriptors = {
   "foundry.page.restructure": {
     name: "foundry.page.restructure",
     description:
-      "Add, remove, move, copy and arrange the sections of one page in the draft, as a new immutable revision.",
+      "Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision.",
     inputSchema: pageToolInputSchema({
       pageId: pageIdSchema,
       operations: {
@@ -2335,7 +2312,11 @@ export function createMcpToolRegistry(application: McpReadApplication) {
           "foundry.page.restructure",
           input,
           context,
-          requestedRestructureScopes(input),
+          mcpRestructureScopes(
+            isRecord(input) && Array.isArray(input.operations)
+              ? input.operations
+              : [],
+          ),
         );
       }
       return application.restructurePage!(principal, parsed, context);

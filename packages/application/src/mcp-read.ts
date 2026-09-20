@@ -363,7 +363,7 @@ function isAuthenticConnection(
  * list, is left out, because naming it would invite an edit that is always
  * refused. See ADR-0035.
  */
-function registeredSectionTypes(registry: PageComponentRegistry) {
+function siteSectionTypes(registry: PageComponentRegistry) {
   return registry.allowedComponents.map((sectionType) => {
     const registration = registry.components[sectionType]!;
     const variant = Object.hasOwn(designContract.variants, sectionType)
@@ -808,7 +808,7 @@ export function createMcpReadApplication({
         auditInput: {},
         context,
         async run() {
-          return { sections: registeredSectionTypes(pageComponents) };
+          return { sections: siteSectionTypes(pageComponents) };
         },
       });
     },

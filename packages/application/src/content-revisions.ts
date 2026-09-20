@@ -289,8 +289,8 @@ export type DeletePageCommand = PageMutationCommand &
   Readonly<{ pageId: string }>;
 
 /**
- * Change which sections one page holds, in which order, and how they are
- * arranged.
+ * Change which sections one page holds, in which order, and in which section
+ * style.
  *
  * It takes the same five things every other page operation takes, plus the
  * page and the list of section operations. The operations themselves are

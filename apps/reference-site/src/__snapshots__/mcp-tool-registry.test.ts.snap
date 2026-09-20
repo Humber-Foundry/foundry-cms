@@ -155,7 +155,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": false,
     },
-    "description": "Add, remove, move, copy and arrange the sections of one page in the draft, as a new immutable revision.",
+    "description": "Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision.",
     "execution": {
       "taskSupport": "forbidden",
     },

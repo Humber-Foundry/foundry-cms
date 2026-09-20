@@ -1910,7 +1910,7 @@ describe("MCP page restructure tool", () => {
     ).toHaveLength(4);
   });
 
-  it("needs the content draft scope, and the design scope only to arrange", async () => {
+  it("needs the content draft scope, and the design scope only to choose a section style", async () => {
     const withContent = await draftWithPage(
       [mcpInitialScope, mcpContentDraftScope],
       "open-restructure-scope-1",
@@ -1960,7 +1960,7 @@ describe("MCP page restructure tool", () => {
     });
   });
 
-  it("arranges a section on a page made inside the draft when both scopes are held", async () => {
+  it("styles a section on a page made inside the draft when both scopes are held", async () => {
     const { fixtureValue, workspaceId, pageId } = await draftWithPage(
       [mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope],
       "open-restructure-arrange",
@@ -2096,7 +2096,7 @@ describe("MCP page restructure tool", () => {
 });
 
 describe("MCP design tool on a draft-made page", () => {
-  it("arranges a section the installed site never held, and names why it refuses", async () => {
+  it("styles a section the installed site never held, and names why it refuses", async () => {
     const fixtureValue = fixture([
       mcpInitialScope,
       mcpContentDraftScope,

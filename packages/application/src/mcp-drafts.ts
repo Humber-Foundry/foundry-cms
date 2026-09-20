@@ -320,21 +320,27 @@ export type McpRestructurePageInput = McpPageMutationInput &
  * The draft scopes one restructure needs.
  *
  * Changing which sections a page holds is a content change, so every
- * restructure needs the content draft scope. Naming a section style is choosing
- * a design value, so a request that names one needs the design draft scope as
- * well. The request is read for this before anything is loaded, so an agent
- * that lacks the scope is told which scope it lacks rather than being refused
- * afterwards. See ADR-0035.
+ * restructure needs the content draft scope. Naming a section style is
+ * choosing a design value, so a request that names one needs the design draft
+ * scope as well. See ADR-0035.
+ *
+ * The operations are read as they arrived, before anything is parsed or
+ * loaded, so this answers for a malformed request as well as a well-formed
+ * one. That is deliberate: a request is audited whether or not it parsed, and
+ * naming only the content scope there would understate what the caller tried
+ * to do. It is also why this is the only place the rule is written.
  */
 export function mcpRestructureScopes(
-  operations: ReadonlyArray<PageSectionOperation>,
+  operations: ReadonlyArray<unknown>,
 ): ReadonlyArray<string> {
-  const namesAnArrangement = operations.some(
+  const namesASectionStyle = operations.some(
     (operation) =>
-      operation.op === "set_variant" ||
-      (operation.op === "add" && operation.variant !== undefined),
+      typeof operation === "object" &&
+      operation !== null &&
+      "variant" in operation &&
+      (operation as { variant: unknown }).variant !== undefined,
   );
-  return namesAnArrangement
+  return namesASectionStyle
     ? [mcpContentDraftScope, mcpDesignDraftScope]
     : [mcpContentDraftScope];
 }

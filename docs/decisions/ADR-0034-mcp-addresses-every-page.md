@@ -164,8 +164,8 @@ installed definition, so a section on a page an agent made in a draft could not
 have its variant changed through MCP. That was the same fault this record fixes
 for content, in the one place it had not been fixed.
 [ADR-0035](ADR-0035-mcp-page-restructure-and-draft-scoped-variants.md) closes
-it: the `componentId` is now checked against the draft, and choosing an
-arrangement needs `design.draft` whether the section is new or old.
+it: the `componentId` is now checked against the draft, and choosing a
+section style needs `design.draft` whether the section is new or old.
 
 The reference site stays a one-page published site. The page tools work inside
 a draft, and the draft is only published if a person approves it.

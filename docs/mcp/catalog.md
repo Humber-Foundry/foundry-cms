@@ -140,7 +140,7 @@ Annotations are shown as
 | `foundry.page.rename` | `F / T / T / F` | Change one page's name and web address in the draft, as a new immutable revision. |
 | `foundry.page.duplicate` | `F / F / T / F` | Copy one page in the draft under a new name and web address, as a new immutable revision. |
 | `foundry.page.delete` | `F / T / T / F` | Remove one page from the draft, as a new immutable revision. |
-| `foundry.page.restructure` | `F / T / T / F` | Add, remove, move, copy and arrange the sections of one page in the draft, as a new immutable revision. |
+| `foundry.page.restructure` | `F / T / T / F` | Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision. |
 | `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their section styles and their editable fields. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
 | `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
