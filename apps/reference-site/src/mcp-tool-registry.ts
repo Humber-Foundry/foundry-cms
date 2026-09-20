@@ -895,6 +895,41 @@ function parseBlogScheduleRequestInput(input: unknown) {
   };
 }
 
+/**
+ * One campaign send-time request's arguments, or `null` when anything about
+ * them is not what this command takes. It mirrors
+ * `parseBlogScheduleRequestInput`, because the two requests take the same
+ * shape with a campaign in place of a post.
+ */
+function parseCampaignScheduleRequestInput(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, [
+      "campaignId",
+      "sendAt",
+      "reportingTimeZone",
+      "idempotencyKey",
+    ]) ||
+    typeof input.sendAt !== "string" ||
+    !publishAtShape.test(input.sendAt) ||
+    typeof input.reportingTimeZone !== "string" ||
+    input.reportingTimeZone.length < 1 ||
+    input.reportingTimeZone.length > 100 ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  const campaignId = parseCampaignId(input.campaignId);
+  return campaignId === null
+    ? null
+    : {
+        campaignId,
+        sendAt: input.sendAt,
+        reportingTimeZone: input.reportingTimeZone,
+        idempotencyKey: input.idempotencyKey,
+      };
+}
+
 function parsePageMutationInput(
   input: unknown,
   extraKeys: ReadonlyArray<string>,
@@ -2805,24 +2840,6 @@ const descriptors = {
   },
 } as const;
 
-/**
- * One send-time request's arguments, or `null` when the campaign id is not
- * one this product mints. The caller has already checked every other field,
- * so this is the last thing that can turn the request down before the
- * application sees it.
- */
-function parseScheduleRequest(
-  campaignIdValue: unknown,
-  sendAt: string,
-  reportingTimeZone: string,
-  idempotencyKey: string,
-) {
-  const campaignId = parseCampaignId(campaignIdValue);
-  return campaignId === null
-    ? null
-    : { campaignId, sendAt, reportingTimeZone, idempotencyKey };
-}
-
 export function createMcpToolRegistry(application: McpReadApplication) {
   const handlers = {
     "foundry.site.get": async (
@@ -3453,26 +3470,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       input,
       context,
     ) => {
-      const parsed =
-        isRecord(input) &&
-        hasExactKeys(input, [
-          "campaignId",
-          "sendAt",
-          "reportingTimeZone",
-          "idempotencyKey",
-        ]) &&
-        validIdempotencyKey(input.idempotencyKey) &&
-        typeof input.sendAt === "string" &&
-        publishAtShape.test(input.sendAt) &&
-        typeof input.reportingTimeZone === "string" &&
-        input.reportingTimeZone.trim() !== ""
-          ? parseScheduleRequest(
-              input.campaignId,
-              input.sendAt,
-              input.reportingTimeZone,
-              input.idempotencyKey,
-            )
-          : null;
+      const parsed = parseCampaignScheduleRequestInput(input);
       if (parsed === null) {
         return application.rejectInvalidInput(
           principal,
