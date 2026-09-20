@@ -4555,6 +4555,16 @@ h3.media-places-heading {
   background: var(--dash-accent-tint);
 }
 
+/* The round mark is only what the owner looks at — the whole label is what
+ * they tap — but a default 13px mark is hard to see, so it is sized up. */
+.page-lifecycle-layouts input[type="radio"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.15rem 0 0;
+  flex: none;
+  accent-color: var(--dash-accent);
+}
+
 .page-lifecycle-layouts label > span {
   display: grid;
   gap: 0.25rem;
