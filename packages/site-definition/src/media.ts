@@ -2,10 +2,9 @@ import type { SiteDefinition, SiteMediaOccurrence } from "./index";
 import { findPageByMediaOccurrenceId, replacePage } from "./pages";
 
 /**
- * Raised when a media occurrence names no page of this site, or when two
- * pages claim the same occurrence id. Binding the photo to some other page
- * would put it on a page the occurrence id does not name, which
- * `isBaseSiteDefinition` refuses, so the caller is told instead.
+ * Raised when a media occurrence names no page of this site. Binding the photo
+ * to some other page would put it on a page the occurrence id does not name,
+ * which `isBaseSiteDefinition` refuses, so the caller is told instead.
  */
 export class SiteMediaOccurrencePageError extends Error {
   constructor(readonly occurrenceId: string) {

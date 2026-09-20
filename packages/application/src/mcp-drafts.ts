@@ -546,20 +546,31 @@ const blogRefusalSentences: Readonly<
 const blogMediaNotInLibraryReason = "blog_media_not_in_library";
 
 /**
- * The named reasons a photo tool is refused for.
+ * Every named reason a photo tool is refused for, written once so the draft
+ * and the installation's own media steps cannot name them differently.
  *
- * `media_not_an_image` covers bytes that are not one of the picture types the
- * library stores. `media_too_large` covers a picture bigger than one tool call
- * may carry. `media_upload_refused` covers every other rule the media library
- * itself keeps. `media_asset_not_found` covers placing a photo this site does
- * not hold, and `media_page_not_found` covers a page the draft does not hold.
- * See ADR-0037.
+ * `notAnImage` covers bytes that are not one of the picture types the library
+ * stores. `tooLarge` covers a picture bigger than one tool call may carry.
+ * `uploadRefused` and `placeRefused` cover any other rule the media library
+ * itself keeps, on an upload and on a placement. `assetNotFound` covers a
+ * photo this site does not hold, `pageNotFound` a page this draft does not
+ * hold, and `placeConflict` a photo slot another change moved first. See
+ * ADR-0037.
  */
-const mediaNotAnImageReason = "media_not_an_image";
-const mediaTooLargeReason = "media_too_large";
-const mediaUploadRefusedReason = "media_upload_refused";
-const mediaAssetNotFoundReason = "media_asset_not_found";
-const mediaPageNotFoundReason = "media_page_not_found";
+export const mcpMediaRefusalReasons = Object.freeze({
+  notAnImage: "media_not_an_image",
+  tooLarge: "media_too_large",
+  uploadRefused: "media_upload_refused",
+  placeRefused: "media_place_refused",
+  placeConflict: "media_place_conflict",
+  assetNotFound: "media_asset_not_found",
+  pageNotFound: "media_page_not_found",
+} as const);
+
+const mediaNotAnImageReason = mcpMediaRefusalReasons.notAnImage;
+const mediaTooLargeReason = mcpMediaRefusalReasons.tooLarge;
+const mediaPlaceRefusedReason = mcpMediaRefusalReasons.placeRefused;
+const mediaPageNotFoundReason = mcpMediaRefusalReasons.pageNotFound;
 
 /**
  * The most picture bytes one `foundry.media.upload` call may carry.
@@ -1853,7 +1864,7 @@ export function createMcpDraftApplication({
         input,
         context,
         recordKey: "occurrenceId",
-        refusalReason: mediaUploadRefusedReason,
+        refusalReason: mediaPlaceRefusedReason,
         async run(application, command) {
           const current = await application.queries.getCurrent();
           const page = findPageById(current.definition, input.pageId);

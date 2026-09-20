@@ -108,8 +108,11 @@ names.**
 
 It bound every occurrence to the home page, which was right when a site had one
 page. It now reads the page from the occurrence id with
-`findPageByMediaOccurrenceId` and refuses when no single page claims it, which
-the draft reports as "This draft has no page for that photo slot." The
+`findPageByMediaOccurrenceId` and refuses when no page claims it, which the
+draft reports as "This draft has no page for that photo slot." Two pages claim
+one id only when a page below the home page takes the page id `home`;
+`occurrence_home_hero` and `occurrence_home_detail` are the home page's own
+reserved pair, so the home page wins that tie and can still hold a photo. The
 dashboard sends only `occurrence_home_*`, which still resolves to the home
 page, so nothing a person does changes.
 

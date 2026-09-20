@@ -401,7 +401,8 @@ schema bounds the base64 text, and a photo a little over the limit is refused
 with the named reason `media_too_large`, which says to send a smaller copy.
 The picture type and size are read from the bytes themselves, never from what
 the caller claimed, and the picture must be a JPEG, PNG or WebP; anything else
-is refused with `media_not_an_image`. An agent never chooses a photo's id: the
+is refused with `media_not_an_image`. Any other rule the media library keeps is
+refused with `media_upload_refused`. An agent never chooses a photo's id: the
 server mints it from the retry key, so sending the same request twice leaves
 one photo. The result reports the photo exactly as the list does.
 
@@ -416,7 +417,11 @@ that page's slot as a new immutable revision, and reports the slot as
 `occurrenceId`. A page the agent made inside the same draft can take a photo,
 because the slot is worked out from the draft's own page list. Placing on a
 page this draft does not hold is refused with `media_page_not_found`, and
-naming a photo this site does not hold with `media_asset_not_found`.
+naming a photo this site does not hold with `media_asset_not_found`. A slot
+another change moved first is refused with `media_place_conflict`, and any
+other rule the media library keeps with `media_place_refused`. Every refusal
+carries a named reason, and repeating the same request repeats the first
+refusal word for word.
 
 A photo goes into a **post** through the post's own fields rather than through
 this tool: `foundry.blog.create` and `foundry.blog.update` take `mainImage`,

@@ -11,6 +11,7 @@ import {
   createPublishedSiteBundle,
   createSiteApplication,
   isMediaContentType,
+  mcpMediaRefusalReasons,
   McpMediaValidationError,
   McpReadError,
   MediaMutationInProgressError,
@@ -320,7 +321,7 @@ function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
   }
   if (error instanceof MediaOccurrenceConflictError) {
     return new McpMediaValidationError(
-      "media_place_conflict",
+      mcpMediaRefusalReasons.placeConflict,
       "Another change moved that photo slot. Read the draft again and retry.",
     );
   }
@@ -440,13 +441,13 @@ export function createProductionMcpRuntime(
           metadata = await inspectImageSource(source);
         } catch {
           throw new McpMediaValidationError(
-            "media_not_an_image",
+            mcpMediaRefusalReasons.notAnImage,
             "That file is not a JPEG, PNG or WebP picture.",
           );
         }
         if (!isMediaContentType(metadata.contentType)) {
           throw new McpMediaValidationError(
-            "media_not_an_image",
+            mcpMediaRefusalReasons.notAnImage,
             "This site stores JPEG, PNG and WebP photos only.",
           );
         }
@@ -470,7 +471,10 @@ export function createProductionMcpRuntime(
           });
           return mcpMediaAssetOf(asset);
         } catch (error) {
-          throw mediaLibraryRefusal(error, "media_upload_refused");
+          throw mediaLibraryRefusal(
+            error,
+            mcpMediaRefusalReasons.uploadRefused,
+          );
         }
       },
       async placeMediaOccurrence({
@@ -490,7 +494,7 @@ export function createProductionMcpRuntime(
         );
         if (asset === null) {
           throw new McpMediaValidationError(
-            "media_asset_not_found",
+            mcpMediaRefusalReasons.assetNotFound,
             "This site holds no photo with that id.",
           );
         }
@@ -518,7 +522,10 @@ export function createProductionMcpRuntime(
             },
           };
         } catch (error) {
-          throw mediaLibraryRefusal(error, "media_place_refused");
+          throw mediaLibraryRefusal(
+            error,
+            mcpMediaRefusalReasons.placeRefused,
+          );
         }
       },
       cursors,
