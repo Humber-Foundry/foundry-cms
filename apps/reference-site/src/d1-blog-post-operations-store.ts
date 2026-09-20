@@ -32,10 +32,10 @@ import type { D1DatabaseBinding } from "./d1-human-access-store";
  *
  * It is either an active owner or editor of this site, or an active MCP
  * connection that holds every permission the request evaluated. A connection
- * is its own actor, so it never borrows a person's membership, and the three
+ * is its own actor, so it never borrows a person's membership, and the four
  * MCP binds are NULL when a person ran the command. See ADR-0036.
  */
-function contentAuthoritySql(binds: {
+export function contentAuthoritySql(binds: {
   site: string;
   actor: string;
   connection: string;
@@ -83,7 +83,7 @@ function contentAuthoritySql(binds: {
  * permission this command needs. They arrive in the order
  * `contentAuthoritySql` names them.
  */
-function mcpAuthorityBinds(
+export function mcpAuthorityBinds(
   authority: McpBlogOperationAuthority | undefined,
 ): readonly [
   string | null,

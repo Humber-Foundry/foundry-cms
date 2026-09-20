@@ -339,10 +339,10 @@ function blogRefusal(error: ContentRevisionValidationError) {
 }
 
 /**
- * What every MCP page tool takes: the draft, the revision the agent read
- * before it decided, and the key that makes a retry safe. It is the same
- * front as `foundry.content.patch`, because a page operation is the same kind
- * of draft write.
+ * What every MCP tool that writes a draft record takes: the draft, the
+ * revision the agent read before it decided, and the key that makes a retry
+ * safe. It is the same front as `foundry.content.patch`, because a page
+ * operation and a blog post write are the same kind of draft write.
  */
 export type McpPageMutationInput = Readonly<{
   workspaceId: ContentWorkspaceId;
@@ -521,11 +521,28 @@ async function requireOwnMediaReferences(
   post: McpBlogPostContent,
   holdsAsset: (assetId: string) => Promise<boolean>,
 ) {
-  for (const { field, address } of blogPostMediaFields(post)) {
+  const fields = blogPostMediaFields(post);
+  // A post often uses the same photo twice, as its header and its share
+  // picture, so each photo is looked up once however often it appears.
+  const assetIds = new Set(
+    fields.flatMap(({ address }) => {
+      const assetId = mediaAssetIdFromPublishedPath(address);
+      return assetId === null ? [] : [assetId];
+    }),
+  );
+  const held = new Map(
+    await Promise.all(
+      [...assetIds].map(
+        async (assetId) =>
+          [assetId, await holdsAsset(assetId)] as const,
+      ),
+    ),
+  );
+  for (const { field, address } of fields) {
     const assetId = mediaAssetIdFromPublishedPath(address);
     // The refusal names the field rather than repeating the address, so
     // nothing a caller wrote is echoed back into a client's screen.
-    if (assetId === null || !(await holdsAsset(assetId))) {
+    if (assetId === null || held.get(assetId) !== true) {
       throw new McpReadError(
         "VALIDATION_FAILED",
         `The picture at ${field} is not one of this site's photos. Use the media path of a photo the media library already holds.`,

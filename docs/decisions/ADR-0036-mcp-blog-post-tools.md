@@ -51,8 +51,13 @@ approval.**
 `commands.restore` through `restoreArchivedBlogPostAsDraft`.
 `foundry.blog.schedule_request` calls `commands.proposeSchedule`. Nothing about
 the blog's rules is written a second time in the MCP layer. The MCP front adds
-only the connection's permission, the replay handling, the base-revision check
-and a refusal an agent can read.
+only the connection's permission, the replay handling and a refusal an agent
+can read.
+
+The two draft writes also carry the revision the agent read, as every draft
+tool does. The three collection commands do not: they name the post and act on
+it as it stands, the way the dashboard's own controls do, and their retry key
+is what makes a repeat safe.
 
 ### 2. An MCP connection is its own actor, so the blog commands learned to
 accept one
@@ -77,9 +82,10 @@ change a person made are told apart afterwards.
 
 The reference site restores a post through `claimRestore` and the restore
 initialization extension rather than through `commands.restore`, so the MCP
-check for restore runs in `restoreArchivedBlogPostAsDraftCommand` and again in
-the `claimRestore` statement. `commands.restore` carries the same branch so
-the command surface stays uniform.
+check for restore runs in `restoreArchivedBlogPostAsDraftCommand`, again in the
+`claimRestore` statement, and once more in the statement the extension writes.
+`commands.restore` carries the same branch so the command surface stays
+uniform.
 
 ### 3. Archiving is content work, and it does not take a live post off the site
 

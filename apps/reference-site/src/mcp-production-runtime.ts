@@ -296,10 +296,19 @@ export function createProductionMcpRuntime(
         );
       },
       async mediaLibraryHoldsAsset({ assetId }) {
+        // An address can name anything after `/api/media/`. A name this
+        // site could never have given a photo is simply not one of its
+        // photos, so it answers no rather than failing the request.
+        let mediaAssetId;
+        try {
+          mediaAssetId = createMediaAssetId(assetId);
+        } catch {
+          return false;
+        }
         return (
           (await createD1MediaAssetStore(database).getAsset(
             installedSiteDefinition.site.id,
-            createMediaAssetId(assetId),
+            mediaAssetId,
           )) !== null
         );
       },

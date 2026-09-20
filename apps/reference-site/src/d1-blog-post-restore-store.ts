@@ -1,11 +1,16 @@
 import type {
   BlogPostOperationalState,
+  McpBlogOperationAuthority,
   RestoredBlogPostDraft,
 } from "@humber-foundry/application";
 
 import type { D1ContentRevisionInitializationExtension } from "./d1-content-revision-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createBlogPostAuditEventId } from "./d1-blog-post-operation-audit";
+import {
+  contentAuthoritySql,
+  mcpAuthorityBinds,
+} from "./d1-blog-post-operations-store";
 
 export function createD1BlogPostRestoreInitializationExtension(input: {
   database: D1DatabaseBinding;
@@ -13,6 +18,12 @@ export function createD1BlogPostRestoreInitializationExtension(input: {
   actorId: string;
   sourcePostRevisionId: string;
   requestId: string;
+  /**
+   * Set when an MCP connection asked for the restore. The statement then
+   * accepts the connection on its own permissions instead of a person's
+   * membership. See ADR-0036.
+   */
+  authority?: McpBlogOperationAuthority;
 }): D1ContentRevisionInitializationExtension {
   return {
     blogPostAdvanceAuthority: "archived-restore",
@@ -65,12 +76,14 @@ export function createD1BlogPostRestoreInitializationExtension(input: {
                  AND current_revision = ?7
                  AND current_revision_id = ?8
              )
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?2 AND id = ?6
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
-             )`,
+             AND ${contentAuthoritySql({
+               site: "?2",
+               actor: "?6",
+               connection: "?9",
+               mcpActor: "?10",
+               scopes: "?11",
+               pinnedScope: "?12",
+             })}`,
         )
         .bind(
           revision.createdAt,
@@ -81,6 +94,7 @@ export function createD1BlogPostRestoreInitializationExtension(input: {
           input.actorId,
           post.revision,
           artifact.postRevisionId,
+          ...mcpAuthorityBinds(input.authority),
         ),
       input.database
         .prepare(

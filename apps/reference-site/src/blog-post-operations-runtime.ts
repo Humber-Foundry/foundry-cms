@@ -558,6 +558,9 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
         actorId: input.actorId,
         sourcePostRevisionId: input.selectedPostRevisionId,
         requestId: input.idempotencyKey,
+        ...(input.authority === undefined
+          ? {}
+          : { authority: input.authority }),
       }),
     );
   let revision;

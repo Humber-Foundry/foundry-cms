@@ -1,5 +1,3 @@
-import type { SiteId } from "@humber-foundry/site-definition";
-
 import {
   BlogPostOperationError,
   resolvePostPublicationInstant,
@@ -166,7 +164,7 @@ export function createMcpBlogApplication({
     postId: string,
   ) {
     const post = await runtime.findPost({ principal, postId });
-    if (post === null || post.siteId !== (principal.siteId as SiteId)) {
+    if (post === null || post.siteId !== principal.siteId) {
       throw new McpReadError(
         "OBJECT_NOT_FOUND",
         "The requested object was not found.",

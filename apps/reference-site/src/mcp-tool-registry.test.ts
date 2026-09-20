@@ -354,11 +354,14 @@ describe("MCP draft tool registry", () => {
         // that acts on the collection rather than the draft: it names the
         // post it acts on, names no workspace, and has no revision to
         // carry. See ADR-0036.
-        const actsOnTheCollection =
-          properties.includes("postId") &&
-          !properties.includes("workspaceId");
-        if (actsOnTheCollection) {
-          expect(tool.name).toMatch(/^foundry\.blog\./u);
+        const collectionCommands = [
+          "foundry.blog.archive",
+          "foundry.blog.restore",
+          "foundry.blog.schedule_request",
+        ];
+        if (collectionCommands.includes(tool.name)) {
+          expect(properties).toContain("postId");
+          expect(properties).not.toContain("workspaceId");
         } else {
           expect(properties).toContain("expectedRevision");
         }
