@@ -100,6 +100,33 @@ Migration `0030_mcp_page_operation_receipts.sql` adds `error_reason` to
 `mcp_mutation_receipts` and widens its `operation` list to name the four page
 operations.
 
+### 5. Adding or removing a page is a content change, whatever group its fields are in
+
+`mcpRevisionScopes` decides which draft scopes a revision's own changes need,
+by comparing the draft's editable fields with the workspace's base revision
+([ADR-0007](ADR-0007-mcp-publication-scope-derivation-boundary.md)). It read
+every changed field by its group, so a Design field meant the design changed.
+
+A page made from the `Introduction` or `What you offer` starting point brings
+sections, and every section carries a design variant field. Under the old
+reading, adding such a page made the revision a design change, and a
+connection holding only `content.draft` was then refused its own draft by
+`foundry.workspace.get`, `foundry.preview.prepare` and
+`foundry.publication.request`. The agent could make the page and then do
+nothing with it.
+
+A field only one side holds is now read as a content change whatever its
+group, because it belongs to a record the draft added or removed rather than
+to a value the agent chose. The variant on a new page is the default the
+starting point placed. Changing it still needs `foundry.design.patch`, which
+asks for `design.draft` itself, so nothing here lets a content-scoped
+connection change a design.
+
+The same rule fixes the other end. A delete changed no field, so the
+comparison found nothing and fell back to whichever draft scope the caller
+happened to hold. A path the draft no longer holds now counts as a content
+change, so a revision that removed a page reports `content.draft`.
+
 ## Consequences
 
 An agent can now do the whole job the owner asked for: list the pages, read

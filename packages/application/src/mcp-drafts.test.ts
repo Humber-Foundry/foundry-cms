@@ -1343,6 +1343,128 @@ describe("MCP page tools", () => {
     ).toBeUndefined();
   });
 
+  it("names the field a content edit was refused for", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-field-refusal-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const missing = "page_0123456789abcdef0123.seo.description";
+
+    await expect(
+      fixtureValue.application.patchContent(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "patch-missing-field-1",
+          operations: [{ op: "set", field: missing, value: "Words." }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "content_field_not_editable",
+      message: `This draft has no content field at ${missing}.`,
+    });
+
+    await expect(
+      fixtureValue.application.patchContent(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "patch-wrong-format-1",
+          operations: [
+            {
+              op: "set",
+              field: `${referenceSiteDefinition.site.id}.name`,
+              value: createRichTextDocumentFromPlainText("Words."),
+              format: "richText",
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "content_field_format_mismatch",
+    });
+  });
+
+  it("carries a page the whole way on the content draft scope alone", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-scope-journey-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+
+    // A starting point places sections, and a section carries a design
+    // variant field. Those fields are new, not changed, so adding a page
+    // stays a content change and the agent can still preview its own work.
+    const created = resultOf<{ pageId: string }>(
+      await fixtureValue.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-create-scope-journey-1",
+          title: "What we offer",
+          slug: "what-we-offer",
+          startingLayout: "what_you_offer",
+        },
+        context,
+      ),
+    );
+    await expect(
+      fixtureValue.application.getWorkspace(
+        principalValue,
+        workspaceId,
+        context,
+      ),
+    ).resolves.toBeDefined();
+    const prepared = resultOf<{ previewId: string }>(
+      await fixtureValue.application.preparePreview(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "page-preview-scope-journey-1",
+        },
+        context,
+      ),
+    );
+    expect(prepared.previewId).toEqual(expect.any(String));
+    expect(
+      fixtureValue.previewScopesEvaluated.at(-1),
+    ).toEqual([mcpContentDraftScope]);
+
+    // Removing a page changes no field and removes many, so it is a content
+    // change too rather than a revision that looks unchanged.
+    await fixtureValue.application.deletePage(
+      principalValue,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "page-delete-scope-journey-1",
+        pageId: created.pageId,
+      },
+      context,
+    );
+    await fixtureValue.application.preparePreview(
+      principalValue,
+      {
+        workspaceId,
+        expectedRevision: 2,
+        idempotencyKey: "page-preview-scope-journey-2",
+      },
+      context,
+    );
+    expect(
+      fixtureValue.previewScopesEvaluated.at(-1),
+    ).toEqual([mcpContentDraftScope]);
+  });
+
   it("refuses a page operation with a named reason an agent can act on", async () => {
     const { fixtureValue, workspaceId } = await openedDraft(
       [mcpInitialScope, mcpContentDraftScope],
@@ -1522,7 +1644,7 @@ describe("MCP page tools", () => {
     });
   });
 
-  it("makes the same page an owner would make in the dashboard", async () => {
+  it("adds nothing of its own to the page operation the dashboard calls", async () => {
     const { fixtureValue, workspaceId } = await openedDraft(
       [mcpInitialScope, mcpContentDraftScope],
       "open-page-parity-1",
@@ -1549,8 +1671,11 @@ describe("MCP page tools", () => {
       ),
     );
 
-    // The dashboard writes the same command through the same operation, in a
-    // draft with the same identity, so the two pages must be the same page.
+    // `savePageMutation` in app/api/foundry-cms/revisions/route.ts is all the
+    // dashboard does for a create: it calls `commands.createPage` with the
+    // owner's actor and the body's title, address and starting point. The
+    // same call is made here, so what is being compared is whether the MCP
+    // tool adds anything of its own to that operation. It must not.
     const humanActor = createContentActorId("membership-human-55");
     const human = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -1604,6 +1729,44 @@ describe("MCP page tools", () => {
       findPageById(
         (await human.queries.getCurrent()).definition,
         humanResult.pageId,
+      ),
+    );
+
+    // A real owner would not be holding the agent's idempotency key, so their
+    // page gets a different id. Everything else about it is still the same
+    // page, down to each section's own id built from that page id.
+    const ownKeyResult = await human.commands.createPage({
+      actorId: humanActor,
+      workspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 1,
+      idempotencyKey: "human-own-page-parity-key-1",
+      title: "What we offer",
+      slug: "what-we-offer-again",
+      startingLayout: "what_you_offer",
+    });
+    const withOwnKey = findPageById(
+      (await human.queries.getCurrent()).definition,
+      ownKeyResult.pageId,
+    )!;
+    const fromAgent = findPageById(
+      await definitionOf(fixtureValue, workspaceId),
+      mcp.pageId,
+    )!;
+    expect(ownKeyResult.pageId).not.toBe(mcp.pageId);
+    expect(
+      JSON.parse(
+        JSON.stringify({ ...withOwnKey, id: "", slug: "" }).replaceAll(
+          ownKeyResult.pageId,
+          "",
+        ),
+      ),
+    ).toEqual(
+      JSON.parse(
+        JSON.stringify({ ...fromAgent, id: "", slug: "" }).replaceAll(
+          mcp.pageId,
+          "",
+        ),
       ),
     );
   });

@@ -286,13 +286,15 @@ function isContentFieldPath(value: unknown): value is string {
   );
 }
 
-// A page id is an ordinary Site Definition identifier, so `home` and a minted
-// `page_<digest>` are both well formed here. Whether the draft holds a page
-// with this id is the draft's answer, not the schema's.
+// A page id is an ordinary Site Definition identifier, so a hand-written id
+// and a minted `page_<digest>` are both well formed here. Whether the draft
+// holds a page with this id is the draft's answer, not the schema's.
+const pageIdMaxLength = 200;
+
 const pageIdSchema = {
   type: "string",
   minLength: 1,
-  maxLength: 200,
+  maxLength: pageIdMaxLength,
   pattern: siteDefinitionSchema.$defs.id.pattern,
 } as const;
 
@@ -604,7 +606,7 @@ function isPageId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length >= 1 &&
-    value.length <= 200 &&
+    value.length <= pageIdMaxLength &&
     pageIdShape.test(value)
   );
 }
@@ -1141,6 +1143,32 @@ function parseAnalyticsInput(input: unknown): Readonly<{
   };
 }
 
+/**
+ * The input a page tool takes: the draft, the revision the agent read before
+ * it decided, the key that makes a retry safe, and whatever that one
+ * operation names. Written once so the four tools cannot drift apart.
+ */
+function pageToolInputSchema<
+  Extra extends Readonly<Record<string, unknown>>,
+>(extraProperties: Extra) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      workspaceId: workspaceIdSchema,
+      expectedRevision: { type: "integer", minimum: 0 },
+      idempotencyKey: idempotencyKeySchema,
+      ...extraProperties,
+    },
+    required: [
+      "workspaceId",
+      "expectedRevision",
+      "idempotencyKey",
+      ...Object.keys(extraProperties),
+    ],
+  } as const;
+}
+
 const descriptors = {
   "foundry.site.get": {
     name: "foundry.site.get",
@@ -1421,26 +1449,11 @@ const descriptors = {
     name: "foundry.page.create",
     description:
       "Add a page to the draft from one of the starting points, as a new immutable revision.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        workspaceId: workspaceIdSchema,
-        expectedRevision: { type: "integer", minimum: 0 },
-        idempotencyKey: idempotencyKeySchema,
-        title: pageTitleSchema,
-        slug: pageSlugSchema,
-        startingLayout: pageStartingLayoutSchema,
-      },
-      required: [
-        "workspaceId",
-        "expectedRevision",
-        "idempotencyKey",
-        "title",
-        "slug",
-        "startingLayout",
-      ],
-    },
+    inputSchema: pageToolInputSchema({
+      title: pageTitleSchema,
+      slug: pageSlugSchema,
+      startingLayout: pageStartingLayoutSchema,
+    }),
     outputSchema: toolOutputSchema(pageMutationResult),
     annotations: nonDestructiveMutationAnnotations,
     execution: taskExecution,
@@ -1449,26 +1462,11 @@ const descriptors = {
     name: "foundry.page.rename",
     description:
       "Change one page's name and web address in the draft, as a new immutable revision.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        workspaceId: workspaceIdSchema,
-        expectedRevision: { type: "integer", minimum: 0 },
-        idempotencyKey: idempotencyKeySchema,
-        pageId: pageIdSchema,
-        title: pageTitleSchema,
-        slug: pageSlugSchema,
-      },
-      required: [
-        "workspaceId",
-        "expectedRevision",
-        "idempotencyKey",
-        "pageId",
-        "title",
-        "slug",
-      ],
-    },
+    inputSchema: pageToolInputSchema({
+      pageId: pageIdSchema,
+      title: pageTitleSchema,
+      slug: pageSlugSchema,
+    }),
     outputSchema: toolOutputSchema(pageMutationResult),
     annotations: mutationAnnotations,
     execution: taskExecution,
@@ -1477,26 +1475,11 @@ const descriptors = {
     name: "foundry.page.duplicate",
     description:
       "Copy one page in the draft under a new name and web address, as a new immutable revision.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        workspaceId: workspaceIdSchema,
-        expectedRevision: { type: "integer", minimum: 0 },
-        idempotencyKey: idempotencyKeySchema,
-        pageId: pageIdSchema,
-        title: pageTitleSchema,
-        slug: pageSlugSchema,
-      },
-      required: [
-        "workspaceId",
-        "expectedRevision",
-        "idempotencyKey",
-        "pageId",
-        "title",
-        "slug",
-      ],
-    },
+    inputSchema: pageToolInputSchema({
+      pageId: pageIdSchema,
+      title: pageTitleSchema,
+      slug: pageSlugSchema,
+    }),
     outputSchema: toolOutputSchema(pageMutationResult),
     annotations: nonDestructiveMutationAnnotations,
     execution: taskExecution,
@@ -1505,22 +1488,7 @@ const descriptors = {
     name: "foundry.page.delete",
     description:
       "Remove one page from the draft, as a new immutable revision.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        workspaceId: workspaceIdSchema,
-        expectedRevision: { type: "integer", minimum: 0 },
-        idempotencyKey: idempotencyKeySchema,
-        pageId: pageIdSchema,
-      },
-      required: [
-        "workspaceId",
-        "expectedRevision",
-        "idempotencyKey",
-        "pageId",
-      ],
-    },
+    inputSchema: pageToolInputSchema({ pageId: pageIdSchema }),
     outputSchema: toolOutputSchema(pageMutationResult),
     annotations: mutationAnnotations,
     execution: taskExecution,

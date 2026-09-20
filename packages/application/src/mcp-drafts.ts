@@ -227,6 +227,20 @@ export function mcpRevisionScopes(
   return mcpDefinitionScopes(base.definition, revision.definition, fallback);
 }
 
+/**
+ * Which draft scopes a revision's own changes need.
+ *
+ * A field both sides hold is read by its group: a Design field means the
+ * design changed, anything else means the content changed.
+ *
+ * A field only one side holds belongs to a record this draft added or removed,
+ * such as a page. That is a content change whatever group the field is in. A
+ * page an agent adds brings the design fields its sections start with, and
+ * those are defaults the starting point placed rather than a design the agent
+ * chose; no design that was already on the site changed. Changing one of them
+ * afterwards still needs `foundry.design.patch`, which asks for the design
+ * draft scope itself. See ADR-0034.
+ */
 function mcpDefinitionScopes(
   base: SiteDefinition,
   revision: SiteDefinition,
@@ -240,10 +254,16 @@ function mcpDefinitionScopes(
   );
   let contentChanged = false;
   let designChanged = false;
+  const revisionPaths = new Set<string>();
   for (const field of listEditableSiteFields(revision)) {
-    if (baseFields.get(field.path) === JSON.stringify(field.value)) continue;
-    if (field.group === "Design") designChanged = true;
+    revisionPaths.add(field.path);
+    const before = baseFields.get(field.path);
+    if (before === JSON.stringify(field.value)) continue;
+    if (before !== undefined && field.group === "Design") designChanged = true;
     else contentChanged = true;
+  }
+  for (const path of baseFields.keys()) {
+    if (!revisionPaths.has(path)) contentChanged = true;
   }
   const scopes = [
     ...(contentChanged ? [mcpContentDraftScope] : []),
@@ -296,6 +316,14 @@ export type McpDeletePageInput = McpPageMutationInput &
  * reads those sentences in the message and this word in `reason`.
  */
 const pageFieldsRefusedReason = "page_fields_refused";
+
+/**
+ * The named reason for a content edit the draft has no field for, and for one
+ * sent in the wrong format. An agent branches on these instead of reading the
+ * sentence.
+ */
+const contentFieldNotEditableReason = "content_field_not_editable";
+const contentFieldFormatReason = "content_field_format_mismatch";
 
 /**
  * Turn a refused page operation into the tool error an agent acts on.
@@ -357,10 +385,22 @@ function contentEdits(
   );
   return operations.map(({ field, value, format }) => {
     const contract = contentFields.get(field);
-    if (contract === undefined || contract.format !== (format ?? "plainText")) {
+    if (contract === undefined) {
+      // The draft's own field list is the answer, and the tool no longer
+      // advertises one, so the refusal names the path it turned down.
       throw new McpReadError(
         "VALIDATION_FAILED",
-        "The content field is not editable through MCP.",
+        `This draft has no content field at ${field}.`,
+        { reason: contentFieldNotEditableReason },
+      );
+    }
+    if (contract.format !== (format ?? "plainText")) {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        format === "richText"
+          ? `The field ${field} holds plain text, not rich text.`
+          : `The field ${field} holds rich text. Send it with format "richText".`,
+        { reason: contentFieldFormatReason },
       );
     }
     if (contract.format !== "richText") {

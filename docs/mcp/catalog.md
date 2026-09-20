@@ -279,6 +279,9 @@ Input schema constraints:
   relationship, file, code or markup commands.
 - The output returns the workspace, new revision, content and preview hashes,
   schema version, validation result and replay status.
+- A refused edit carries a named `reason`: `content_field_not_editable` when
+  the draft has no such field, and `content_field_format_mismatch` when the
+  field holds the other kind of value. The message names the path.
 
 ### Add, rename, copy and remove a page
 
@@ -301,10 +304,14 @@ writes a new immutable revision and returns `pageId`: the new page for
 
 Refusals carry a named `reason` beside the message, so an agent can act on it
 without reading the sentence: `page_not_found`, `page_id_taken`,
-`page_id_reserved`, `page_slug_refused`, `page_title_refused`,
-`page_starting_layout_unknown`, `page_is_home`, `page_still_linked`,
+`page_slug_refused`, `page_title_refused`, `page_is_home`, `page_still_linked`,
 `schema_invalid`, and `page_fields_refused` when a rename is refused by the
-name or web address field itself.
+name or web address field itself. A `page_still_linked` message names every
+link that still points at the page, so the agent can change those first.
+
+A starting point this server does not offer, and a malformed page id, are
+refused at the tool's own schema instead, with `VALIDATION_FAILED` and no
+named reason.
 
 `startingLayout` is one of the registered starting points: `blank`,
 `introduction` or `what_you_offer`. A page id is minted from the idempotency
