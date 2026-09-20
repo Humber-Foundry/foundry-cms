@@ -121,6 +121,9 @@ type DeliveryReadiness = Readonly<{
 const refusalSentences: Readonly<Record<string, string>> = {
   delivery_not_configured:
     "Email is not connected yet, so nothing can be sent or tested.",
+  campaign_sender_details_not_configured:
+    "Foundry does not yet have the name and postal address that must appear " +
+    "at the bottom of every email, so no email can be written or sent.",
   bulk_owner_required: "Only the site owner can do this step.",
   not_authorized: "You do not have permission to do this step.",
   bulk_test_required: "Send a test first.",
@@ -907,6 +910,11 @@ export function CampaignControls({
   const [flowCampaignId, setFlowCampaignId] = useState<string | null>(null);
   const [report, setReport] = useState<CampaignSendReport | null>(null);
   const [delivery, setDelivery] = useState<DeliveryReadiness | null>(null);
+  // Whether the name and postal address for the bottom of every email are
+  // set. Reported separately from the delivery secrets, because without them
+  // an email cannot even be written.
+  const [senderDetails, setSenderDetails] =
+    useState<DeliveryReadiness | null>(null);
   const media: EditorMediaContext = { csrfToken, workspaceId, siteImages };
 
   const loadReport = useCallback(async (campaignId: string) => {
@@ -927,9 +935,21 @@ export function CampaignControls({
       cache: "no-store",
     })
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { delivery: DeliveryReadiness } | null) => {
-        if (current && body !== null) setDelivery(body.delivery);
-      })
+      .then(
+        (
+          body: {
+            delivery: DeliveryReadiness;
+            senderDetails?: DeliveryReadiness;
+          } | null,
+        ) => {
+          if (current && body !== null) {
+            setDelivery(body.delivery);
+            if (body.senderDetails !== undefined) {
+              setSenderDetails(body.senderDetails);
+            }
+          }
+        },
+      )
       .catch(() => {
         // Readiness is a hint about the installation, not a step. When it
         // cannot be read the steps still show the server's own refusals.
@@ -1044,6 +1064,12 @@ export function CampaignControls({
     }
   }
 
+  // Every email carries a legal footer built from the installation's own
+  // name and postal address. Foundry never invents one, so while they are
+  // absent the server refuses to write an email and the screen says so
+  // instead of offering a step that always fails.
+  const senderDetailsMissing = senderDetails?.state === "not_configured";
+
   return (
     <section aria-labelledby="campaigns-heading">
       <div className="dashboard-section-heading">
@@ -1053,12 +1079,13 @@ export function CampaignControls({
             Write an email to your subscribers. It stays a private draft here;
             subscriber identities are never shown.
           </p>
+          <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
         </div>
         {writingNew || selected !== null ? null : (
           <button
             type="button"
             className="button button-primary"
-            disabled={busy}
+            disabled={busy || senderDetailsMissing}
             onClick={() => {
               setSelected(null);
               setWritingNew(true);
@@ -1131,7 +1158,11 @@ export function CampaignControls({
         >
           <label>
             <span>Start from a blog post</span>
-            <select name="sourcePostRevisionId" required disabled={busy}>
+            <select
+              name="sourcePostRevisionId"
+              required
+              disabled={busy || senderDetailsMissing}
+            >
               {postSources.map(({ post, artifact }) => (
                 <option
                   key={artifact.postRevisionId}
@@ -1142,7 +1173,11 @@ export function CampaignControls({
               ))}
             </select>
           </label>
-          <button type="submit" className="copy-button" disabled={busy}>
+          <button
+            type="submit"
+            className="copy-button"
+            disabled={busy || senderDetailsMissing}
+          >
             Create email from post
           </button>
         </form>
@@ -1170,7 +1205,7 @@ export function CampaignControls({
               <button
                 type="button"
                 className="copy-button"
-                disabled={busy}
+                disabled={busy || senderDetailsMissing}
                 onClick={() => {
                   setWritingNew(false);
                   setRendered(null);

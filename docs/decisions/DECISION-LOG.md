@@ -30,3 +30,4 @@
 | [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
 | [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted | 2026-09-19 |
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |
+| [ADR-0030](ADR-0030-campaign-channel-configuration-is-a-value.md) | The campaign channel configuration is a value, and there is no default legal footer | Accepted | 2026-09-19 |

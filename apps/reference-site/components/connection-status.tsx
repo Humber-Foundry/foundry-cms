@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 
 import { HelpTip } from "./help-tip";
 
-/** What is connected: email delivery, or site publishing. */
-export type ConnectionKind = "email" | "publishing";
+/**
+ * What is connected: email delivery, site publishing, or the sender details
+ * and legal footer that go at the bottom of every email.
+ */
+export type ConnectionKind = "email" | "publishing" | "senderDetails";
 
 /**
  * Where this public repository's own documents are read from, so a setup
@@ -19,6 +22,7 @@ const documentationBaseAddress =
 const setupLinkLabel: Readonly<Record<ConnectionKind, string>> = {
   email: "How to connect email",
   publishing: "How to connect publishing",
+  senderDetails: "How to set the sender details",
 };
 
 /**
@@ -40,16 +44,23 @@ export type ConnectionReadiness = Readonly<{
 const localDevelopmentSentence: Readonly<Record<ConnectionKind, string>> = {
   email: "Email is off in local development.",
   publishing: "Publishing is off in local development.",
+  senderDetails: "Sender details are not needed in local development.",
 };
 
 const connectedSentence: Readonly<Record<ConnectionKind, string>> = {
   email: "Email is connected.",
   publishing: "Publishing is connected.",
+  senderDetails: "Your sender details are set.",
 };
 
 const notConnectedSentence: Readonly<Record<ConnectionKind, string>> = {
   email: "Email is not connected yet.",
   publishing: "Publishing is not connected yet.",
+  // The owner does not know what a setting is called. This says what is
+  // missing in the words they would use, and what it stops them doing.
+  senderDetails:
+    "Foundry does not yet have the name and postal address that must appear " +
+    "at the bottom of every email, so no campaign can be written or sent.",
 };
 
 const helpTipLabel = "What does connected mean?";
@@ -68,7 +79,27 @@ const connectedMeaning: Readonly<Record<ConnectionKind, string>> = {
   publishing:
     "This means every publishing setting is installed, not that GitHub or " +
     "Cloudflare were reached.",
+  senderDetails:
+    "This means the name, postal address, contact page and unsubscribe page " +
+    "for the bottom of every email are set, and Foundry knows which address " +
+    "the email comes from.",
 };
+
+/**
+ * Whether the setting names belong on screen next to the sentence.
+ *
+ * Email and publishing are connected by an operator who reads the setting
+ * names, and #165 puts them on the line. The sender details are the owner's
+ * own words — a name and a postal address — so the line says that in plain
+ * words and keeps the names behind a disclosure for whoever installs them.
+ */
+const settingNamesShownInline: Readonly<Record<ConnectionKind, boolean>> = {
+  email: true,
+  publishing: true,
+  senderDetails: false,
+};
+
+const settingNamesLabel = "Which settings are these?";
 
 /**
  * Whether email delivery or site publishing is connected, in plain words.
@@ -104,12 +135,22 @@ export function ConnectionStatus({
     );
   }
 
+  const missingNames = readiness.missingSettings.join(", ");
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {notConnectedSentence[kind]}
-      {readiness.missingSettings.length > 0 ? (
-        <> Missing: {readiness.missingSettings.join(", ")}.</>
-      ) : null}{" "}
+      {readiness.missingSettings.length === 0 ? null : settingNamesShownInline[
+          kind
+        ] ? (
+        <> Missing: {missingNames}.</>
+      ) : (
+        <>
+          {" "}
+          <HelpTip label={settingNamesLabel}>
+            {`Whoever set this site up installs them as ${missingNames}.`}
+          </HelpTip>
+        </>
+      )}{" "}
       <a
         href={`${documentationBaseAddress}${readiness.setupGuide}`}
         target="_blank"

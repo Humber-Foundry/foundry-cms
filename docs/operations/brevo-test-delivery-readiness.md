@@ -66,21 +66,63 @@ While any of them is absent or malformed:
   not match the same subscriber once the real subscriber identity secret is
   installed.
 
-These settings stay required whether or not delivery is connected, because the
-compliance footer they build is stored on every campaign revision and is read
-by whoever receives the email: `FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID`,
-`FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION`, `FOUNDRY_CAMPAIGN_LEGAL_NAME`,
-`FOUNDRY_CAMPAIGN_POSTAL_ADDRESS`, `FOUNDRY_CAMPAIGN_CONTACT_URL` and
-`FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL`. Foundry never stands in for them, so a
-campaign saved before delivery is connected still carries the installation's
-own footer.
-
 A missing `FOUNDRY_DB` is different. It is a database fault, not a missing
 delivery setting, so it still stops the request.
 
-The MCP campaign surface in `apps/reference-site/src/mcp-campaign-runtime.ts`
-is unchanged. It still refuses to start without the Brevo webhook token and
-account-scope fingerprint, so it also fails closed.
+## Sender details and the legal footer
+
+Every email carries a footer with the sender's legal name, postal address, a
+way to contact them and a way to stop the emails. Foundry never invents any of
+them. The footer is stored on every campaign revision and is read by whoever
+receives the email, so there is no default and no placeholder value anywhere in
+the product.
+
+These are the settings that build it, in setup order:
+
+- `FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID` — which Foundry logical sender the
+  email comes from. It must be one of the keys in `FOUNDRY_BREVO_SENDERS_JSON`.
+- `FOUNDRY_CAMPAIGN_LEGAL_NAME` — the name that appears at the bottom of every
+  email.
+- `FOUNDRY_CAMPAIGN_POSTAL_ADDRESS` — the postal address that appears at the
+  bottom of every email.
+- `FOUNDRY_CAMPAIGN_CONTACT_URL` — an absolute `https://` page a reader can
+  open to make contact. It must carry no username and no password.
+- `FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL` — an absolute `https://` page a reader can
+  open to stop the emails. Foundry adds the signed token to it at send time.
+- `FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION` — the version mark stored with the
+  footer, so a stored revision says which wording it carries.
+
+These are ordinary configuration, not delivery secrets, so they are reported
+under their own heading rather than in the delivery list above.
+
+### While a sender detail is absent
+
+The Newsletter page loads and says what is missing. So does Settings, under
+"Sender details". Reading the campaigns that are already stored still works.
+
+Everything that would create or use a footer is refused with one reason,
+`campaign_sender_details_not_configured`:
+
+- Creating and editing a campaign are refused and recorded as rejected
+  commands. No revision can be stored with an empty or invented footer.
+- A test request is refused before the provider is asked for anything.
+- Authorizing, scheduling, sending now and retrying a send are refused.
+- Every entry point of the scheduled worker in
+  `apps/reference-site/src/campaign-bulk-scheduler-runtime.ts` is refused, and
+  the worker stops with the same reason rather than claiming work.
+- The MCP campaign runtime in
+  `apps/reference-site/src/mcp-campaign-runtime.ts` refuses to start with the
+  same reason.
+- The campaigns API answers HTTP 503 with
+  `{"error": "campaign_sender_details_not_configured"}`. It allows only
+  `cancel_bulk_schedule`, so an action added later is refused until it is
+  allowed deliberately.
+
+`cancel_bulk_schedule` stays available for the same reason as above:
+cancelling stops a send.
+
+The MCP campaign surface also still refuses to start without the Brevo webhook
+token and account-scope fingerprint, so it fails closed for delivery too.
 
 ## Delivery readiness report
 
@@ -96,6 +138,11 @@ delivery is connected. Server code reads the same result through
     "missingSettings": ["FOUNDRY_BREVO_API_KEY"],
     "providerHealth": null,
     "setupGuide": "docs/operations/brevo-test-delivery-readiness.md"
+  },
+  "senderDetails": {
+    "state": "not_configured",
+    "missingSettings": ["FOUNDRY_CAMPAIGN_LEGAL_NAME"],
+    "setupGuide": "docs/operations/brevo-test-delivery-readiness.md"
   }
 }
 ```
@@ -105,6 +152,10 @@ delivery is connected. Server code reads the same result through
 - `missingSettings` holds setting **names** only, in the order of the list
   above. The report never returns a setting value, a provider token or a
   personal email address.
+- `senderDetails` answers the same question for the sender and footer settings
+  above. It carries no `providerHealth`, because no provider is involved. The
+  two headings never overlap: a sender setting never appears in
+  `delivery.missingSettings`, and the other way round.
 - `providerHealth` is `null` unless every setting is installed. It then holds
   the provider's own `state`, `credential` and `senderIdentity`. A provider
   that cannot be reached is reported as `unavailable` rather than failing the
