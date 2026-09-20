@@ -83,14 +83,6 @@ function hasIdentityOnlyStructuralBase(edit: StaleRecoveryEdit): boolean {
   }
 }
 
-export function workspaceCreationOperation(
-  preservedRevision: PreservedContentRevision | undefined,
-): "create_default_workspace" | "create_workspace" {
-  return preservedRevision === undefined
-    ? "create_default_workspace"
-    : "create_workspace";
-}
-
 export async function preparePreservedRevisionRecovery({
   preservedRevision,
   durableRecoveryEdits = [],
@@ -102,7 +94,7 @@ export async function preparePreservedRevisionRecovery({
   storage = window.localStorage,
   createRecoveryId = () => crypto.randomUUID(),
 }: {
-  preservedRevision: PreservedContentRevision | undefined;
+  preservedRevision: PreservedContentRevision;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
   activeRecovery?: StaleRecoveryPointer;
   readOutbox?: (
@@ -111,9 +103,6 @@ export async function preparePreservedRevisionRecovery({
   storage?: Pick<Storage, "getItem" | "removeItem" | "setItem">;
   createRecoveryId?: () => string;
 }): Promise<StaleRecoveryPointer | undefined> {
-  if (preservedRevision === undefined) {
-    return undefined;
-  }
   const record = await readOutbox(preservedRevision.workspaceId);
   const chainedRecoveryEdits =
     activeRecovery === undefined
@@ -227,19 +216,33 @@ export async function preparePreservedRevisionRecovery({
   return recovery;
 }
 
-export function ContentWorkspaceStarter({
+/**
+ * The recovery screen for a draft that can no longer be saved, because the
+ * site moved on after the draft was written.
+ *
+ * This is not a first-visit step. The dashboard creates the draft workspace on
+ * the server, so a site owner never has to start one. The screen only appears
+ * when the saved draft has to be replaced, and it always starts a separate
+ * workspace so the old draft is left intact to copy from.
+ *
+ * `reason` decides what the screen promises. Only `older-schema` carries edits
+ * out of the stored draft, so `site-updated` must not claim that it does.
+ */
+export function ContentDraftRecovery({
   csrfToken,
   staleRecovery,
   preservedRevision,
   durableRecoveryEdits,
+  reason,
 }: {
   csrfToken: string;
   staleRecovery?: Readonly<{
     id: string;
     sourceWorkspaceId: string;
   }>;
-  preservedRevision?: PreservedContentRevision;
+  preservedRevision: PreservedContentRevision;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
+  reason: "older-schema" | "site-updated";
 }) {
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
@@ -254,9 +257,9 @@ export function ContentWorkspaceStarter({
 
   async function startWorkspace() {
     pendingAttempt.current ??= {
-      body: JSON.stringify({
-        operation: workspaceCreationOperation(preservedRevision),
-      }),
+      // Always a separate workspace: reopening the default one would return
+      // the same draft that cannot accept changes.
+      body: JSON.stringify({ operation: "create_workspace" }),
       idempotencyKey: crypto.randomUUID(),
     };
     setStarting(true);
@@ -324,9 +327,7 @@ export function ContentWorkspaceStarter({
     } catch {
       setStarting(false);
       setMessage(
-        preservedRevision === undefined
-          ? "The workspace could not be confirmed. Retry to check the same request."
-          : "The fresh workspace could not be confirmed without preserving browser edits. Retry, or copy the edits from the preserved workspace before leaving it.",
+        "The fresh draft could not be confirmed and your unsaved changes were not copied. Try again, or copy the changes out of the old draft before you leave it.",
       );
     }
   }
@@ -334,21 +335,32 @@ export function ContentWorkspaceStarter({
   return (
     <section
       className="content-editor"
-      aria-labelledby="content-workspace-heading"
+      aria-labelledby="content-draft-recovery-heading"
     >
       <div className="dashboard-section-heading editor-heading">
         <div>
-          <h2 id="content-workspace-heading">Content editor</h2>
-          {preservedRevision === undefined ? (
+          <h2 id="content-draft-recovery-heading">Start a fresh draft</h2>
+          {reason === "older-schema" ? (
             <p>
-              Start a private draft workspace from the current published site.
+              This draft was written for an older version of your site, so it
+              can no longer be saved. Start a fresh draft to carry on. Any
+              changes that still fit are copied across, and this draft is kept.
             </p>
           ) : (
             <p>
-              Workspace <code>{preservedRevision.workspaceId}</code> revision{" "}
-              {preservedRevision.revision} is preserved under Site Definition{" "}
-              {preservedRevision.schemaVersion}. Start a fresh workspace to
-              edit the current schema.
+              Your site moved to a newer version after this draft was written,
+              so this draft can no longer be saved. Start a fresh draft to
+              carry on. This draft is kept, and you can still{" "}
+              {/* Pages opens this draft in the editor, because only an
+                  older-schema draft sends the owner back to this screen. */}
+              <a
+                href={`/dash/pages?workspace=${encodeURIComponent(
+                  preservedRevision.workspaceId,
+                )}`}
+              >
+                open it in Pages
+              </a>{" "}
+              to copy anything you need.
             </p>
           )}
         </div>
@@ -358,11 +370,7 @@ export function ContentWorkspaceStarter({
           disabled={starting}
           onClick={startWorkspace}
         >
-          {starting
-            ? "Starting…"
-            : preservedRevision === undefined
-              ? "Start workspace"
-              : "Start fresh workspace"}
+          {starting ? "Starting…" : "Start a fresh draft"}
         </button>
       </div>
       <p role="status" aria-live="polite" className="editor-message">

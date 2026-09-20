@@ -36,6 +36,16 @@ publishes the same files it published before. See ADR-0017.
 a new revision; it never changes a revision that was previewed, approved,
 published, tested or sent.
 
+**Draft workspace** — One person's private copy of the site, held in D1, where
+every content and design change is made before publication. It has a stable
+id, an owner, and a numbered revision that advances with each accepted save.
+Revision 0 is a copy of the published site, so a workspace at revision 0 holds
+no changes yet. Every authorized person gets one on their first dashboard
+visit; they never have to start it. Owner-facing copy should call it **your
+draft**; "workspace" names the stored record and the API operations. The page
+editor still says "workspace" to the owner in several places, which is a gap
+to close rather than the pattern to copy.
+
 **Rendered artifact** — The immutable output produced from one revision by one
 schema and renderer version for a specific channel.
 
@@ -223,6 +233,14 @@ personal email address. Connected means the secrets are installed; it does not
 mean a test was delivered. While delivery is not connected, a campaign can
 still be written, saved and cancelled, and every send and test operation is
 refused.
+
+**Publishing readiness** — Whether this installation holds every setting site
+publishing needs (the GitHub App identity, the repository it writes to, the
+public origin, the Cloudflare deployment, and the publication signing
+secret), and the names of the settings it still lacks. It reports setting
+names only, never a setting value, a token or a key. Connected means the
+settings are installed; it does not mean GitHub or Cloudflare were reached —
+this check makes no network call. See ADR-0021.
 
 **Test delivery** — A real provider test-send operation for one exact campaign
 fingerprint and explicit test recipients. An on-screen preview is not a test

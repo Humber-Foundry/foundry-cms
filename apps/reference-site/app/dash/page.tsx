@@ -1,10 +1,12 @@
-import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
+import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
 
@@ -24,14 +26,20 @@ export default async function DashboardOverviewPage({
   const definition = await loadPublishedDefinition();
   const { workspace, staleRecovery } =
     await readWorkspaceSearchParams(searchParams);
-  const dashboardWorkspace = await loadDashboardWorkspace(workspace, "/dash");
+  const dashboardWorkspace = await loadDashboardWorkspace(
+    workspace,
+    "/dash",
+    staleRecovery,
+  );
   const mutationToken = await loadMutationToken();
   const messages = await loadMessagesAttention(access);
 
-  const hasDraft = dashboardWorkspace.contentRevision !== undefined;
+  // The draft workspace always exists, so Overview reports the draft. It only
+  // offers a fresh start when this draft can no longer accept changes.
+  const { contentRevision } = dashboardWorkspace;
   const needsFreshWorkspace =
     dashboardWorkspace.schemaRecovery !== undefined ||
-    dashboardWorkspace.contentStale === true;
+    dashboardWorkspace.contentStale;
 
   return (
     <main className="dashboard-main" id="main">
@@ -42,13 +50,29 @@ export default async function DashboardOverviewPage({
         </div>
       </div>
 
-      {hasDraft && !needsFreshWorkspace ? (
+      {needsFreshWorkspace ? (
+        <ContentDraftRecovery
+          csrfToken={mutationToken}
+          staleRecovery={staleRecovery}
+          preservedRevision={preservedRevisionOf(contentRevision)}
+          durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
+          reason={recoveryReasonOf(dashboardWorkspace)}
+        />
+      ) : (
         <section className="panel" aria-labelledby="draft-state">
           <h2 id="draft-state">Your draft</h2>
-          <p>
-            You have unpublished changes. Open Pages to keep editing, or
-            publish when you are happy with the preview.
-          </p>
+          {contentRevision.revision === 0 ? (
+            <p>
+              Your draft is ready and matches your live site. Open Pages to
+              start changing it. Nothing you change reaches the live site until
+              you publish.
+            </p>
+          ) : (
+            <p>
+              You have unpublished changes. Open Pages to keep editing, or
+              publish when you are happy with the preview.
+            </p>
+          )}
           <p className="panel-actions">
             <a
               className="button button-primary"
@@ -56,26 +80,12 @@ export default async function DashboardOverviewPage({
                 dashboardWorkspace.workspaceId,
               )}`}
             >
-              Continue editing
+              {contentRevision.revision === 0
+                ? "Start editing"
+                : "Continue editing"}
             </a>
           </p>
         </section>
-      ) : (
-        <ContentWorkspaceStarter
-          csrfToken={mutationToken}
-          staleRecovery={staleRecovery}
-          preservedRevision={
-            needsFreshWorkspace && dashboardWorkspace.contentRevision
-              ? {
-                  workspaceId: dashboardWorkspace.contentRevision.workspaceId,
-                  revision: dashboardWorkspace.contentRevision.revision,
-                  schemaVersion:
-                    dashboardWorkspace.contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
-          durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
-        />
       )}
 
       <section aria-labelledby="attention">

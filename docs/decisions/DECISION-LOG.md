@@ -9,7 +9,7 @@
 | [ADR-0002](ADR-0002-default-newsletter-delivery-adapter.md) | Default newsletter-delivery adapter | Accepted | 2026-07-26 |
 | [ADR-0003](ADR-0003-unified-privacy-first-analytics.md) | Unified privacy-first analytics architecture | Accepted | 2026-07-26 |
 | [ADR-0004](ADR-0004-draft-preview-publish-pipeline.md) | Draft, preview and publish pipeline | Accepted | 2026-07-26 |
-| [ADR-0005](ADR-0005-human-authentication-authorization-boundary.md) | Human authentication and authorization boundary | Accepted | 2026-07-26 |
+| [ADR-0005](ADR-0005-human-authentication-authorization-boundary.md) | Human authentication and authorization boundary | Accepted, amended 2026-09-18 | 2026-07-26 |
 | [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) | Bulk campaign execution boundary | Accepted | 2026-07-30 |
 | [ADR-0007](ADR-0007-mcp-publication-scope-derivation-boundary.md) | MCP publication scope derivation and enforcement boundary | Accepted | 2026-07-30 |
 | [ADR-0008](ADR-0008-seo-metadata-shared-field-set.md) | One SEO and sharing field set, with a derived canonical URL | Accepted | 2026-08-15 |
@@ -25,4 +25,6 @@
 | [ADR-0018](ADR-0018-public-page-routes.md) | One route serves every page below the home page | Accepted | 2026-09-18 |
 | [ADR-0019](ADR-0019-mcp-dynamic-client-registration.md) | Dynamic client registration, and consent is the only grant | Accepted | 2026-09-18 |
 | [ADR-0020](ADR-0020-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |
+| [ADR-0021](ADR-0021-connection-status-shared-component.md) | One shared component reports whether email and publishing are connected | Accepted | 2026-09-18 |
+| [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
 | [ADR-0024](ADR-0024-editor-page-selection.md) | The address names the page being edited, and one module answers which page it is | Accepted | 2026-09-18 |

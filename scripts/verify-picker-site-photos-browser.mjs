@@ -117,17 +117,9 @@ async function main() {
 
     // Start a workspace and land on the page editor.
     await page.goto(`${origin}/dash`);
-    const startWorkspace = page.getByRole("button", { name: "Start workspace" });
-    await startWorkspace.waitFor({ state: "visible" });
-    await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
-          response.status() === 201,
-      ),
-      startWorkspace.click(),
-    ]);
+    // The dashboard creates the draft workspace on the server, so Overview
+    // links straight into the page editor.
+    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
 
     // Pages opens on the list of every page. Open the home page from it to
