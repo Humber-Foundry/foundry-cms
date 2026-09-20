@@ -22,10 +22,15 @@ import validateSiteDefinition from "./site-definition-validator.mjs";
 import { isSiteDefinitionWithPageComponents } from "./page-component-registry";
 import {
   homePageSlug,
+  pageMediaOccurrenceId,
+  pageMediaOccurrenceIdPattern,
+  pageMediaSlots,
   pageSlugMaxLength,
   pageSlugPattern,
   reservedPageSlugs,
+  type PageMediaSlot,
 } from "./pages";
+import { everySiteLink, siteHrefPageId } from "./site-href";
 
 export * from "./rich-text";
 
@@ -55,7 +60,27 @@ export function createSiteId(value: string): SiteId {
   return value as SiteId;
 }
 
-export type SiteHref = `#${string}` | `mailto:${string}`;
+/**
+ * Where a link goes.
+ *
+ * - `#anchor` jumps to a section on the home page. This is the original
+ *   shorthand, kept exactly as every stored definition already wrote it, and
+ *   it always means the home page even when it is read on another page. See
+ *   ADR-0022.
+ * - `mailto:` opens a mail client addressed to the written address.
+ * - `page:<pageId>` opens a page in this site, referenced by its stable id so
+ *   a slug rename (#159) does not break the link.
+ * - `page:<pageId>#<anchor>` opens a section on a page in this site.
+ * - `blog` opens the Blog.
+ *
+ * Read a stored value with `parseSiteHref`; turn one into the address a
+ * browser follows with `resolveSiteHref`. Both live in `site-href.ts`.
+ */
+export type SiteHref =
+  | `#${string}`
+  | `mailto:${string}`
+  | `page:${string}`
+  | "blog";
 
 declare const blogPostIdBrand: unique symbol;
 export type BlogPostId = string & {
@@ -134,7 +159,13 @@ export type SiteMediaCrop = Readonly<{
 }>;
 
 export type SiteMediaOccurrence = Readonly<{
-  occurrenceId: "occurrence_home_hero" | "occurrence_home_detail";
+  /**
+   * A page's hero or detail media slot. The home page keeps its two
+   * historical ids, `occurrence_home_hero` and `occurrence_home_detail`; any
+   * other page's id is built from its own page id. See
+   * `pageMediaOccurrenceId` in `pages.ts` and ADR-0026.
+   */
+  occurrenceId: `occurrence_${string}_${PageMediaSlot}`;
   revision: number;
   asset: Readonly<{
     assetId: string;
@@ -463,6 +494,12 @@ export const siteDefinitionSchema = {
         slug: { $ref: "#/$defs/pageSlug" },
         title: { $ref: "#/$defs/text" },
         media: {
+          $comment:
+            "A page holds at most one hero occurrence and at most one " +
+            "detail occurrence. JSON Schema cannot compare an occurrence id " +
+            "to this page's own id, so it only checks the slot suffix here; " +
+            "isBaseSiteDefinition checks that each occurrence id names this " +
+            "page. See ADR-0026.",
           type: "array",
           items: { $ref: "#/$defs/mediaOccurrence" },
           allOf: [
@@ -470,7 +507,7 @@ export const siteDefinitionSchema = {
               contains: {
                 type: "object",
                 properties: {
-                  occurrenceId: { const: "occurrence_home_hero" },
+                  occurrenceId: { type: "string", pattern: "_hero$" },
                 },
                 required: ["occurrenceId"],
               },
@@ -481,7 +518,7 @@ export const siteDefinitionSchema = {
               contains: {
                 type: "object",
                 properties: {
-                  occurrenceId: { const: "occurrence_home_detail" },
+                  occurrenceId: { type: "string", pattern: "_detail$" },
                 },
                 required: ["occurrenceId"],
               },
@@ -575,10 +612,20 @@ export const siteDefinitionSchema = {
       },
     },
     href: {
+      $comment:
+        "Compatible widening, no schema version step: ADR-0022. The first " +
+        "two patterns are unchanged from 1.7.0, so every stored #anchor and " +
+        "mailto: value stays valid, byte for byte. `page:<pageId>` and " +
+        "`page:<pageId>#<anchor>` reference a page by its stable id; " +
+        "isBaseSiteDefinition rejects one that names no page, because JSON " +
+        "Schema cannot look a value up in another array. `blog` targets the " +
+        "Blog, which always exists.",
       type: "string",
       anyOf: [
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
+        { pattern: "^page:[a-z][a-z0-9_]*(#[a-z][a-z0-9_]*)?$" },
+        { const: "blog" },
       ],
     },
     registeredPageSection: {
@@ -652,7 +699,13 @@ export const siteDefinitionSchema = {
       required: ["occurrenceId", "revision", "asset", "crop"],
       properties: {
         occurrenceId: {
-          enum: ["occurrence_home_hero", "occurrence_home_detail"],
+          $comment:
+            "The home page's own two ids, occurrence_home_hero and " +
+            "occurrence_home_detail, match this pattern unchanged. Any " +
+            "other page's id is occurrence_<pageId>_hero or " +
+            "occurrence_<pageId>_detail. See ADR-0026.",
+          type: "string",
+          pattern: pageMediaOccurrenceIdPattern.source,
         },
         revision: { type: "integer", minimum: 1 },
         asset: {
@@ -1049,7 +1102,28 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
           validateRichTextDocument(section.body);
         }
       });
+      // JSON Schema cannot compare an occurrence id to the id of the page
+      // that holds it, so this walk rejects an occurrence id built for a
+      // different page — one page's media accidentally carrying another
+      // page's id. See ADR-0026.
+      const ownOccurrenceIds = new Set<string>(
+        pageMediaSlots.map((slot) => pageMediaOccurrenceId(page, slot)),
+      );
+      (page.media ?? []).forEach((occurrence) => {
+        if (!ownOccurrenceIds.has(occurrence.occurrenceId)) {
+          throw new TypeError("site_media_occurrence_page_mismatch");
+        }
+      });
     });
+    // A `page:` href must name a page that exists. JSON Schema cannot look a
+    // value up in another array, so this is a runtime check, the same way
+    // duplicate page ids and slugs are checked above. See ADR-0022.
+    for (const { link } of everySiteLink(definition)) {
+      const targetId = siteHrefPageId(link.href);
+      if (targetId !== null && !pageIds.has(targetId)) {
+        throw new TypeError("site_href_page_absent");
+      }
+    }
     const postIds = new Set<string>();
     const postSlugs = new Set<string>();
     definition.blog.posts.forEach((post) => {
@@ -1094,3 +1168,4 @@ export * from "./design-presets";
 export * from "./blog";
 export * from "./blog-rendering";
 export * from "./seo";
+export * from "./site-href";

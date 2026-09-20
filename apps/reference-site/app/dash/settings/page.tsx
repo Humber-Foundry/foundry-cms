@@ -97,6 +97,11 @@ export default async function DashboardSettingsPage() {
           Each connection works only on this site, only with the permissions you
           approve, and you can revoke any of them on their own.
         </p>
+        <p className="panel-actions">
+          <a className="button button-primary" href="/dash/settings/connect-agent">
+            Connect an agent
+          </a>
+        </p>
         <McpConnectionControls
           connections={mcpConnections}
           csrfToken={mutationToken}

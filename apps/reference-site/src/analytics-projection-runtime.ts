@@ -1,4 +1,4 @@
-import { homePage } from "@humber-foundry/site-definition";
+import { pagePath } from "@humber-foundry/site-definition";
 import {
   addUtcDays,
   addUtcSeconds,
@@ -211,15 +211,19 @@ async function listChangedCampaignSnapshots({
  * stored yet, so the current published definition is treated as having always
  * owned its paths. A later route change will need a stored history to keep two
  * content items' traffic apart.
+ *
+ * Every page contributes its own path, not only the home page, so a view of
+ * any page is recorded against that page's own id instead of always the home
+ * page's. See ADR-0026.
  */
 export function currentRouteHistory(): ReadonlyArray<PublishedRouteHistoryEntry> {
   return [
-    {
-      path: "/",
-      contentId: homePage(installedSiteDefinition).id,
+    ...installedSiteDefinition.pages.map((page) => ({
+      path: pagePath(page),
+      contentId: page.id,
       fromUtc: "1970-01-01T00:00:00.000Z",
-      toUtc: null,
-    },
+      toUtc: null as string | null,
+    })),
     ...installedSiteDefinition.blog.posts.map((post) => ({
       path: `/blog/${post.slug}`,
       contentId: post.id,

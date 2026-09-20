@@ -7,6 +7,7 @@ import {
   homePage,
   homePageIndex,
   homePageSlug,
+  pageMediaOccurrenceId,
   replacePage,
   reservedPageSlugs,
   referenceSiteDefinition,
@@ -110,5 +111,27 @@ describe("site page accessors", () => {
         id: "page_absent",
       }),
     ).toThrow("site_definition_page_absent");
+  });
+});
+
+describe("pageMediaOccurrenceId", () => {
+  it("keeps the home page's two historical ids unchanged", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    const home = homePage(definition);
+    expect(pageMediaOccurrenceId(home, "hero")).toBe("occurrence_home_hero");
+    expect(pageMediaOccurrenceId(home, "detail")).toBe(
+      "occurrence_home_detail",
+    );
+  });
+
+  it("builds another page's id from its own page id", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    const about = findPageById(definition, "page_about")!;
+    expect(pageMediaOccurrenceId(about, "hero")).toBe(
+      "occurrence_page_about_hero",
+    );
+    expect(pageMediaOccurrenceId(about, "detail")).toBe(
+      "occurrence_page_about_detail",
+    );
   });
 });

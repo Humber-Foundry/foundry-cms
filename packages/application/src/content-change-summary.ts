@@ -1,10 +1,10 @@
 import {
   listEditableSiteFields,
+  pageDisplayTitle,
   pagePath,
   pageSectionLabel,
   type EditableSiteField,
   type SiteDefinition,
-  type SitePage,
 } from "@humber-foundry/site-definition";
 
 /**
@@ -84,10 +84,6 @@ function uniqueInOrder(values: ReadonlyArray<string>) {
 
 function summaryLine(title: string, entries: ReadonlyArray<string>) {
   return `${title} — ${entries.join(", ")}`;
-}
-
-function pageTitle(page: SitePage) {
-  return page.title.trim() === "" ? pagePath(page) : page.title;
 }
 
 function bucket(buckets: Map<string, ChangeBucket>, key: string) {
@@ -264,7 +260,7 @@ export function createContentChangeSummary(input: {
     if (!created && fields.length === 0) continue;
     pages.push({
       pageId: page.id,
-      title: pageTitle(page),
+      title: pageDisplayTitle(page),
       path: pagePath(page),
       state: created ? "created" : "changed",
       changedFields: created ? [] : fields,
@@ -274,7 +270,7 @@ export function createContentChangeSummary(input: {
     if (draftPages.has(page.id)) continue;
     pages.push({
       pageId: page.id,
-      title: pageTitle(page),
+      title: pageDisplayTitle(page),
       path: pagePath(page),
       state: "removed",
       changedFields: [],
