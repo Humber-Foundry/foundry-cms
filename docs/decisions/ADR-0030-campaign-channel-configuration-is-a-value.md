@@ -92,9 +92,11 @@ the application's `bulkCommandsAllowedWithoutSenderDetails`, and its
 `testCommandsAllowedWithoutSenderDetails`. Each names what still works rather
 than what is blocked, so a command added later is refused until someone allows
 it deliberately. This follows #163's decision after its review found a blocked
-list that failed open. `refuseCommandsExcept` applies all three the same way.
-The test list is empty, and is written out anyway so the next command added
-there meets the same gate.
+list that failed open. `refuseCommandsExcept` applies the two application
+lists; the route applies its own list at the request gate, because it refuses
+with an HTTP status rather than by replacing a function. The test list is
+empty, and is written out anyway so the next command added there meets the same
+gate.
 
 Only two commands survive, and neither sends anything: `cancel_bulk_schedule`
 (cancelling stops a send, and an Owner needs it exactly when something has gone
@@ -104,8 +106,11 @@ unsubscribe).
 `createCampaignApplication` is the exception, and it gates each write command
 on its own rather than through a list. A wrapper there would have to refuse
 `recordRejectedCommand`, which is how a refusal is written down in the first
-place. Its four write commands — create, edit, and the two that record an
-accepted test — all call `requireConfiguredChannel()`.
+place, and `replayTestCommand`, which only reads a stored receipt. Those two
+stay open deliberately. Everything that stores campaign state calls
+`requireConfiguredChannel()`: `createStandalone` and `createFromPost` through
+the shared `createFirstRevision`, `edit`, `recordAcceptedTestCommand` and
+`recordAcceptedTestReceiptConfirmation`.
 
 ### 3a. Which reason a new installation reads
 

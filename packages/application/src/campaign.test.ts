@@ -755,6 +755,74 @@ describe("campaigns without the sender details and compliance footer", () => {
     ).resolves.toMatchObject({ id: created.campaign.id, version: 1 });
   });
 
+  it("refuses to record an accepted test, and a receipt for one", async () => {
+    // These two write the audit trail and the command receipts that say a
+    // test went out. No test can go out while the footer cannot be built, so
+    // recording one would be a false record.
+    const store = createInMemoryCampaignStore();
+    const configured = createFixture({ store });
+    const created = await configured.application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-settings-removed-4",
+      input: standaloneInput,
+    });
+
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.commands.recordAcceptedTestCommand({
+        actor: editor,
+        requestId: "campaign-record-test-without-footer-1",
+        command: { action: "request_test" },
+        campaign: created.campaign,
+        revision: created.revision,
+        beforeState: "draft",
+        afterState: "draft",
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+    await expect(
+      application.commands.recordAcceptedTestReceiptConfirmation({
+        actor: editor,
+        requestId: "campaign-record-receipt-without-footer-1",
+        command: { action: "confirm_test_receipt" },
+        campaign: created.campaign,
+        revision: created.revision,
+        beforeState: "draft",
+        afterState: "draft",
+        targetId: created.campaign.id,
+        confirmation: {
+          executionId: "40000000-0000-4000-8000-000000000001",
+          siteId,
+          ownerActorId: ownerMembership.id,
+          requestId: "campaign-record-receipt-without-footer-1",
+          confirmedAt: "2026-07-29T07:00:00.000Z",
+        },
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("still writes down a refusal while the settings are absent", async () => {
+    // `recordRejectedCommand` is deliberately not gated. It is how a refusal
+    // is written down, so gating it would lose the record of the refusal.
+    const store = createInMemoryCampaignStore();
+    const { application } = createFixture({ channel: notConfigured, store });
+    await application.commands.recordRejectedCommand({
+      actor: editor,
+      requestId: "campaign-record-refusal-without-footer-1",
+      reason: "campaign_sender_details_not_configured",
+      command: { action: "request_test" },
+      targetId: "campaign:new",
+      beforeState: "draft",
+      action: "campaign.test",
+      commandName: "campaign.request_test",
+    });
+    expect(
+      store.listAuditEvents().map((event) => [event.outcome, event.reason]),
+    ).toContainEqual([
+      "rejected",
+      "campaign_sender_details_not_configured",
+    ]);
+  });
+
   it("leaves the stored footer exactly as the installation wrote it", async () => {
     const store = createInMemoryCampaignStore();
     const configured = createFixture({ store });

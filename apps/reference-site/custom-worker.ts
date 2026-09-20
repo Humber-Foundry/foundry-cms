@@ -1,7 +1,10 @@
 // @ts-expect-error The OpenNext worker is generated before Wrangler bundles this entry.
 import openNextWorker from "./.open-next/worker.js";
 
-import { reconcileHumanAccessEligibility } from "@humber-foundry/application";
+import {
+  reconcileHumanAccessEligibility,
+  stableRejectionReason,
+} from "@humber-foundry/application";
 
 import { installedSiteDefinition } from "./foundry/site-definition";
 
@@ -80,11 +83,10 @@ async function runScheduledWork(
       console.error(
         "scheduled_campaign_delivery_failed",
         JSON.stringify({
-          reason:
-            error instanceof Error &&
-            /^[a-z][a-z0-9_]+$/u.test(error.message)
-              ? error.message
-              : "scheduled_campaign_delivery_failed",
+          reason: stableRejectionReason(
+            error,
+            "scheduled_campaign_delivery_failed",
+          ),
         }),
       );
     }),

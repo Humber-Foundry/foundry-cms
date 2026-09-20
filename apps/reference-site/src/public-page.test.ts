@@ -65,6 +65,20 @@ describe("findPublicPage", () => {
     const definition = withSecondPage({ id: "page_blog_shadow", slug: "blog" });
     expect(findPublicPage(definition, "blog")).toBeNull();
   });
+
+  it("never finds a page that only exists in a different definition", () => {
+    // The revision preview route (#156) passes only the one definition its
+    // capability was verified against. This proves `findPublicPage` itself
+    // has no way to answer with a page from anywhere else, so a crafted
+    // slug that names a real page in another workspace's or revision's
+    // definition still finds nothing here.
+    const definition = withSecondPage();
+    const otherWorkspacePage = withSecondPage({
+      id: "page_from_another_workspace",
+      slug: "from-another-workspace",
+    }).pages[1]!;
+    expect(findPublicPage(definition, otherWorkspacePage.slug)).toBeNull();
+  });
 });
 
 describe("pageRouteMetadata", () => {

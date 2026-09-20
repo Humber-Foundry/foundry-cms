@@ -32,13 +32,26 @@ import {
   type CampaignRevision,
 } from "./campaign-types";
 
-function stableRejectionReason(error: unknown): string {
+/**
+ * The stable reason code one error carries, or a generic one.
+ *
+ * A reason code is a lower-case word with underscores. Anything else could be
+ * a message with a value in it, so it is never passed on: a rejection reason
+ * is recorded in the audit trail and read by an operator, and must never carry
+ * a setting value, an address or a token.
+ *
+ * Exported because the scheduled worker logs the same shape.
+ */
+export function stableRejectionReason(
+  error: unknown,
+  fallback = "campaign_command_rejected",
+): string {
   return error instanceof CampaignConflictError ||
     error instanceof CampaignNotFoundError ||
     error instanceof CampaignValidationError ||
     (error instanceof Error && /^[a-z][a-z0-9_]+$/u.test(error.message))
     ? error.message
-    : "campaign_command_rejected";
+    : fallback;
 }
 
 function rejectionError(reason: string): Error {
