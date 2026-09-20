@@ -1,4 +1,4 @@
-# ADR-0021: One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page
+# ADR-0028: One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page
 
 - **Status:** Accepted
 - **Date:** 2026-09-18
