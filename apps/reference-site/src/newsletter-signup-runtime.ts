@@ -177,6 +177,23 @@ export async function loadNewsletterSignupApplication(): Promise<NewsletterSignu
 }
 
 /**
+ * How many people are waiting to confirm a newsletter signup right now. A
+ * count only — `countPendingSignups` never returns an address — so this
+ * needs no actor, no capability check and no sensitive-access audit record.
+ * It is safe for the Subscribers screen to show to an Editor and an MCP
+ * client exactly as it shows it to an Owner.
+ */
+export async function loadPendingSignupCount(): Promise<number> {
+  const signupStore = isLocalDevelopment()
+    ? localSignupStore
+    : (await loadStores()).signupStore;
+  return signupStore.countPendingSignups({
+    siteId: installedSiteDefinition.site.id,
+    now: new Date().toISOString(),
+  });
+}
+
+/**
  * The rate limit for the public signup form. It uses the same binding as the
  * public contact form, under its own key prefix, so one form cannot spend the
  * other's allowance.

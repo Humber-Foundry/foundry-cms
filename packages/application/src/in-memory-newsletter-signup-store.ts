@@ -111,6 +111,19 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
       }
       return { expired };
     },
+    async countPendingSignups({ siteId, now }) {
+      let count = 0;
+      for (const candidate of signups.values()) {
+        if (
+          candidate.siteId === siteId &&
+          candidate.state === "pending" &&
+          Date.parse(candidate.expiresAt) > Date.parse(now)
+        ) {
+          count += 1;
+        }
+      }
+      return count;
+    },
     async claimDueConfirmationJobs({
       siteId,
       now,

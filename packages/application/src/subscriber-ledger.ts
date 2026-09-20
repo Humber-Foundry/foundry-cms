@@ -162,11 +162,46 @@ export type SubscriberLedgerExport = Readonly<{
   events: ReadonlyArray<SubscriberEvent>;
 }>;
 
+/**
+ * The most recent moment each subscriber (or somebody using that address)
+ * gave consent: the `occurredAt` of their latest `consent_recorded` or
+ * `resubscribed` event. A subscriber with neither — for example one created
+ * by `ingestSuppression` for an address that never went through signup —
+ * has no entry, because that record was never consent evidence and must
+ * never read as if it were.
+ */
+export function latestConsentDateBySubscriber(
+  events: ReadonlyArray<SubscriberEvent>,
+): ReadonlyMap<SubscriberId, string> {
+  const latest = new Map<SubscriberId, string>();
+  for (const event of events) {
+    if (event.type !== "consent_recorded" && event.type !== "resubscribed") {
+      continue;
+    }
+    const current = latest.get(event.subscriberId);
+    if (current === undefined || event.occurredAt > current) {
+      latest.set(event.subscriberId, event.occurredAt);
+    }
+  }
+  return latest;
+}
+
+/**
+ * A subscriber plus the one extra fact the Subscribers screen needs and the
+ * ledger keeps only in its event history: when consent was last given. This
+ * is still what `listIdentities` returns — an Owner-only, audited read — not
+ * a second, unaudited way to reach a subscriber's history.
+ */
+export type SubscriberIdentity = Subscriber &
+  Readonly<{
+    latestConsentAt: string | null;
+  }>;
+
 export type SubscriberLedgerApplication = Readonly<{
   queries: Readonly<{
     listIdentities(input: {
       actor: ExternalHumanIdentity;
-    }): Promise<ReadonlyArray<Subscriber>>;
+    }): Promise<ReadonlyArray<SubscriberIdentity>>;
     exportLedger(input: {
       actor: ExternalHumanIdentity;
     }): Promise<SubscriberLedgerExport>;
@@ -455,7 +490,12 @@ export function createSubscriberLedgerApplication({
   const queries: SubscriberLedgerApplication["queries"] = Object.freeze({
       async listIdentities({ actor }) {
         await sensitiveAccess(actor, "subscriber-identities.read");
-        return store.listSubscribers(siteId);
+        const snapshot = await store.readSnapshot(siteId);
+        const latestConsent = latestConsentDateBySubscriber(snapshot.events);
+        return snapshot.subscribers.map((subscriber) => ({
+          ...subscriber,
+          latestConsentAt: latestConsent.get(subscriber.id) ?? null,
+        }));
       },
       async exportLedger({ actor }) {
         await sensitiveAccess(actor, "subscriber-ledger.export");

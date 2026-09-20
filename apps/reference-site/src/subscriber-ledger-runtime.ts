@@ -9,10 +9,16 @@ import {
 } from "@humber-foundry/application";
 
 import {
+  countSubscribersByDisplayState,
+  type SubscriberStateCounts,
+} from "./subscriber-display";
+
+import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanAccessRequestContext,
   loadHumanIdentityRequestContext,
   type AuthenticatedHumanIdentityContext,
+  type HumanAccessRequestContext,
 } from "./human-access-runtime";
 import {
   HumanAccessConfigurationError,
@@ -111,6 +117,29 @@ export async function loadSubscriberLedgerRequestContext(
     humanContext: await loadHumanAccessRequestContext(requestHeaders),
     ...dependencies,
   });
+}
+
+/**
+ * How many subscribers are in each display state. The count itself carries
+ * no identity — it can never return an address, so it needs no capability
+ * check and no sensitive-access audit record, unlike `listIdentities`. This
+ * is what an Editor and an MCP client see on the Subscribers screen, exactly
+ * as an Owner does.
+ *
+ * It still takes the caller's authorized dashboard access context, not
+ * because the count needs it, but so only a route that has already
+ * authenticated a dashboard member can reach it at all — this must never
+ * become a query anyone can call from an unauthenticated path.
+ */
+export async function loadSubscriberStateCounts(
+  access: Extract<HumanAccessRequestContext, { state: "authorized" }>,
+): Promise<SubscriberStateCounts> {
+  void access;
+  const { store } = await loadDependencies();
+  const subscribers = await store.listSubscribers(
+    installedSite.application.siteId,
+  );
+  return countSubscribersByDisplayState(subscribers);
 }
 
 export { loadHumanIdentityRequestContext };

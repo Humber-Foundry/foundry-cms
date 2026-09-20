@@ -171,6 +171,18 @@ export interface NewsletterSignupStore {
     siteId: SiteId;
     now: string;
   }): Promise<Readonly<{ expired: number }>>;
+  /**
+   * How many people are waiting to confirm: requests still in the `pending`
+   * state whose `expiresAt` has not yet passed `now`. A row a sweep has not
+   * reached yet, past its own `expiresAt`, is not counted as waiting — it is
+   * already effectively expired, whether or not `expirePendingSignups` has
+   * run against it. Never returns an address, so it needs no actor and no
+   * sensitive-access audit record, unlike `listIdentities`.
+   */
+  countPendingSignups(input: {
+    siteId: SiteId;
+    now: string;
+  }): Promise<number>;
   claimDueConfirmationJobs(input: {
     siteId: SiteId;
     now: string;

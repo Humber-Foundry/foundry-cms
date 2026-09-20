@@ -412,4 +412,74 @@ describe("subscriber consent and suppression ledger", () => {
       }),
     ]);
   });
+
+  it("refuses the export to an Editor, proved on its own rather than through listIdentities", async () => {
+    const { application } = createFixture();
+    await application.commands.recordConsent({
+      actor: owner,
+      email: "person@example.com",
+      evidence: consent,
+    });
+
+    await expect(
+      application.queries.exportLedger({ actor: editor }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+  });
+
+  it("carries the date consent was last given, not the date the record was created", async () => {
+    const { application } = createFixture();
+    const subscriber = await application.commands.recordConsent({
+      actor: owner,
+      email: "person@example.com",
+      evidence: consent,
+    });
+    await application.commands.suppress({
+      actor: owner,
+      email: "person@example.com",
+      reason: "unsubscribed",
+      occurredAt: "2026-07-27T18:01:00.000Z",
+    });
+    const resubscribeEvidence: ConsentEvidence = {
+      ...consent,
+      occurredAt: "2026-07-27T18:02:00.000Z",
+      evidenceReference: "resubscribe-789",
+    };
+    await application.commands.resubscribe({
+      actor: owner,
+      email: "person@example.com",
+      evidence: resubscribeEvidence,
+    });
+
+    const identities = await application.queries.listIdentities({
+      actor: owner,
+    });
+
+    expect(identities).toHaveLength(1);
+    expect(identities[0]).toMatchObject({
+      id: subscriber.id,
+      // The record itself was created (by the fixture's fixed clock) at the
+      // first consent; the date shown must be the later resubscription, not
+      // that creation date.
+      createdAt: now.toISOString(),
+      latestConsentAt: resubscribeEvidence.occurredAt,
+    });
+  });
+
+  it("carries no consent date for a record that never went through consent", async () => {
+    const { application } = createFixture();
+    await application.provider.ingestSuppression({
+      provider: "portable-test-provider",
+      providerEventId: "provider-complaint-only",
+      email: "never-consented@example.com",
+      reason: "complained",
+      occurredAt: "2026-07-27T18:01:00.000Z",
+    });
+
+    const identities = await application.queries.listIdentities({
+      actor: owner,
+    });
+
+    expect(identities).toHaveLength(1);
+    expect(identities[0]?.latestConsentAt).toBeNull();
+  });
 });
