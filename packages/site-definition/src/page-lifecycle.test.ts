@@ -9,6 +9,7 @@ import {
   homePageSlug,
   isBaseSiteDefinition,
   isMintedPageId,
+  listEditableSiteFields,
   mintedPageId,
   pageDeleteBlockedMessage,
   pageMediaOccurrenceId,
@@ -523,5 +524,39 @@ describe("removePageFromDefinition", () => {
     expect(
       refusal(() => removePageFromDefinition(referenceSiteDefinition, pageId("f"))).code,
     ).toBe("page_not_found");
+  });
+});
+
+describe("the page name and web address as editable fields", () => {
+  const definition = create(referenceSiteDefinition);
+  const fields = listEditableSiteFields(definition);
+  const field = (path: string) => fields.find((one) => one.path === path)!;
+
+  it("gives every page a name field and a web address field", () => {
+    for (const page of definition.pages) {
+      expect(field(`${page.id}.title`).label).toBe("Page name");
+      expect(field(`${page.id}.slug`).label).toBe("Web address");
+      expect(field(`${page.id}.title`).pageId).toBe(page.id);
+    }
+  });
+
+  it("warns on the web address field that an old address stops working", () => {
+    // The Rename control says this too, and says it precisely because it
+    // knows what is published. This is the other way an address changes.
+    expect(field(`${firstPageId}.slug`).hint).toContain(
+      "stops the old address working",
+    );
+  });
+
+  it("says instead that the home page sits at the top of the site", () => {
+    const home = homePage(definition);
+    expect(field(`${home.id}.slug`).hint).toBe(
+      "The home page always sits at the top of the site.",
+    );
+  });
+
+  it("lets the web address be left blank only on the home page", () => {
+    expect(field(`${firstPageId}.slug`).optional).toBe(true);
+    expect(field(`${firstPageId}.title`).optional).toBe(false);
   });
 });

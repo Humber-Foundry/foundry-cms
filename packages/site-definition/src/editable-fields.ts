@@ -505,10 +505,15 @@ function editableFieldBindings(
         // a real value here and not a missing one. `validate` below is what
         // decides whether a blank is allowed on this page.
         optional: true,
+        // The warning sits on the field itself, not only in the Rename
+        // control, because this is the other place a web address can be
+        // changed and the field list cannot see what is published. Saying
+        // "if" is honest on a page that was never published and still warns
+        // the owner of the page that was. See ADR-0033.
         hint:
           page.slug === homePageSlug
             ? "The home page always sits at the top of the site."
-            : "Visitors reach this page at this address.",
+            : "Visitors reach this page at this address. If the page is already on your site, changing this stops the old address working.",
         validate: (value) => pageSlugRefusal(definition, value.trim(), page.id),
         write: (draft, value) => {
           draft.pages[pageIndex]!.slug = value.trim();

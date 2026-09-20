@@ -122,8 +122,19 @@ export function PageLifecycleList({
     setOpen(next);
   }
 
-  function close() {
-    if (busy) return;
+  /**
+   * Shut the dialog, unless a change is on its way.
+   *
+   * Escape and the backdrop both reach here through the dialog's own cancel
+   * event. That event has to be stopped while busy, or the browser closes the
+   * dialog while this component still believes it is open, and whatever the
+   * server says next is never shown.
+   */
+  function close(event?: { preventDefault(): void }) {
+    if (busy) {
+      event?.preventDefault();
+      return;
+    }
     setOpen(null);
   }
 
@@ -226,7 +237,7 @@ export function PageLifecycleList({
   }
 
   const current = open;
-  const asksForWords =
+  const showsNameAndAddress =
     current !== null && current.kind !== "delete";
   const slugChangeWarning =
     current !== null &&
@@ -310,7 +321,7 @@ export function PageLifecycleList({
             {current.kind === "delete" ? (
               <DeleteExplanation page={current.page} />
             ) : null}
-            {asksForWords ? (
+            {showsNameAndAddress ? (
               <>
                 <p className="page-lifecycle-field">
                   <label htmlFor="page-lifecycle-name">Page name</label>
@@ -390,6 +401,9 @@ export function PageLifecycleList({
                     </span>
                   </label>
                 ))}
+                {fieldErrors.startingLayout === undefined ? null : (
+                  <span role="alert">{fieldErrors.startingLayout}</span>
+                )}
               </fieldset>
             ) : null}
             {slugChangeWarning ? (
