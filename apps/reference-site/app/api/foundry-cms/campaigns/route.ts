@@ -131,6 +131,22 @@ const actionsAllowedWithoutDelivery = Object.freeze([
   "cancel_bulk_schedule",
 ] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
 
+/**
+ * The commands that still run while the installation has not set its sender
+ * details and compliance footer.
+ *
+ * Only cancelling a schedule survives. Writing a campaign stores the legal
+ * footer on the revision, so writing is refused too; that is the difference
+ * from the delivery list above, which still allows writing.
+ *
+ * This names what is allowed rather than what is blocked, for the same reason
+ * as the list above: an action added later is refused until someone allows it
+ * here deliberately.
+ */
+const actionsAllowedWithoutSenderDetails = Object.freeze([
+  "cancel_bulk_schedule",
+] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
+
 type BulkAction = (typeof bulkActions)[number];
 type BulkCommand = Extract<CampaignCommand, { action: BulkAction }>;
 
@@ -433,7 +449,13 @@ export async function GET(request: Request) {
     // named settings are still missing. It never returns a setting's value.
     if (parameters.get("readiness") === "delivery") {
       return Response.json(
-        { delivery: await readCampaignDeliveryReadiness(context) },
+        {
+          delivery: await readCampaignDeliveryReadiness(context),
+          // The sender details and the compliance footer are separate settings from
+          // the delivery secrets, with separate consequences, so they get their
+          // own heading. This also holds setting names only.
+          senderDetails: context.senderDetails,
+        },
         { headers: { "cache-control": "private, no-store" } },
       );
     }
@@ -580,6 +602,26 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "campaign_command_invalid" },
         { status: 400 },
+      );
+    }
+    // Fail closed. The compliance footer is stored on every campaign revision
+    // and is read by whoever receives the email, so while the installation has
+    // not set the settings that build it, a campaign may not even be written.
+    //
+    // This runs before the delivery gate below. A new installation has neither,
+    // and both answers would be true; this one is checked first so the whole
+    // product reports one reason for one installation. It is also the wider
+    // fault: without these settings nothing can be written at all, while a
+    // missing delivery secret only stops a send.
+    if (
+      context.senderDetails.state === "not_configured" &&
+      !(actionsAllowedWithoutSenderDetails as ReadonlyArray<string>).includes(
+        parsed.action,
+      )
+    ) {
+      return Response.json(
+        { error: "campaign_sender_details_not_configured" },
+        { status: 503, headers: { "cache-control": "private, no-store" } },
       );
     }
     // Fail closed: while email delivery is not configured, only the commands

@@ -1228,6 +1228,9 @@ describe("content publication application", () => {
     const mcp = createMcpPublicationApplication({
       base: read,
       runtime: {
+        async loadPreviewReview() {
+          return null;
+        },
         async loadRevision() {
           return revisionApplication.application;
         },
@@ -1286,6 +1289,118 @@ describe("content publication application", () => {
     expect(JSON.stringify({ audit: mcpAudit, commit })).not.toMatch(
       /authorization|bearer|access[_-]?token|refresh[_-]?token|secret-canary/iu,
     );
+  });
+
+  it("refuses an MCP publication once the draft changed after approval", async () => {
+    // The person approved one exact revision. A later save makes that
+    // approval stale, and the agent's request must fail with a named error
+    // rather than publish anything.
+    const { app, approval } = await approve();
+    const actor: McpConnectionPrincipal = {
+      connectionId: "connection-stale",
+      actorId: "agent-stale",
+      clientId: "https://client.example/stale.json",
+      siteId: referenceSiteDefinition.site.id,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationPublishScope,
+      ],
+    };
+    const read = createMcpReadApplication({
+      site: createSiteApplication({
+        siteId: referenceSiteDefinition.site.id,
+        publishedSites: createInMemoryPublishedSiteRepository([
+          createPublishedSiteBundle(referenceSiteDefinition),
+        ]),
+      }),
+      siteMetadata: {
+        canonicalUrl: "https://foundry.example",
+        locale: "en-CA",
+        timeZone: "America/Vancouver",
+        async getLiveRelease() {
+          return null;
+        },
+      },
+      connections: {
+        async findCurrentConnection() {
+          return { ...actor, status: "active" };
+        },
+        async recordInvocation() {},
+      },
+      cursors: {
+        async encode() {
+          return "unused";
+        },
+        async decode() {
+          throw new Error("unused");
+        },
+      },
+      createInvocationId: () => "invocation-stale",
+      now: () => "2026-07-27T10:01:00.000Z",
+    });
+    const mcp = createMcpPublicationApplication({
+      base: read,
+      runtime: {
+        async loadPreviewReview() {
+          return null;
+        },
+        async loadRevision() {
+          return revisionApplication.application;
+        },
+        async loadPublication() {
+          return app;
+        },
+        async loadBlogOperations() {
+          throw new Error("unused");
+        },
+        async recordInvocation() {},
+      },
+      now: () => "2026-07-27T10:01:00.000Z",
+    });
+    const context = {
+      throwIfExpired() {},
+      run: <Result>(operation: () => Promise<Result>) => operation(),
+      finishDurably: <Result>(operation: () => Promise<Result>) => operation(),
+    };
+
+    await revisionApplication.application.commands.save({
+      actorId: editorId,
+      workspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 1,
+      edits: [{ path: "section_hero.title", value: "Edited after approval" }],
+      idempotencyKey: "save-after-approval-stale",
+    });
+
+    // The revision the person approved is no longer the current draft.
+    await expect(
+      mcp.requestPublication(
+        actor,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId: approval.id,
+          idempotencyKey: "78787878-7878-4878-8878-787878787878",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "STALE_REVISION", latestRevision: 2 });
+
+    // Carrying the old approval onto the new revision fails too.
+    await expect(
+      mcp.requestPublication(
+        actor,
+        {
+          workspaceId,
+          revision: 2,
+          approvalId: approval.id,
+          idempotencyKey: "89898989-8989-4989-8989-898989898989",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "APPROVAL_STALE" });
+    expect(createCommit).not.toHaveBeenCalled();
   });
 
   it("exposes release history with immutable approval and state evidence", async () => {

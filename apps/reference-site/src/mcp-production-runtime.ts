@@ -288,6 +288,13 @@ export function createProductionMcpRuntime(
   const publicationApplication = createMcpPublicationApplication({
     base: readApplication,
     runtime: {
+      loadPreviewReview({ principal, previewId }) {
+        return store.findPreviewReview({
+          connectionId: principal.connectionId,
+          siteId: principal.siteId,
+          previewId,
+        });
+      },
       async loadRevision({ principal, workspaceId }) {
         const { loadContentRevisionApplication } =
           await import("./content-revision-runtime");

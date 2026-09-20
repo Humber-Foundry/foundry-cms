@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 
 import { HelpTip } from "./help-tip";
 
-/** What is connected: email delivery, or site publishing. */
-export type ConnectionKind = "email" | "publishing";
+/**
+ * What is connected: email delivery, site publishing, or the sender details
+ * and compliance footer that go at the bottom of every email.
+ */
+export type ConnectionKind = "email" | "publishing" | "senderDetails";
 
 /**
  * Where this public repository's own documents are read from, so a setup
@@ -15,11 +18,6 @@ export type ConnectionKind = "email" | "publishing";
  */
 const documentationBaseAddress =
   "https://github.com/Humber-Foundry/foundry-cms/blob/main/";
-
-const setupLinkLabel: Readonly<Record<ConnectionKind, string>> = {
-  email: "How to connect email",
-  publishing: "How to connect publishing",
-};
 
 /**
  * How one installation's email delivery or site publishing is connected.
@@ -37,41 +35,84 @@ export type ConnectionReadiness = Readonly<{
   setupGuide: string;
 }>;
 
-const localDevelopmentSentence: Readonly<Record<ConnectionKind, string>> = {
-  email: "Email is off in local development.",
-  publishing: "Publishing is off in local development.",
-};
+/**
+ * Everything this component says about one kind, gathered in one place.
+ *
+ * One entry per kind, so adding a kind is one edit rather than an edit to
+ * each sentence map.
+ *
+ * `connectedMeaning`: "connected" means the settings a send or a publish needs
+ * are present. No report calls the provider to prove a working connection, so
+ * the plain sentence shows by default and the fuller explanation sits behind a
+ * `HelpTip` (#149) rather than on every screen that renders it.
+ *
+ * `settingNamesShownInline`: email and publishing are connected by an operator
+ * who reads the setting names, and ADR-0021 puts them on the line. The sender
+ * details are the owner's own words — a name and a postal address — so that
+ * line says it in plain words and keeps the names behind a disclosure for
+ * whoever installs them.
+ */
+type ConnectionCopy = Readonly<{
+  setupLinkLabel: string;
+  localDevelopmentSentence: string;
+  connectedSentence: string;
+  notConnectedSentence: string;
+  connectedMeaning: string;
+  settingNamesShownInline: boolean;
+}>;
 
-const connectedSentence: Readonly<Record<ConnectionKind, string>> = {
-  email: "Email is connected.",
-  publishing: "Publishing is connected.",
-};
+/**
+ * What the owner reads when the sender details are absent.
+ *
+ * Exported because the Newsletter steps refuse with the same reason and must
+ * say the same words. One sentence, one place.
+ */
+export const senderDetailsNotSetSentence =
+  "Foundry does not yet have the name and postal address that must appear " +
+  "at the bottom of every email, so no campaign can be written or sent.";
 
-const notConnectedSentence: Readonly<Record<ConnectionKind, string>> = {
-  email: "Email is not connected yet.",
-  publishing: "Publishing is not connected yet.",
+const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
+  email: {
+    setupLinkLabel: "How to connect email",
+    localDevelopmentSentence: "Email is off in local development.",
+    connectedSentence: "Email is connected.",
+    notConnectedSentence: "Email is not connected yet.",
+    connectedMeaning:
+      "This means every email setting is installed, not that a message was " +
+      "sent.",
+    settingNamesShownInline: true,
+  },
+  publishing: {
+    setupLinkLabel: "How to connect publishing",
+    localDevelopmentSentence: "Publishing is off in local development.",
+    connectedSentence: "Publishing is connected.",
+    notConnectedSentence: "Publishing is not connected yet.",
+    connectedMeaning:
+      "This means every publishing setting is installed, not that GitHub or " +
+      "Cloudflare were reached.",
+    settingNamesShownInline: true,
+  },
+  senderDetails: {
+    setupLinkLabel: "How to set the sender details",
+    localDevelopmentSentence:
+      "Local development uses a footer marked as local development, and " +
+      "nothing it writes can be sent.",
+    connectedSentence: "Your sender details are set.",
+    notConnectedSentence: senderDetailsNotSetSentence,
+    connectedMeaning:
+      "This means the name, postal address, contact page and unsubscribe " +
+      "page for the bottom of every email are set, and Foundry knows which " +
+      "address the email comes from.",
+    settingNamesShownInline: false,
+  },
 };
 
 const helpTipLabel = "What does connected mean?";
+const settingNamesLabel = "Which settings are these?";
 
 /**
- * "Connected" here means the settings a send or a publish needs are present.
- * Neither report calls the provider to prove a working connection. This
- * ticket shows the plain "connected" line by default and keeps the fuller
- * explanation behind a `HelpTip` (#149), rather than printing the full
- * sentence on every one of the five screens that render it.
- */
-const connectedMeaning: Readonly<Record<ConnectionKind, string>> = {
-  email:
-    "This means every email setting is installed, not that a message was " +
-    "sent.",
-  publishing:
-    "This means every publishing setting is installed, not that GitHub or " +
-    "Cloudflare were reached.",
-};
-
-/**
- * Whether email delivery or site publishing is connected, in plain words.
+ * Whether email delivery, site publishing, or the sender details and
+ * compliance footer are connected, in plain words.
  *
  * Shows the server's own state. It never assumes a connection exists because
  * a screen loaded, and it never renders a setting's value, so it is safe to
@@ -89,33 +130,46 @@ export function ConnectionStatus({
   // value, not only `null`.
   if (!readiness) return null;
 
+  const copy = connectionCopy[kind];
+
   if (readiness.state === "local_development") {
     return (
-      <p className="connection-status">{localDevelopmentSentence[kind]}</p>
+      <p className="connection-status">{copy.localDevelopmentSentence}</p>
     );
   }
 
   if (readiness.state === "connected") {
     return (
       <p className="connection-status connection-status-connected">
-        {connectedSentence[kind]}{" "}
-        <HelpTip label={helpTipLabel}>{connectedMeaning[kind]}</HelpTip>
+        {copy.connectedSentence}{" "}
+        <HelpTip label={helpTipLabel}>{copy.connectedMeaning}</HelpTip>
       </p>
     );
   }
 
+  const missingNames = readiness.missingSettings.join(", ");
+  const namesInline =
+    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
+  const namesBehindDisclosure =
+    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
   return (
     <p className="connection-status connection-status-missing" role="alert">
-      {notConnectedSentence[kind]}
-      {readiness.missingSettings.length > 0 ? (
-        <> Missing: {readiness.missingSettings.join(", ")}.</>
+      {copy.notConnectedSentence}
+      {namesInline ? <> Missing: {missingNames}.</> : null}
+      {namesBehindDisclosure ? (
+        <>
+          {" "}
+          <HelpTip label={settingNamesLabel}>
+            {`Whoever set this site up installs them as ${missingNames}.`}
+          </HelpTip>
+        </>
       ) : null}{" "}
       <a
         href={`${documentationBaseAddress}${readiness.setupGuide}`}
         target="_blank"
         rel="noreferrer"
       >
-        {setupLinkLabel[kind]}
+        {copy.setupLinkLabel}
       </a>
     </p>
   );

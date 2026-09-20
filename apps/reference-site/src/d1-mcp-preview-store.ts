@@ -15,7 +15,10 @@ type PreparedPreview = Awaited<
 export function createD1McpPreviewStore(
   database: D1DatabaseBinding,
   {
-    createPreviewId = () => crypto.randomUUID(),
+    // A preview id says what it names. `foundry.publication.status` reads the
+    // kind of an operation from its identifier, so a preview receipt carries
+    // the same kind of prefix as a publication or a schedule.
+    createPreviewId = () => `preview_${crypto.randomUUID()}`,
     now = () => new Date().toISOString(),
     beforePersist = () => {},
   }: {

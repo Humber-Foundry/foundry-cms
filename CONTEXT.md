@@ -234,6 +234,16 @@ mean a test was delivered. While delivery is not connected, a campaign can
 still be written, saved and cancelled, and every send and test operation is
 refused.
 
+**Sender readiness** — Whether this installation holds every campaign identity
+and compliance setting the compliance footer is built from (which sender the
+email comes from, the legal name, the postal address, the contact address, the
+unsubscribe address and the footer's version mark), and the names of the
+settings it still lacks. It reports setting names only, never a setting value.
+It is separate from delivery readiness because the consequence is different:
+without the delivery secrets a campaign can still be written but not sent;
+without these it cannot be written at all, because Foundry never invents a
+legal name or a postal address. See ADR-0030.
+
 **Publishing readiness** — Whether this installation holds every setting site
 publishing needs (the GitHub App identity, the repository it writes to, the
 public origin, the Cloudflare deployment, and the publication signing
@@ -495,6 +505,17 @@ not changed before it went out.
 commit, a Cloudflare deployment, an approval fingerprint) kept in "Published
 history" for support and developers, with one help tip on the section
 explaining what each is for.
+
+**App / Connected app** — The dashboard's word for what this glossary calls
+an **MCP agent**. The dashboard says "an app", "the app that made this
+draft", or the app's own name; it never shows the words MCP, agent,
+connection id or actor id as page copy. When the connection record names no
+client, the dashboard says "A connected app".
+
+**Draft review** — The dashboard's word for the screen where a person
+answers a draft an app prepared (`/dash/review/<previewId>`). It carries two
+answers, Approve and Ask for changes. The preview id never appears as page
+copy.
 
 **Receipt** — The dashboard's word for a form submission's identifier. Kept
 as a word, with a help tip, because it is what a visitor or support quotes

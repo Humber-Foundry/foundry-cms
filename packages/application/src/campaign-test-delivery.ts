@@ -7,6 +7,11 @@ import {
 import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
+  campaignSenderDetailsNotConfiguredReason,
+  refuseCommandsExcept,
+  type CampaignChannelConfigurationState,
+} from "./campaign-channel-state";
+import {
   CampaignIdempotencyError,
   CampaignNotFoundError,
   CampaignValidationError,
@@ -566,11 +571,49 @@ function matchesPreparedAcceptance(
   );
 }
 
+/**
+ * The test-delivery commands that still work while the installation has not
+ * set its sender details and compliance footer.
+ *
+ * The list is empty. A test is a real email and confirming a test receipt
+ * records that one arrived, so neither can be honest while the footer cannot
+ * be built. The list is written out anyway, for the same reason as the bulk
+ * one: it names what stays, so a command added later is refused until someone
+ * allows it here deliberately.
+ *
+ * The `queries` are untouched. Reading grants nothing, and the Newsletter
+ * screen needs them to explain where a campaign has got to.
+ */
+const testCommandsAllowedWithoutSenderDetails = Object.freeze(
+  [] as const,
+) satisfies ReadonlyArray<keyof CampaignTestDeliveryApplication["commands"]>;
+
+/**
+ * Refuse every test-delivery command with one named reason.
+ *
+ * The `queries` are untouched. Reading grants nothing, and the Newsletter
+ * screen needs them to explain where a campaign has got to.
+ */
+function withoutSenderDetails(
+  application: CampaignTestDeliveryApplication,
+): CampaignTestDeliveryApplication {
+  return Object.freeze({
+    commands: refuseCommandsExcept(
+      application.commands,
+      testCommandsAllowedWithoutSenderDetails,
+      () =>
+        new CampaignValidationError(campaignSenderDetailsNotConfiguredReason),
+    ),
+    queries: application.queries,
+  });
+}
+
 export function createCampaignTestDeliveryApplication({
   siteId,
   campaignStore,
   store,
   adapter,
+  channelConfiguration,
   authorize,
   identifyActor,
   resolveAudience,
@@ -589,6 +632,12 @@ export function createCampaignTestDeliveryApplication({
   campaignStore: CampaignStore;
   store: CampaignTestDeliveryStore;
   adapter: NewsletterDeliveryAdapter;
+  /**
+   * The sender details and compliance footer this installation has set, or the
+   * typed value that says they are absent. A test is a real email, so while
+   * they are absent every test request is refused with one named reason.
+   */
+  channelConfiguration: CampaignChannelConfigurationState;
   authorize(
     actor: CampaignActor,
     capability: "campaign.author" | "campaign.test.confirm",
@@ -1555,7 +1604,7 @@ export function createCampaignTestDeliveryApplication({
     }
   }
 
-  return Object.freeze({
+  const application = Object.freeze({
     commands: Object.freeze({ requestTest, confirmReceipt }),
     queries: Object.freeze({
       async currentEvidence({
@@ -1630,6 +1679,9 @@ export function createCampaignTestDeliveryApplication({
       },
     }),
   });
+  return channelConfiguration.state === "configured"
+    ? application
+    : withoutSenderDetails(application);
 }
 
 export function createInMemoryCampaignTestDeliveryStore():

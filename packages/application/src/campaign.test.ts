@@ -16,9 +16,11 @@ import {
   type HumanMembership,
 } from "./human-access";
 import {
+  campaignChannelNotConfigured,
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
+  configuredCampaignChannel,
   createCampaignApplication,
   createCampaignId,
   createCampaignRevisionId,
@@ -94,7 +96,7 @@ const standaloneInput: CampaignEditableInput = {
   },
   emailContent: createRichTextDocumentFromPlainText("Standalone email body."),
 };
-const channelConfiguration = {
+const campaignChannel = {
   senderIdentityId: "sender_primary",
   complianceFooter: {
     version: "footer-v1",
@@ -108,11 +110,18 @@ const channelConfiguration = {
     version: 1,
   } as const,
 };
+const channelConfiguration =
+  configuredCampaignChannel(campaignChannel);
 
-function createFixture() {
+function createFixture(
+  options: {
+    channel?: typeof channelConfiguration;
+    store?: ReturnType<typeof createInMemoryCampaignStore>;
+  } = {},
+) {
   let id = 0;
   let campaignId = 0;
-  const store = createInMemoryCampaignStore();
+  const store = options.store ?? createInMemoryCampaignStore();
   const requestedCapabilities: string[] = [];
   const application = createCampaignApplication({
     siteId,
@@ -133,7 +142,7 @@ function createFixture() {
         ? sourcePost
         : null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
-    channelConfiguration,
+    channelConfiguration: options.channel ?? channelConfiguration,
     siteCanonicalOrigin: "https://example.test",
     rendererVersion: "1111111111111111111111111111111111111111",
     schemaVersion: "1.7.0",
@@ -634,5 +643,196 @@ describe("campaign authoring and rendering", () => {
         reason: "campaign_schema_invalid",
       },
     ]);
+  });
+});
+
+describe("campaigns without the sender details and compliance footer", () => {
+  // The compliance footer is stored on every campaign revision and is read by
+  // whoever receives the email. Foundry never invents a legal name, a postal
+  // address, a contact address or an unsubscribe address, so while the
+  // settings are absent no revision may be created or edited at all. Reading
+  // what is already stored still works, because the Newsletter page has to
+  // load and say what is missing.
+  const notConfigured = campaignChannelNotConfigured([
+    "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+    "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+  ]);
+
+  it("refuses to create a standalone campaign, with one named reason", async () => {
+    const { application } = createFixture({ channel: notConfigured });
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        requestId: "campaign-create-without-footer-1",
+        input: standaloneInput,
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("refuses to create a campaign from a post, with the same reason", async () => {
+    const { application } = createFixture({ channel: notConfigured });
+    await expect(
+      application.commands.createFromPost({
+        actor: editor,
+        requestId: "campaign-create-from-post-without-footer-1",
+        sourcePostRevisionId,
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("stores no campaign and no revision when creation is refused", async () => {
+    const store = createInMemoryCampaignStore();
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        requestId: "campaign-create-without-footer-2",
+        input: standaloneInput,
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+    await expect(store.listCampaigns(siteId)).resolves.toEqual([]);
+  });
+
+  it("records the refusal as a rejected command with the named reason", async () => {
+    const store = createInMemoryCampaignStore();
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        requestId: "campaign-create-without-footer-3",
+        input: standaloneInput,
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+    expect(
+      store
+        .listAuditEvents()
+        .map((event) => [event.outcome, event.reason]),
+    ).toContainEqual([
+      "rejected",
+      "campaign_sender_details_not_configured",
+    ]);
+  });
+
+  it("refuses to edit a campaign that was written while the settings were set", async () => {
+    const store = createInMemoryCampaignStore();
+    const configured = createFixture({ store });
+    const created = await configured.application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-settings-removed-1",
+      input: standaloneInput,
+    });
+
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.commands.edit({
+        actor: editor,
+        requestId: "campaign-edit-without-footer-1",
+        campaignId: created.campaign.id,
+        expectedVersion: created.campaign.version,
+        input: { ...standaloneInput, subject: "A different subject line" },
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("still reads the campaigns that are already stored", async () => {
+    const store = createInMemoryCampaignStore();
+    const configured = createFixture({ store });
+    const created = await configured.application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-settings-removed-2",
+      input: standaloneInput,
+    });
+
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.queries.listCampaigns({ actor: editor }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      application.queries.getCampaign({
+        actor: editor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toMatchObject({ id: created.campaign.id, version: 1 });
+  });
+
+  it("refuses to record an accepted test, and a receipt for one", async () => {
+    // These two write the audit trail and the command receipts that say a
+    // test went out. No test can go out while the footer cannot be built, so
+    // recording one would be a false record.
+    const store = createInMemoryCampaignStore();
+    const configured = createFixture({ store });
+    const created = await configured.application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-settings-removed-4",
+      input: standaloneInput,
+    });
+
+    const { application } = createFixture({ channel: notConfigured, store });
+    await expect(
+      application.commands.recordAcceptedTestCommand({
+        actor: editor,
+        requestId: "campaign-record-test-without-footer-1",
+        command: { action: "request_test" },
+        campaign: created.campaign,
+        revision: created.revision,
+        beforeState: "draft",
+        afterState: "draft",
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+    await expect(
+      application.commands.recordAcceptedTestReceiptConfirmation({
+        actor: editor,
+        requestId: "campaign-record-receipt-without-footer-1",
+        command: { action: "confirm_test_receipt" },
+        campaign: created.campaign,
+        revision: created.revision,
+        beforeState: "draft",
+        afterState: "draft",
+        targetId: created.campaign.id,
+        confirmation: {
+          executionId: "40000000-0000-4000-8000-000000000001",
+          siteId,
+          ownerActorId: ownerMembership.id,
+          requestId: "campaign-record-receipt-without-footer-1",
+          confirmedAt: "2026-07-29T07:00:00.000Z",
+        },
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("still writes down a refusal while the settings are absent", async () => {
+    // `recordRejectedCommand` is deliberately not gated. It is how a refusal
+    // is written down, so gating it would lose the record of the refusal.
+    const store = createInMemoryCampaignStore();
+    const { application } = createFixture({ channel: notConfigured, store });
+    await application.commands.recordRejectedCommand({
+      actor: editor,
+      requestId: "campaign-record-refusal-without-footer-1",
+      reason: "campaign_sender_details_not_configured",
+      command: { action: "request_test" },
+      targetId: "campaign:new",
+      beforeState: "draft",
+      action: "campaign.test",
+      commandName: "campaign.request_test",
+    });
+    expect(
+      store.listAuditEvents().map((event) => [event.outcome, event.reason]),
+    ).toContainEqual([
+      "rejected",
+      "campaign_sender_details_not_configured",
+    ]);
+  });
+
+  it("leaves the stored footer exactly as the installation wrote it", async () => {
+    const store = createInMemoryCampaignStore();
+    const configured = createFixture({ store });
+    const created = await configured.application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-settings-removed-3",
+      input: standaloneInput,
+    });
+    expect(created.revision.complianceFooter).toEqual(
+      campaignChannel.complianceFooter,
+    );
   });
 });
