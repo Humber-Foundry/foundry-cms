@@ -317,11 +317,13 @@
 .attention-list {
   margin: 0;
   padding: 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
   list-style: none;
 }
 
 .attention-list li {
-  padding-block: 0.85rem;
   border-top: 1px solid var(--dash-line);
 }
 
@@ -330,8 +332,10 @@
 }
 
 .attention-list a {
-  display: inline-block;
-  min-height: 1.5rem;
+  display: flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+  padding: 0 1rem;
   color: var(--dash-accent);
   font-weight: 600;
   text-decoration: none;

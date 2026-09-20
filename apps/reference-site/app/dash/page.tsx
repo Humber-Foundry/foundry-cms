@@ -1,4 +1,5 @@
 import { formatLocalScheduleTime } from "@/components/schedule-time-format";
+import { AttentionList } from "@/components/attention-list";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
@@ -238,59 +239,54 @@ export default async function DashboardOverviewPage({
             and drafts or schedule requests an app made for you appear here.
           </p>
         ) : (
-          <ul className="attention-list">
-            {previewsToReview.map((preview) => (
-              <li key={preview.previewId}>
-                <a
-                  href={`/dash/review/${encodeURIComponent(preview.previewId)}`}
-                >
-                  {preview.agentName === unnamedConnectedApp
+          <AttentionList
+            items={[
+              ...previewsToReview.map((preview) => ({
+                key: `preview-${preview.previewId}`,
+                href: `/dash/review/${encodeURIComponent(preview.previewId)}`,
+                label:
+                  preview.agentName === unnamedConnectedApp
                     ? "A draft waiting for your review"
-                    : `A draft from ${preview.agentName} waiting for your review`}
-                </a>
-              </li>
-            ))}
-            {pendingScheduleRequests.map((request) => (
-              <li key={request.postId}>
-                <a
-                  href={`/dash/blog?workspace=${encodeURIComponent(
-                    dashboardWorkspace.workspaceId,
-                  )}#blog-post-${encodeURIComponent(request.postId)}`}
-                >
-                  {request.agentName} asked to publish "{request.postTitle}"
-                  {" "}at {request.requestedTime}
-                </a>
-              </li>
-            ))}
-            {pendingCampaignRequests.map((request) => (
-              <li key={request.campaignId}>
-                <a
-                  href={`/dash/campaigns#campaign-${encodeURIComponent(
-                    request.campaignId,
-                  )}`}
-                >
-                  {request.agentName} asked to send "{request.subject}"
-                  {" "}at {request.requestedTime}
-                </a>
-              </li>
-            ))}
-            {messages.unreadCount > 0 ? (
-              <li>
-                <a href="/dash/forms">
-                  {messages.unreadCount} message
-                  {messages.unreadCount === 1 ? "" : "s"} you have not read
-                </a>
-              </li>
-            ) : null}
-            {messages.heldForReview > 0 ? (
-              <li>
-                <a href="/dash/forms">
-                  {messages.heldForReview} message
-                  {messages.heldForReview === 1 ? "" : "s"} held as spam
-                </a>
-              </li>
-            ) : null}
-          </ul>
+                    : `A draft from ${preview.agentName} waiting for your review`,
+              })),
+              ...pendingScheduleRequests.map((request) => ({
+                key: `schedule-${request.postId}`,
+                href: `/dash/blog?workspace=${encodeURIComponent(
+                  dashboardWorkspace.workspaceId,
+                )}#blog-post-${encodeURIComponent(request.postId)}`,
+                label: `${request.agentName} asked to publish "${request.postTitle}" at ${request.requestedTime}`,
+              })),
+              ...pendingCampaignRequests.map((request) => ({
+                key: `campaign-schedule-${request.campaignId}`,
+                href: `/dash/campaigns#campaign-${encodeURIComponent(
+                  request.campaignId,
+                )}`,
+                label: `${request.agentName} asked to send "${request.subject}" at ${request.requestedTime}`,
+              })),
+              ...(messages.unreadCount > 0
+                ? [
+                    {
+                      key: "messages-unread",
+                      href: "/dash/forms",
+                      label: `${messages.unreadCount} message${
+                        messages.unreadCount === 1 ? "" : "s"
+                      } you have not read`,
+                    },
+                  ]
+                : []),
+              ...(messages.heldForReview > 0
+                ? [
+                    {
+                      key: "messages-held",
+                      href: "/dash/forms",
+                      label: `${messages.heldForReview} message${
+                        messages.heldForReview === 1 ? "" : "s"
+                      } held as spam`,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         )}
       </section>
     </main>
