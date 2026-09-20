@@ -92,10 +92,16 @@ one immutable version of the whole definition, so the store holds no per-page
 edit time. Showing a draft-wide time on each row would suggest a fact the CMS
 does not have.
 
-In-canvas navigation resolves a link by the path it points at. Today a
-navigation item may hold only an anchor or a mail address, so no stored link
-resolves to a page yet; ticket #155 adds page targets, and this rule then opens
-them with no further change.
+In-canvas navigation resolves a link by the path it points at. Ticket #155 has
+landed, so a navigation item may now hold a `page:` target, and the canvas draws
+it through `resolveSiteHref`. The anchor the owner clicks therefore holds the
+page's public path, which is what this rule reads. A unit check feeds
+`resolveSiteHref`'s own output back into it, so the two rules cannot drift.
+
+There is still no browser check for it. The reference site has one page, so
+there is no second page for a navigation item to point at, and a link to the
+page already open opens nothing. Ticket #159 adds page creation; the browser
+check belongs with it.
 
 ## Alternatives considered
 

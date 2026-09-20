@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  defaultPageHref,
   homePage,
   listEditableSiteFields,
   referenceSiteDefinition,
+  resolveSiteHref,
   type SiteDefinition,
+  type SiteHref,
   type SitePage,
 } from "@humber-foundry/site-definition";
 
@@ -207,6 +210,42 @@ describe("editorPageForLinkPath", () => {
 
   it("finds no page for a site path no page is served at", () => {
     expect(editorPageForLinkPath(twoPages, "/nothing-here")).toBeUndefined();
+  });
+
+  /**
+   * The canvas draws a navigation item through `resolveSiteHref`, so the
+   * anchor the owner clicks holds the address that call produced, not the
+   * stored `page:` href. These checks feed exactly that address back in, so
+   * the two rules cannot drift apart.
+   */
+  it("opens the page a navigation item points at", () => {
+    const context = {
+      currentPage: homePage(twoPages),
+      pageHref: defaultPageHref("/"),
+      blogHref: "/blog",
+    };
+    for (const page of twoPages.pages) {
+      const drawn = resolveSiteHref(
+        twoPages,
+        `page:${page.id}` as SiteHref,
+        context,
+      );
+      expect(editorPageForLinkPath(twoPages, drawn)).toEqual(page);
+    }
+  });
+
+  it("opens the page a navigation item points at, anchor and all", () => {
+    const anchor = secondPage.sections[0]!.id;
+    const drawn = resolveSiteHref(
+      twoPages,
+      `page:${secondPage.id}#${anchor}` as SiteHref,
+      {
+        currentPage: homePage(twoPages),
+        pageHref: defaultPageHref("/"),
+        blogHref: "/blog",
+      },
+    );
+    expect(editorPageForLinkPath(twoPages, drawn)).toEqual(secondPage);
   });
 });
 
