@@ -19,7 +19,7 @@ const address = "reader@example.test";
 const requestedAt = "2026-03-01T10:00:00.000Z";
 const expiresAt = "2026-03-02T10:00:00.000Z";
 
-const { database } = useMigratedTestDatabase(["0028_newsletter_signup.sql"]);
+const { database } = useMigratedTestDatabase(["0029_newsletter_signup.sql"]);
 
 function store() {
   return createD1NewsletterSignupStore(

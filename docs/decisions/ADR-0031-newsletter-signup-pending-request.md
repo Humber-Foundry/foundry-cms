@@ -82,7 +82,7 @@ settings only — never a value.
 
 ## Consequences
 
-- A new migration, `0028_newsletter_signup.sql`, adds
+- A new migration, `0029_newsletter_signup.sql`, adds
   `newsletter_signup_requests` and `newsletter_confirmation_jobs`. A partial
   unique index allows one pending request per address, so two live confirmation
   links can never both create a subscriber.
