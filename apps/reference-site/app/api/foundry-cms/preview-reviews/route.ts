@@ -1,0 +1,305 @@
+import {
+  AccessDeniedError,
+  ContentApprovalInvalidError,
+  ContentPublicationValidationError,
+  ContentRevisionConfigurationError,
+  createContentActorId,
+} from "@humber-foundry/application";
+
+import {
+  AccessIdentityError,
+  AccessIdentityUnavailableError,
+} from "../../../../src/access-identity";
+import { loadContentPublicationApplication } from "../../../../src/content-publication-runtime";
+import { HumanAccessConfigurationError } from "../../../../src/human-access-configuration";
+import {
+  authorizeAuthenticatedHumanIdentity,
+  loadHumanIdentityRequestContext,
+} from "../../../../src/human-access-runtime";
+import {
+  executeIdempotentHumanMutation,
+  HumanMutationExecutionNotStartedError,
+  HumanMutationExecutionResumableError,
+  HumanMutationIdempotencyError,
+  verifyHumanMutation,
+} from "../../../../src/human-mutation-runtime";
+import {
+  humanMutationResultHeader,
+  recordedHumanMutationResult,
+} from "../../../../src/human-mutation-protocol";
+import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
+import {
+  loadMcpPreviewForHuman,
+  previewChangeReasonLimit,
+  recordPreviewReviewDecision,
+} from "../../../../src/mcp-preview-review-runtime";
+
+/**
+ * The person's decision about one preview an agent prepared.
+ *
+ * Only a signed-in member with a current mutation token reaches this route. An
+ * agent's own credential is an MCP bearer token, which this route never reads
+ * and never accepts, so an agent cannot approve its own work.
+ *
+ * Approving does not publish. It creates the immutable approval that the
+ * agent's `foundry.publication.request` needs, bound to the exact revision the
+ * person previewed.
+ */
+
+type ApproveCommand = Readonly<{
+  operation: "approve";
+  previewId: string;
+  previewConfirmed: true;
+}>;
+
+type RequestChangesCommand = Readonly<{
+  operation: "request_changes";
+  previewId: string;
+  reason: string;
+}>;
+
+function readCommand(
+  value: unknown,
+): ApproveCommand | RequestChangesCommand | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("operation" in value) ||
+    !("previewId" in value) ||
+    typeof value.previewId !== "string" ||
+    value.previewId.length < 1 ||
+    value.previewId.length > 200
+  ) {
+    return null;
+  }
+  if (
+    value.operation === "approve" &&
+    "previewConfirmed" in value &&
+    value.previewConfirmed === true
+  ) {
+    return value as ApproveCommand;
+  }
+  if (
+    value.operation === "request_changes" &&
+    "reason" in value &&
+    typeof value.reason === "string" &&
+    value.reason.trim().length > 0 &&
+    value.reason.length <= previewChangeReasonLimit
+  ) {
+    return value as RequestChangesCommand;
+  }
+  return null;
+}
+
+/**
+ * A reason is text a person typed. It is stored and later read by an agent, so
+ * it is kept as plain text: control characters are removed and the length is
+ * capped. Every screen that shows it renders it as text, never as markup.
+ */
+function plainReason(reason: string) {
+  return reason
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, " ")
+    .trim()
+    .slice(0, previewChangeReasonLimit);
+}
+
+function domainErrorResponse(error: unknown): Response | null {
+  if (error instanceof ContentApprovalInvalidError) {
+    return Response.json({ error: error.code }, { status: 409 });
+  }
+  if (error instanceof ContentPublicationValidationError) {
+    return Response.json({ error: error.code }, { status: 422 });
+  }
+  return null;
+}
+
+function recorded(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set(humanMutationResultHeader, recordedHumanMutationResult);
+  return new Response(response.body, {
+    status: response.status,
+    headers,
+  });
+}
+
+/**
+ * A decision is never read from a GET. A link, a prefetch or an image tag can
+ * make a browser issue a GET, so the only method that can record a decision is
+ * a POST that also carries the person's mutation token.
+ */
+export async function GET() {
+  return Response.json(
+    { error: "method_not_allowed" },
+    { status: 405, headers: { allow: "POST" } },
+  );
+}
+
+export async function POST(request: Request) {
+  try {
+    const identity = await loadHumanIdentityRequestContext(request.headers);
+    await verifyHumanMutation(request, identity.identity);
+    const command = readCommand(await request.json());
+    if (command === null) {
+      return Response.json({ error: "invalid_command" }, { status: 400 });
+    }
+    const response = await executeIdempotentHumanMutation({
+      request,
+      identity: identity.identity,
+      command,
+      execute: async () => {
+        let access;
+        let selected;
+        try {
+          access = await authorizeAuthenticatedHumanIdentity(identity);
+          if (access.state !== "authorized") {
+            return Response.json(
+              { error: "not_authorized" },
+              { status: 403 },
+            );
+          }
+          // Owner and Editor may both approve site and blog content. The
+          // capability table names that permission `content.write`.
+          await access.application.queries.requireCapability({
+            actor: access.identity,
+            capability: "content.write",
+          });
+          selected = await loadMcpPreviewForHuman({
+            previewId: command.previewId,
+            siteId: access.membership.siteId,
+          });
+        } catch (error) {
+          const domain = domainErrorResponse(error);
+          if (domain !== null) return domain;
+          throw new HumanMutationExecutionNotStartedError(error);
+        }
+        if (selected === null) {
+          return Response.json(
+            { error: "preview_not_current" },
+            { status: 404 },
+          );
+        }
+        if (selected.review.decided !== null) {
+          return Response.json(
+            { error: "already_decided" },
+            { status: 409 },
+          );
+        }
+        try {
+          const { revision } = selected;
+          const decidedAt = new Date().toISOString();
+          if (command.operation === "request_changes") {
+            const reason = plainReason(command.reason);
+            if (reason.length === 0) {
+              return Response.json(
+                { error: "invalid_command" },
+                { status: 400 },
+              );
+            }
+            const stored = await recordPreviewReviewDecision({
+              previewId: command.previewId,
+              siteId: access.membership.siteId,
+              workspaceId: revision.workspaceId,
+              revision: revision.revision,
+              decision: "changes_requested",
+              approvalId: null,
+              reason,
+              decidedBy: access.membership.id,
+              decidedAt,
+            });
+            if (!stored) {
+              return Response.json(
+                { error: "already_decided" },
+                { status: 409 },
+              );
+            }
+            return Response.json(
+              { review: { decision: "changes_requested", decidedAt } },
+              { status: 201 },
+            );
+          }
+          const application = await loadContentPublicationApplication(
+            revision.workspaceId,
+            createContentActorId(`mcp-${selected.review.actorId}`),
+          );
+          const approval = await application.commands.approve({
+            workspaceId: revision.workspaceId,
+            revision: revision.revision,
+            approvedBy: access.membership.id,
+            previewConfirmed: command.previewConfirmed,
+          });
+          // Two people answering at the same moment both reach `approve`, and
+          // the second insert loses. The approval it made names no review row,
+          // so no agent can ever learn its id, and the next revision
+          // invalidates it. It is left in place because `content_approvals` is
+          // append-only by design.
+          const stored = await recordPreviewReviewDecision({
+            previewId: command.previewId,
+            siteId: access.membership.siteId,
+            workspaceId: revision.workspaceId,
+            revision: revision.revision,
+            decision: "approved",
+            approvalId: approval.id,
+            reason: null,
+            decidedBy: access.membership.id,
+            decidedAt,
+          });
+          if (!stored) {
+            return Response.json(
+              { error: "already_decided" },
+              { status: 409 },
+            );
+          }
+          return Response.json(
+            {
+              review: {
+                decision: "approved",
+                approvalId: approval.id,
+                decidedAt,
+              },
+            },
+            { status: 201 },
+          );
+        } catch (error) {
+          const domain = domainErrorResponse(error);
+          if (domain !== null) return domain;
+          throw new HumanMutationExecutionResumableError(error);
+        }
+      },
+    });
+    return recorded(response);
+  } catch (error) {
+    const domain = domainErrorResponse(error);
+    if (domain !== null) return domain;
+    if (
+      error instanceof AccessDeniedError ||
+      error instanceof AccessIdentityError ||
+      error instanceof HumanRequestIntegrityError
+    ) {
+      return Response.json({ error: "request_check_failed" }, { status: 403 });
+    }
+    if (
+      error instanceof AccessIdentityUnavailableError ||
+      error instanceof HumanAccessConfigurationError ||
+      error instanceof ContentRevisionConfigurationError
+    ) {
+      return Response.json(
+        { error: "request_check_unavailable" },
+        { status: 503 },
+      );
+    }
+    if (error instanceof HumanMutationIdempotencyError) {
+      return Response.json(
+        {
+          error:
+            error.code === "invalid_key"
+              ? "invalid_idempotency_key"
+              : error.code === "key_conflict"
+                ? "idempotency_key_conflict"
+                : "request_in_progress",
+        },
+        { status: error.code === "invalid_key" ? 400 : 409 },
+      );
+    }
+    throw error;
+  }
+}

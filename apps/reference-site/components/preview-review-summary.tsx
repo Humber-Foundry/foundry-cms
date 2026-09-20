@@ -1,0 +1,95 @@
+import type { ContentChangeSummary } from "@humber-foundry/application";
+import { contentChangeVisitorEffect } from "@humber-foundry/application";
+
+import { HelpTip } from "@/components/help-tip";
+import { mcpRelativeTime } from "@/src/mcp-connection-display";
+
+export type PreviewReviewDecided = Readonly<{
+  decision: "approved" | "changes_requested";
+  approvalId: string | null;
+  reason: string | null;
+  decidedAt: string;
+}>;
+
+/**
+ * What a person reads before they answer: who prepared the draft, which pages
+ * and posts changed, the design changes, and what a visitor will get.
+ *
+ * It renders only. The controls that record an answer are a separate client
+ * component, so nothing on this part of the screen can change server state.
+ */
+export function PreviewReviewSummary({
+  agentName,
+  preparedAt,
+  summary,
+}: {
+  agentName: string;
+  preparedAt: string;
+  summary: ContentChangeSummary;
+}) {
+  // `changedDocuments` already names every changed, created and removed page
+  // by its title, and `publicEffect` gives each page's web address. Listing
+  // `summary.pages` beside them said the same thing twice.
+  const changeLines = [...summary.changedDocuments, ...summary.designChanges];
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <h1>Review this draft</h1>
+          <p>
+            {agentName} prepared this draft {mcpRelativeTime(preparedAt)}.{" "}
+            <HelpTip label="Where does this name come from?">
+              The name comes from the web address the app gave when it
+              connected. It is what the app says about itself, not a name
+              anyone checked.
+            </HelpTip>
+          </p>
+        </div>
+      </div>
+
+      <section className="panel" aria-labelledby="review-changes">
+        <h2 id="review-changes">What changed</h2>
+        {changeLines.length === 0 ? (
+          <p className="empty-state">
+            This draft changes nothing a visitor can see.
+          </p>
+        ) : (
+          <ul className="review-changes">
+            {changeLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
+        <p className="review-effect">{contentChangeVisitorEffect(summary)}</p>
+      </section>
+    </>
+  );
+}
+
+/**
+ * The answer a person already gave about this draft. The reason is text they
+ * typed, so it is rendered as text.
+ */
+export function PreviewReviewAnswer({
+  decided,
+}: {
+  decided: PreviewReviewDecided;
+}) {
+  if (decided.decision === "approved") {
+    return (
+      <p>
+        You approved this draft {mcpRelativeTime(decided.decidedAt)}. The app
+        can publish this exact version now.
+      </p>
+    );
+  }
+  return (
+    <>
+      <p>
+        You asked for changes {mcpRelativeTime(decided.decidedAt)}. This is what
+        you wrote:
+      </p>
+      <blockquote className="review-reason">{decided.reason}</blockquote>
+    </>
+  );
+}

@@ -62,6 +62,10 @@ describe("MCP human review route", () => {
                 { asset: { assetId: "asset-56" } },
               ],
             },
+            // A second page with its own photo. The preview must be able to
+            // draw every page's photos, not only the home page's.
+            { slug: "about", media: [{ asset: { assetId: "asset-57" } }] },
+            { slug: "contact" },
           ],
         },
       },
@@ -85,7 +89,7 @@ describe("MCP human review route", () => {
     });
     expect(mocks.mediaToken).toHaveBeenCalledWith(
       identity,
-      ["asset-55", "asset-56"],
+      ["asset-55", "asset-56", "asset-57"],
       expect.any(String),
     );
     expect(mocks.redirect).toHaveBeenCalledWith(

@@ -101,6 +101,24 @@ function bucketKey(field: EditableSiteField) {
 }
 
 /**
+ * Only the sentences about what a visitor will see.
+ *
+ * `publicEffect` ends by saying that reading the review neither approves nor
+ * publishes anything. That sentence is true on a screen that only shows the
+ * change, and wrong on a screen that carries an Approve control, so a screen
+ * that can approve reads the visitor sentences through this function.
+ */
+export function contentChangeVisitorEffect(
+  summary: ContentChangeSummary,
+): string {
+  return summary.publicEffect.endsWith(reviewDisclaimer)
+    ? summary.publicEffect
+        .slice(0, summary.publicEffect.length - reviewDisclaimer.length)
+        .trim()
+    : summary.publicEffect;
+}
+
+/**
  * Compare the published definition with the draft definition and describe the
  * difference in the words a site owner uses.
  *
