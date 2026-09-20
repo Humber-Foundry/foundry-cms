@@ -110,11 +110,29 @@ describe("subscriber ledger endpoint", () => {
           identityKey: "a".repeat(64),
           email: "person@example.com",
           state: "active",
-          createdAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2025-06-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
       ],
-      events: [],
+      events: [
+        {
+          id: "event-1",
+          siteId: "site_reference",
+          subscriberId: "subscriber-1",
+          type: "consent_recorded",
+          occurredAt: "2026-01-01T00:00:00.000Z",
+          recordedAt: "2026-01-01T00:00:00.000Z",
+          actor: { type: "human", membershipId: "membership-owner" },
+          evidence: {
+            lawfulBasis: "express",
+            source: "public_form",
+            occurredAt: "2026-01-01T00:00:00.000Z",
+            disclosureVersion: "newsletter-v1",
+            collectionSurface: "/newsletter",
+            evidenceReference: "submission-1",
+          },
+        },
+      ],
     });
 
     const response = await GET(
@@ -131,7 +149,11 @@ describe("subscriber ledger endpoint", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     const body = await response.text();
     expect(body).toContain("Email address,State,Consent date");
-    expect(body).toContain("person@example.com,Confirmed");
+    // The consent date comes from the event history, not the subscriber
+    // record's own createdAt (deliberately left different above).
+    expect(body).toContain(
+      "person@example.com,Confirmed,2026-01-01T00:00:00.000Z",
+    );
     // The export goes through the same Owner-only, audited query the table
     // uses — the CSV that reaches an Editor's request refuses exactly like
     // that query does, with no separate unaudited path.

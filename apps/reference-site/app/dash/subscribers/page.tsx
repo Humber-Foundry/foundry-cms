@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { HelpTip } from "@/components/help-tip";
 import { SubscriberTable } from "@/components/subscriber-table";
 import { requireAuthorizedDashboardAccess } from "@/src/dashboard-page-context";
+import { loadPendingSignupCount } from "@/src/newsletter-signup-runtime";
 import {
   countSubscribersByDisplayState,
   toSubscriberDisplayRow,
@@ -16,9 +17,25 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function StateCounts({ counts }: { counts: SubscriberStateCounts }) {
+function StateCounts({
+  waitingToConfirm,
+  counts,
+}: {
+  waitingToConfirm: number;
+  counts: SubscriberStateCounts;
+}) {
   return (
-    <dl className="status-grid">
+    <dl className="status-grid subscriber-counts">
+      <div>
+        <dt>
+          Waiting to confirm{" "}
+          <HelpTip label="What does waiting to confirm mean?">
+            Foundry sent these people a confirmation email. They have not
+            opened the link in it yet, so they have not joined your list.
+          </HelpTip>
+        </dt>
+        <dd>{waitingToConfirm}</dd>
+      </div>
       <div>
         <dt>Confirmed</dt>
         <dd>{counts.confirmed}</dd>
@@ -44,12 +61,14 @@ function StateCounts({ counts }: { counts: SubscriberStateCounts }) {
 
 /**
  * Subscribers is where an Owner sees who is on the newsletter list and
- * exports it. An Editor and an MCP client see the same three counts and
+ * exports it. An Editor and an MCP client see the same four counts and
  * nothing else — no address ever reaches either of them from this screen.
  */
 export default async function DashboardSubscribersPage() {
   const access = await requireAuthorizedDashboardAccess();
   const isOwner = access.membership.role === "owner";
+
+  const waitingToConfirm = await loadPendingSignupCount();
 
   let counts: SubscriberStateCounts;
   let rows: ReadonlyArray<SubscriberDisplayRow> = [];
@@ -62,7 +81,7 @@ export default async function DashboardSubscribersPage() {
     rows = subscribers.map(toSubscriberDisplayRow);
     counts = countSubscribersByDisplayState(subscribers);
   } else {
-    counts = await loadSubscriberStateCounts();
+    counts = await loadSubscriberStateCounts(access);
   }
 
   return (
@@ -70,13 +89,16 @@ export default async function DashboardSubscribersPage() {
       <div className="page-heading">
         <div>
           <h1>Subscribers</h1>
-          <p>Everyone who has joined your newsletter list, and where they stand.</p>
+          <p>
+            Everyone connected to your newsletter list, and the state of
+            each one.
+          </p>
         </div>
       </div>
 
       <section aria-labelledby="subscriber-counts">
         <h2 id="subscriber-counts">Counts</h2>
-        <StateCounts counts={counts} />
+        <StateCounts waitingToConfirm={waitingToConfirm} counts={counts} />
       </section>
 
       {isOwner ? (

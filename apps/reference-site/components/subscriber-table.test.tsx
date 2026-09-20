@@ -48,4 +48,22 @@ describe("SubscriberTable", () => {
     expect(markup).toContain("Address removed");
     expect(markup).not.toContain("null");
   });
+
+  it("shows a plain dash, never the word null, for a record with no consent date", () => {
+    const markup = renderToStaticMarkup(
+      <SubscriberTable
+        rows={[
+          {
+            id: "subscriber-1",
+            email: "never-consented@example.com",
+            displayState: "suppressed",
+            consentDate: null,
+          },
+        ]}
+        labelledBy="subscriber-list"
+      />,
+    );
+    expect(markup).toContain("—");
+    expect(markup).not.toContain("null");
+  });
 });

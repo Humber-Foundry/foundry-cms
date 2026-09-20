@@ -48,7 +48,11 @@ export function SubscriberTable({
                 {subscriberDisplayStateLabel[row.displayState]}
               </span>
             </td>
-            <td>{formatDashboardMoment(row.consentDate)}</td>
+            <td>
+              {row.consentDate === null
+                ? "—"
+                : formatDashboardMoment(row.consentDate)}
+            </td>
           </tr>
         ))}
       </tbody>

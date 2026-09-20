@@ -18,6 +18,7 @@ import {
   loadHumanAccessRequestContext,
   loadHumanIdentityRequestContext,
   type AuthenticatedHumanIdentityContext,
+  type HumanAccessRequestContext,
 } from "./human-access-runtime";
 import {
   HumanAccessConfigurationError,
@@ -119,13 +120,21 @@ export async function loadSubscriberLedgerRequestContext(
 }
 
 /**
- * How many subscribers are in each display state, with no actor and no
- * identity in the answer. This is what an Editor or an MCP client sees on the
- * Subscribers screen: it reads the same ledger `listIdentities` reads, but it
- * can never return an address, so it never needs an authorization check or a
- * sensitive-access audit record.
+ * How many subscribers are in each display state. The count itself carries
+ * no identity — it can never return an address, so it needs no capability
+ * check and no sensitive-access audit record, unlike `listIdentities`. This
+ * is what an Editor and an MCP client see on the Subscribers screen, exactly
+ * as an Owner does.
+ *
+ * It still takes the caller's authorized dashboard access context, not
+ * because the count needs it, but so only a route that has already
+ * authenticated a dashboard member can reach it at all — this must never
+ * become a query anyone can call from an unauthenticated path.
  */
-export async function loadSubscriberStateCounts(): Promise<SubscriberStateCounts> {
+export async function loadSubscriberStateCounts(
+  access: Extract<HumanAccessRequestContext, { state: "authorized" }>,
+): Promise<SubscriberStateCounts> {
+  void access;
   const { store } = await loadDependencies();
   const subscribers = await store.listSubscribers(
     installedSite.application.siteId,

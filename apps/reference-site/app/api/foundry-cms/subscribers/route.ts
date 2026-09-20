@@ -166,7 +166,7 @@ export async function GET(request: Request) {
       const ledger = await context.application.queries.exportLedger({
         actor: context.identity,
       });
-      return new Response(subscribersToCsv(ledger.subscribers), {
+      return new Response(subscribersToCsv(ledger), {
         headers: {
           "content-type": "text/csv; charset=utf-8",
           "content-disposition": 'attachment; filename="subscribers.csv"',

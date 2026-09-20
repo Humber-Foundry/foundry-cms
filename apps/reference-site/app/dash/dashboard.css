@@ -1236,6 +1236,20 @@
   font-size: var(--dash-text-small);
 }
 
+/* The Subscribers screen's four counts. Higher specificity than the plain
+ * `.status-grid` three-column rule above, on purpose, so this always wins
+ * regardless of source order — the same pattern `.mcp-connections
+ * .inventory-row` and `.member-access-table .inventory-row` use below. */
+.status-grid.subscriber-counts {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 760px) {
+  .status-grid.subscriber-counts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .content-editor {
   --editor-pad: clamp(1rem, 3vw, 1.5rem);
 

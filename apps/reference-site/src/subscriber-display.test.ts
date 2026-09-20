@@ -1,4 +1,8 @@
-import { createSubscriberId, type Subscriber } from "@humber-foundry/application";
+import {
+  createSubscriberId,
+  type Subscriber,
+  type SubscriberIdentity,
+} from "@humber-foundry/application";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -17,6 +21,16 @@ function subscriber(overrides: Partial<Subscriber>): Subscriber {
     state: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function identity(
+  overrides: Partial<SubscriberIdentity> = {},
+): SubscriberIdentity {
+  return {
+    ...subscriber(overrides),
+    latestConsentAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -44,24 +58,32 @@ describe("subscriberDisplayState", () => {
 });
 
 describe("toSubscriberDisplayRow", () => {
-  it("carries the consent date from when the record was created, not from a later suppression", () => {
+  it("carries the latest consent date, not the record's own creation date", () => {
     const row = toSubscriberDisplayRow(
-      subscriber({
+      identity({
         state: "hard_bounced",
         createdAt: "2025-03-04T00:00:00.000Z",
         updatedAt: "2026-06-01T00:00:00.000Z",
+        latestConsentAt: "2025-03-04T00:00:05.000Z",
       }),
     );
-    expect(row.consentDate).toBe("2025-03-04T00:00:00.000Z");
+    expect(row.consentDate).toBe("2025-03-04T00:00:05.000Z");
     expect(row.displayState).toBe("suppressed");
   });
 
   it("keeps a null email as null once an address is erased", () => {
     const row = toSubscriberDisplayRow(
-      subscriber({ state: "erased", email: null }),
+      identity({ state: "erased", email: null }),
     );
     expect(row.email).toBeNull();
     expect(row.displayState).toBe("suppressed");
+  });
+
+  it("carries no consent date for a record that never went through consent", () => {
+    const row = toSubscriberDisplayRow(
+      identity({ state: "complained", latestConsentAt: null }),
+    );
+    expect(row.consentDate).toBeNull();
   });
 });
 

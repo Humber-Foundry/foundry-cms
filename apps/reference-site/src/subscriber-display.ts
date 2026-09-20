@@ -1,4 +1,8 @@
-import type { Subscriber, SubscriberState } from "@humber-foundry/application";
+import type {
+  Subscriber,
+  SubscriberIdentity,
+  SubscriberState,
+} from "@humber-foundry/application";
 
 /**
  * What an Owner reads on screen, instead of the ledger's five internal
@@ -38,21 +42,24 @@ export type SubscriberDisplayRow = Readonly<{
   email: string | null;
   displayState: SubscriberDisplayState;
   /**
-   * The date a person gave consent. The ledger keeps this on the subscriber
-   * record itself, set once when the record is created, so a later
-   * suppression never moves it.
+   * The date consent was last given — the latest `consent_recorded` or
+   * `resubscribed` event, not the record's own creation date, which never
+   * moves even when somebody unsubscribes and later resubscribes. Null for
+   * a record that never went through consent at all (for example one a
+   * provider suppression created for an address that never signed up); the
+   * table shows a dash rather than a date nobody gave.
    */
-  consentDate: string;
+  consentDate: string | null;
 }>;
 
 export function toSubscriberDisplayRow(
-  subscriber: Subscriber,
+  subscriber: SubscriberIdentity,
 ): SubscriberDisplayRow {
   return {
     id: subscriber.id,
     email: subscriber.email,
     displayState: subscriberDisplayState(subscriber.state),
-    consentDate: subscriber.createdAt,
+    consentDate: subscriber.latestConsentAt,
   };
 }
 

@@ -193,6 +193,45 @@ describe("the durable newsletter signup store", () => {
     expect(await savedAddresses()).toStrictEqual([["pending", address]]);
   });
 
+  it("counts a pending request that has not run out of time", async () => {
+    await store().savePendingSignup({ pending: pending(), job: job() });
+    expect(
+      await store().countPendingSignups({ siteId, now: requestedAt }),
+    ).toBe(1);
+  });
+
+  it("does not count a pending request whose time has run out, even before a sweep marks it expired", async () => {
+    await store().savePendingSignup({ pending: pending(), job: job() });
+    expect(
+      await store().countPendingSignups({
+        siteId,
+        now: "2026-03-03T10:00:00.000Z",
+      }),
+    ).toBe(0);
+  });
+
+  it("does not count a settled request", async () => {
+    await store().savePendingSignup({ pending: pending(), job: job() });
+    await store().settlePendingSignup({
+      siteId,
+      requestId: createNewsletterSignupRequestId("newsletter_signup-1"),
+      state: "confirmed",
+      settledAt: requestedAt,
+    });
+    expect(
+      await store().countPendingSignups({ siteId, now: requestedAt }),
+    ).toBe(0);
+  });
+
+  it("never returns an address", async () => {
+    await store().savePendingSignup({ pending: pending(), job: job() });
+    const count = await store().countPendingSignups({
+      siteId,
+      now: requestedAt,
+    });
+    expect(typeof count).toBe("number");
+  });
+
   it("refuses to reopen a settled request", async () => {
     await store().savePendingSignup({ pending: pending(), job: job() });
     await store().settlePendingSignup({
