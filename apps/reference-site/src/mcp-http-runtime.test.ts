@@ -287,6 +287,7 @@ function fixture(
     beforeRecordInvocation?: () => Promise<void>;
     beforeGetLiveRelease?: () => Promise<void>;
     observeApplicationPrincipal?: (principal: unknown) => void;
+    denyOwnerAuthentication?: boolean;
   } = {},
 ) {
   initializedSessions.clear();
@@ -455,10 +456,15 @@ function fixture(
         redirectUris: options.registeredRedirectUris ?? [redirectUri],
       },
     },
-    authenticateOwner: async () => ({
-      membershipId: "membership-owner",
-      csrfToken: "owner-bound-csrf",
-    }),
+    authenticateOwner: async () => {
+      if (options.denyOwnerAuthentication === true) {
+        throw new Error("owner_authentication_denied");
+      }
+      return {
+        membershipId: "membership-owner",
+        csrfToken: "owner-bound-csrf",
+      };
+    },
     createAuthorizationCode: () => "opaque-authorization-code",
     createConnectionId: () =>
       options.connectionIds?.[connectionSequence++] ??
@@ -807,8 +813,8 @@ describe("production MCP HTTP runtime", () => {
     // The scope it already holds cannot be cleared here. The scope it is
     // asking to add is a control the Owner can clear.
     expect(consentText).toContain(
-      '<input type="checkbox" checked disabled> Read this site ' +
-        '(<code>site.read</code>) — always included' +
+      '<input type="checkbox" checked disabled><span>Read the site ' +
+        '(<code>site.read</code>) — always included</span>' +
         '<input type="hidden" name="granted_scope" value="site.read">',
     );
     expect(consentText).toContain(
@@ -903,6 +909,8 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(missingProof.status).toBe(400);
+    // A browser posted this form, so an invalid step-up is a readable page.
+    expect(missingProof.headers.get("content-type")).toContain("text/html");
     const wrongConnectionProof = await runtime.fetch(
       new Request(`${resourceUri}/oauth/authorize`, {
         method: "POST",
@@ -917,6 +925,9 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(wrongConnectionProof.status).toBe(400);
+    expect(wrongConnectionProof.headers.get("content-type")).toContain(
+      "text/html",
+    );
     expect(connections.get(first.connectionId)?.scopes).toEqual(["site.read"]);
     expect(connections.get(second.connectionId)?.scopes).toEqual(["site.read"]);
   });
@@ -1005,6 +1016,8 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(authorization.status).toBe(400);
+    // A browser posted this form, so the failure is a readable page.
+    expect(authorization.headers.get("content-type")).toContain("text/html");
     expect(connections.size).toBe(0);
 
     const connected = fixture();
@@ -3580,6 +3593,85 @@ describe("MCP authorize parameter and scope compatibility", () => {
       }),
     );
     expect(response.status).toBe(400);
+    expect(connections.size).toBe(0);
+  });
+
+  it("shows a readable page, not JSON, when a consent submission fails validation", async () => {
+    const { runtime, connections } = fixture();
+    const parameters = {
+      ...(await baseParameters()),
+      scope: "site.read content.draft",
+    };
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          // Adding a scope the client never requested fails validation.
+          ["granted_scope", "site.read"],
+          ["granted_scope", "publication.publish"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const page = await response.text();
+    expect(page).not.toContain('"error"');
+    expect(page).toContain("Return to the client");
+    expect(connections.size).toBe(0);
+  });
+
+  it("shows a readable page, not JSON, when a consent submission has the wrong origin", async () => {
+    const { runtime, connections } = fixture();
+    const parameters = await baseParameters();
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: "https://attacker.example",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const page = await response.text();
+    expect(page).not.toContain('"error"');
+    expect(connections.size).toBe(0);
+  });
+
+  it("shows a readable page, not JSON, when a consent submission cannot confirm the Owner's sign-in", async () => {
+    const { runtime, connections } = fixture({ denyOwnerAuthentication: true });
+    const parameters = await baseParameters();
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const page = await response.text();
+    expect(page).not.toContain('"error"');
+    expect(page).toContain("Sign in as a site Owner");
     expect(connections.size).toBe(0);
   });
 });
