@@ -155,10 +155,14 @@ restoring it onto another page.
 One narrow case survives the release itself. A save is replayed by an
 idempotency key, and the stored receipt holds a hash of the request. A tab open
 across the release that retries a save it had already sent hashes the request
-in its new shape, so the receipt does not match and the save is refused with a
-conflict rather than replayed. The owner is told, their edits are still in the
-draft, and saving again succeeds. It is a loud failure in a short window, not a
-silent loss, so it is accepted rather than worked around.
+in its new shape, so the receipt does not match and the save is refused rather
+than replayed.
+
+The editor now answers that refusal by dropping the attempt, so the next Save
+asks with a fresh key and succeeds. Without that, the editor would keep the
+attempt and re-send the same refused request every time the owner pressed Save.
+No edit is lost either way: the draft still holds them, and the browser outbox
+still holds them.
 
 ## Alternatives considered
 

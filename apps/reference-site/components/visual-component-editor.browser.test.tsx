@@ -1115,6 +1115,113 @@ describe("visual component editor browser acceptance", () => {
     expect(restoreKeys[5]).toBe(restoreKeys[4]);
   });
 
+  it("sends the next save with a fresh key after a refused idempotency key", async () => {
+    const workspaceId = "workspace_browser_idempotency_conflict";
+    await clearContentEditorOutbox(workspaceId);
+    const refusedMessage = "The save did not finish. Press Save to try again.";
+    const saveKeys: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as Record<string, unknown>)
+          : {};
+      if (
+        init?.method === "POST" &&
+        url.endsWith("/api/foundry-cms/revisions") &&
+        !("operation" in body)
+      ) {
+        saveKeys.push(new Headers(init.headers).get("idempotency-key") ?? "");
+        // The server already holds a receipt for this attempt, but for a
+        // different request than the one being sent. Only the first attempt is
+        // refused; whatever the editor sends next is accepted.
+        if (saveKeys.length === 1) {
+          return Response.json(
+            { error: "idempotency_key_conflict" },
+            { status: 409 },
+          );
+        }
+        return Response.json({
+          ...(browserRevision(workspaceId) as object),
+          revision: 5,
+          previewUrl: "/preview/idempotency-conflict",
+        });
+      }
+      return Response.json({ publication: null });
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-idempotency-conflict",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/idempotency-conflict",
+          activeWorkspaceUrl: "/dash?workspace=idempotency-conflict",
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    await enterEditMode(host);
+    const siteName = Array.from(host.querySelectorAll("input")).find(
+      (input) => input.value === referenceSiteDefinition.site.name,
+    );
+    expect(siteName).toBeDefined();
+    await userEvent.fill(siteName!, "Refused idempotency key");
+
+    for (let index = 0; index < 200 && saveKeys.length < 1; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(saveKeys).toHaveLength(1);
+    expect(saveKeys[0]).not.toBe("");
+    for (
+      let index = 0;
+      index < 200 &&
+      host.querySelector(".editor-message")?.textContent !== refusedMessage;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(host.querySelector(".editor-message")?.textContent).toBe(
+      refusedMessage,
+    );
+
+    const saveButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Save");
+    expect(saveButton).toBeDefined();
+    expect(saveButton!.disabled).toBe(false);
+    await userEvent.click(saveButton!);
+    for (let index = 0; index < 200 && saveKeys.length < 2; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(saveKeys).toHaveLength(2);
+    expect(saveKeys[1]).not.toBe("");
+    // The refused attempt was dropped, so this save asks with its own key. A
+    // retained attempt would re-send the same refused key for ever.
+    expect(saveKeys[1]).not.toBe(saveKeys[0]);
+
+    for (
+      let index = 0;
+      index < 200 && !host.textContent?.includes("All changes are saved.");
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(host.textContent).toContain("All changes are saved.");
+    expect(host.textContent).not.toContain(refusedMessage);
+    expect(
+      Array.from(host.querySelectorAll<HTMLButtonElement>("button")).some(
+        (button) => button.textContent === "Save",
+      ),
+    ).toBe(false);
+    await clearContentEditorOutbox(workspaceId);
+  });
+
   it("distinguishes unavailable publication history from an empty history", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).includes("view=history")

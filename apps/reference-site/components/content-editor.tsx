@@ -12,7 +12,6 @@ import {
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
-  findPageByCompositionSlotId,
   findPageById,
   isPageCompositionSlotId,
   listEditableSiteFields,
@@ -1027,6 +1026,23 @@ export function ContentEditor({
             ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
             : `Revision ${acknowledgedRevision} was saved, but the current deployment cannot render it. Start a fresh workspace to recover those edits; the saved revision remains preserved.`,
         );
+        return;
+      }
+      if (
+        response.status === 409 &&
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        body.error === "idempotency_key_conflict"
+      ) {
+        // The server holds a receipt for this attempt, but for a different
+        // request than the one being sent now. That happens when the editor is
+        // updated while a tab is open. The receipt is not this request's to
+        // replay, so the attempt is dropped and the next Save asks afresh.
+        // Keeping it would re-send the same refused request for ever.
+        persistence.discardAttempt();
+        dispatch({ type: "failed", errors: {} });
+        setMessage("The save did not finish. Press Save to try again.");
         return;
       }
       if (!response.ok) {
