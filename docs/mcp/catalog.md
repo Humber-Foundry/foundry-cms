@@ -419,9 +419,11 @@ because the slot is worked out from the draft's own page list. Placing on a
 page this draft does not hold is refused with `media_page_not_found`, and
 naming a photo this site does not hold with `media_asset_not_found`. A slot
 another change moved first is refused with `media_place_conflict`, and any
-other rule the media library keeps with `media_place_refused`. Every refusal
-carries a named reason, and repeating the same request repeats the first
-refusal word for word.
+other rule the media library keeps with `media_place_refused`. A refusal that
+names a broken rule carries its `reason`; a stale revision and a busy photo
+library carry their `code` alone, because the code is the whole answer.
+Repeating the same request with the same retry key repeats the first refusal
+word for word, so retrying a busy photo library needs a new retry key.
 
 A photo goes into a **post** through the post's own fields rather than through
 this tool: `foundry.blog.create` and `foundry.blog.update` take `mainImage`,

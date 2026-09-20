@@ -335,9 +335,13 @@ function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
     // already refused earlier by the tool's own checks, so the refusal
     // invites a retry rather than telling an agent to stop. The dashboard's
     // own route answers the same errors with 409 and a retry.
+    //
+    // A placement records its refusal against the retry key it carried, and
+    // a repeated refusal replays word for word, so the retry has to carry a
+    // new retry key. The message says so.
     return new McpReadError(
       "TEMPORARILY_UNAVAILABLE",
-      "The photo library could not finish that request. Try the same request again.",
+      "The photo library was busy. Send the request again with a new retry key.",
     );
   }
   return error;
