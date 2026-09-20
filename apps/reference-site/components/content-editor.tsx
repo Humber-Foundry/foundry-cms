@@ -78,6 +78,7 @@ import {
   publicationLabels,
   type PublicationRecord,
 } from "./publication-history";
+import { SiteHrefField } from "./site-href-field";
 import { SiteRenderer } from "./site-renderer";
 import { VisualComponentEditor } from "./visual-component-editor";
 // Type only — erased at compile, so the server-only module is never bundled
@@ -2335,7 +2336,23 @@ function EditorFieldGroups({
                   <label key={field.path} data-field-path={field.path}>
                     {fieldLabel}
                     {fieldHint}
-                    {field.values !== undefined ? (
+                    {field.siteHrefTargets !== undefined ? (
+                      <SiteHrefField
+                        id={`${field.path}-field`}
+                        value={field.value}
+                        targets={field.siteHrefTargets}
+                        disabled={editorLocked}
+                        invalid={Boolean(errors[field.path])}
+                        describedBy={fieldDescribedBy}
+                        onChange={(value) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value,
+                          })
+                        }
+                      />
+                    ) : field.values !== undefined ? (
                       <select
                         disabled={editorLocked}
                         value={field.value}

@@ -2033,6 +2033,20 @@
   resize: vertical;
 }
 
+/* The page picker: one select per choice the owner still has to make (what
+ * kind of link, which page, which section, or an email address), stacked
+ * with the same gap the rest of the editor uses between a field and its
+ * border. */
+.site-href-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.site-href-field select,
+.site-href-field input {
+  min-height: var(--dash-control-height);
+}
+
 .rich-text-editor {
   overflow: hidden;
   border: 1px solid var(--dash-field-line);
