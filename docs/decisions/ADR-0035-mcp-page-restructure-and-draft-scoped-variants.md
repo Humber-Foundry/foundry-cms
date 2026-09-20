@@ -95,6 +95,15 @@ section's own field, because it is a design value on a record both revisions
 hold. The style of a section the request added is carried in the section
 itself, because there is nothing to compare it with.
 
+`duplicate` therefore needs `content.draft` only, even when the section it
+copies carries a style the owner chose. The copy is a new record, and the agent
+named no style: it asked for the section that is already there. This is the
+same reading `foundry.page.duplicate` already works under, which copies a whole
+page with every section style on it under `content.draft`
+([ADR-0034](ADR-0034-mcp-addresses-every-page.md)). An agent that wants a
+different style on the copy must name one, and naming one needs
+`design.draft`.
+
 ### 4. `foundry.design.patch` reads the draft, and stops advertising a closed list
 
 The `set_variant` command's `componentId` was a closed list of section

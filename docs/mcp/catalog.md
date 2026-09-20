@@ -366,10 +366,10 @@ schema instead, with `VALIDATION_FAILED` and no named reason.
 ### List the section types
 
 `foundry.section.list` takes no input and needs `site.read`. It answers with
-every registered section type, the words an owner reads for it, the
-section styles it offers, and the fields `foundry.content.patch` can write on it.
-A field the Site Definition protects is not listed, because editing it is
-always refused.
+every section type this installation registers, the words an owner reads for
+it, the section styles it offers, and the fields `foundry.content.patch` can
+write on it. A field the Site Definition protects is not listed, because
+editing it is always refused.
 
 ### Patch design
 

@@ -22,7 +22,7 @@ export const mcpAgentCapabilityDescriptions: Readonly<
   "content.draft":
     "Prepare draft changes to your pages and posts — their words, which sections a page holds, and pages it adds or removes — as a new draft you review before it goes live.",
   "design.draft":
-    "Prepare draft changes to your site's design tokens and layout variants, as a new draft you review before it goes live.",
+    "Prepare draft changes to your site's design tokens and section styles, as a new draft you review before it goes live.",
   "publication.schedule":
     "Schedule a blog draft you already approved to go live at a future time, and check or cancel that schedule.",
   "publication.publish":
@@ -45,7 +45,6 @@ export const mcpAgentNeverDoes: ReadonlyArray<string> = Object.freeze([
   "It can never publish or schedule anything without you approving that exact draft.",
   "It can never send your newsletter to your subscriber list. No permission allows sending to more than your own test addresses.",
   "It never sees a subscriber's email address, even when it can draft or test a newsletter.",
-  "It can never put a page change on your live site by itself. Every change it makes waits in a draft until you approve it.",
   "It cannot start a new blog post from nothing or upload a photo. Those are not built yet.",
   "It cannot see your dashboard sign-in, Cloudflare account, GitHub account or email provider credentials.",
   "It cannot change who can sign in to this dashboard or any other site setting.",

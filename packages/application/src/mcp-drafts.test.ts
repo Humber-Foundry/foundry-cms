@@ -27,6 +27,7 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpRestructureScopes,
   sha256CanonicalJson,
   type McpMutationFailure,
   type ContentRevisionApplication,
@@ -2025,6 +2026,46 @@ describe("MCP page restructure tool", () => {
     expect(
       fixtureValue.previewScopesEvaluated.at(-1),
     ).toEqual([mcpContentDraftScope]);
+  });
+
+  it("copies a section with the style it already carries, on the content scope alone", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope],
+      "open-restructure-copy-style",
+    );
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "restructure-copy-style-1",
+        pageId,
+        operations: [
+          { op: "set_variant", sectionId: `${pageId}_hero`, variant: "focused" },
+        ],
+      },
+      context,
+    );
+    // The agent names no style here, so the copy needs the content scope only,
+    // the same as copying a whole page does. See ADR-0035.
+    expect(
+      mcpRestructureScopes([{ op: "duplicate", sectionId: `${pageId}_hero` }]),
+    ).toEqual([mcpContentDraftScope]);
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 2,
+        idempotencyKey: "restructure-copy-style-2",
+        pageId,
+        operations: [{ op: "duplicate", sectionId: `${pageId}_hero` }],
+      },
+      context,
+    );
+    const sections = await sectionsOf(fixtureValue, workspaceId, pageId);
+    expect(sections[1]!.type === "hero" && sections[1]!.variant).toBe(
+      "focused",
+    );
   });
 
   it("refuses a restructure with a named reason an agent can act on", async () => {

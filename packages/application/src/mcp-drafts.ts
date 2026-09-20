@@ -317,6 +317,18 @@ export type McpRestructurePageInput = McpPageMutationInput &
   }>;
 
 /**
+ * The one field of a section operation that names a section style.
+ *
+ * It is tied to the operation union, so an operation that ever names a section
+ * style under a different key stops the build here and `mcpRestructureScopes`
+ * below has to change with it.
+ */
+const sectionStyleField = "variant" satisfies keyof Extract<
+  PageSectionOperation,
+  { variant: string }
+>;
+
+/**
  * The draft scopes one restructure needs.
  *
  * Changing which sections a page holds is a content change, so every
@@ -337,8 +349,8 @@ export function mcpRestructureScopes(
     (operation) =>
       typeof operation === "object" &&
       operation !== null &&
-      "variant" in operation &&
-      (operation as { variant: unknown }).variant !== undefined,
+      sectionStyleField in operation &&
+      (operation as Record<string, unknown>)[sectionStyleField] !== undefined,
   );
   return namesASectionStyle
     ? [mcpContentDraftScope, mcpDesignDraftScope]
