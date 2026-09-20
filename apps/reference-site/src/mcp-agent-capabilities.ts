@@ -24,11 +24,11 @@ export const mcpAgentCapabilityDescriptions: Readonly<
   "design.draft":
     "Prepare draft changes to your site's design tokens and section styles, as a new draft you review before it goes live.",
   "publication.schedule":
-    "Schedule a blog draft you already approved to go live at a future time, ask you to publish a post at a time it suggests, and check or cancel that schedule.",
+    "Schedule a blog draft you already approved to go live at a future time, ask you to publish a post at a time it suggests, ask you to send a newsletter at a time it suggests, and check or cancel that schedule.",
   "publication.publish":
     "Publish a draft immediately, once you have approved that exact draft.",
   "campaign.draft":
-    "Prepare newsletter campaign drafts for your review. It cannot send them.",
+    "Prepare newsletter campaign drafts for your review, and read where one has got to. It cannot send them.",
   "campaign.test":
     "Send a test copy of a newsletter campaign only to the test addresses you already set up.",
   "analytics.read":

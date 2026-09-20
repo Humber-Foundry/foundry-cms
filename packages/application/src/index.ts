@@ -15,6 +15,8 @@ export * from "./in-memory-newsletter-signup-store";
 export * from "./campaign";
 export * from "./campaign-bulk-delivery";
 export * from "./in-memory-campaign-bulk-state-store";
+export * from "./campaign-schedule-proposals";
+export * from "./in-memory-campaign-schedule-proposal-store";
 export * from "./in-memory-campaign-store";
 export * from "./public-form";
 export * from "./content-revisions";

@@ -161,6 +161,9 @@ Annotations are shown as
 | `foundry.campaign.get` | `T / - / - / F` | Read a campaign's editable content and metadata, without audience or recipient data. |
 | `foundry.campaign.request_test` | `F / F / T / T` | Request a test delivery to the Owner-configured verified recipients. The agent selects no recipients. |
 | `foundry.campaign.test_readiness` | `T / - / - / F` | Read whether a campaign's test delivery and Owner confirmation are current. |
+| `foundry.campaign.list` | `T / - / - / F` | List this site's campaigns with their subject and current version, without audience or recipient data. |
+| `foundry.campaign.status` | `T / - / - / F` | Read where one campaign stands: the owner's approval, a send that is set, a send that has run as a count, and a schedule request waiting for a person. |
+| `foundry.campaign.schedule_request` | `F / F / T / F` | Ask a person to send one campaign at a named time. It records the request only; a person confirms the test, approves the email and starts the send. |
 | `foundry.analytics.read` | `T / - / - / F` | Read one fixed bounded aggregate analytics view with metric metadata and small-cell suppression. |
 
 `openWorldHint` is true only where the operation can change public site state or

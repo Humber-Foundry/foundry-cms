@@ -35,6 +35,7 @@ import {
   senderDetailsNotSetSentence,
 } from "./connection-status";
 import { HelpTip } from "./help-tip";
+import { formatLocalScheduleTime } from "./schedule-time-format";
 import {
   browserTimeZone,
   resolveSendTime,
@@ -126,6 +127,10 @@ const refusalSentences: Readonly<Record<string, string>> = {
     "Email is not connected yet, so nothing can be sent or tested.",
   campaign_sender_details_not_configured: senderDetailsNotSetSentence,
   bulk_owner_required: "Only the site owner can do this step.",
+  human_authority_required:
+    "Only the site owner or an editor can answer an app's request.",
+  schedule_request_not_found:
+    "That request is no longer there. Reload the page.",
   not_authorized: "You do not have permission to do this step.",
   bulk_test_required: "Send a test first.",
   bulk_test_stale:
@@ -190,6 +195,19 @@ function testConfirmed(report: CampaignSendReport): boolean {
  * a missing or misspelt field fails the build here rather than returning a
  * refusal to the person who pressed the button.
  */
+/**
+ * One send-time request an app made, as the server reports it: which
+ * campaign, which app, and the time asked for in the zone the request itself
+ * carries (see ADR-0038 §4).
+ */
+type PendingScheduleRequest = Readonly<{
+  proposalId: string;
+  campaignId: string;
+  agentName: string;
+  localDateTime: string;
+  ianaTimeZone: string;
+}>;
+
 type SendFlowCommand =
   | Readonly<{
       action: "request_test";
@@ -209,6 +227,7 @@ type SendFlowCommand =
       resolvedTime: SendTime;
     }>
   | Readonly<{ action: "cancel_bulk_schedule"; scheduleId: string }>
+  | Readonly<{ action: "decline_schedule_request"; proposalId: string }>
   | Readonly<{
       action: "send_bulk_now";
       campaignId: CampaignId;
@@ -871,6 +890,7 @@ export function CampaignControls({
   siteImages,
   postSources,
   initialCampaigns,
+  initialScheduleRequests,
   role,
 }: {
   csrfToken: string;
@@ -891,12 +911,22 @@ export function CampaignControls({
   initialCampaigns: ReadonlyArray<
     Readonly<{ campaign: Campaign; revision: CampaignRevision }>
   >;
+  /**
+   * The send-time requests an app has made that nobody has answered yet. The
+   * screen shows each one on its own campaign and offers a Decline. Only a
+   * person answers a request: sending and scheduling stay the Owner's steps
+   * below, and declining is this button. See ADR-0039.
+   */
+  initialScheduleRequests: ReadonlyArray<PendingScheduleRequest>;
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [campaigns, setCampaigns] = useState<
     ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
   >(initialCampaigns);
+  const [scheduleRequests, setScheduleRequests] = useState<
+    ReadonlyArray<PendingScheduleRequest>
+  >(initialScheduleRequests);
   const [selected, setSelected] = useState<CampaignRevision | null>(null);
   // The composer opens by itself when there is nothing to list yet.
   const [writingNew, setWritingNew] = useState(initialCampaigns.length === 0);
@@ -967,8 +997,10 @@ export function CampaignControls({
       campaigns: ReadonlyArray<
         Readonly<{ campaign: Campaign; revision: CampaignRevision }>
       >;
+      scheduleRequests?: ReadonlyArray<PendingScheduleRequest>;
     };
     setCampaigns(body.campaigns);
+    setScheduleRequests(body.scheduleRequests ?? []);
     if (selectedCampaignId !== undefined) {
       setSelected(
         body.campaigns.find(
@@ -1007,6 +1039,46 @@ export function CampaignControls({
         // about the old one is out of date.
         if (flowCampaignId !== null) await loadReport(flowCampaignId);
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Say no to one send-time request an app made.
+   *
+   * Declining touches nothing else: no campaign, no approval and no send. It
+   * only stops the request asking. The list is read back afterwards, so what
+   * the screen shows is what the server holds. See ADR-0039.
+   */
+  async function declineScheduleRequest(proposalId: string) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `campaign:${crypto.randomUUID()}`,
+          "x-foundry-csrf": csrfToken,
+        },
+        body: JSON.stringify({
+          action: "decline_schedule_request",
+          proposalId,
+        } satisfies SendFlowCommand),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as
+          | Record<string, unknown>
+          | null;
+        const code = typeof body?.error === "string" ? body.error : "";
+        setMessage(
+          code === ""
+            ? refusalSentence(code)
+            : `${refusalSentence(code)} Reason: ${code}.`,
+        );
+      }
+      await loadCampaigns();
     } finally {
       setBusy(false);
     }
@@ -1187,18 +1259,45 @@ export function CampaignControls({
           // back to the header image, so a preview surface always shows a
           // picture when the campaign has one.
           const thumbnail = revision.shareImage ?? revision.headerImage ?? null;
+          const pendingRequest =
+            scheduleRequests.find(
+              (request) => request.campaignId === campaign.id,
+            ) ?? null;
           return (
-          <li key={campaign.id}>
-            <div className="post-list-summary">
-              {thumbnail === null ? null : (
-                <img
-                  className="campaign-thumbnail"
-                  src={campaignPreviewSrc(thumbnail.url)}
-                  alt={thumbnail.alt}
-                />
+          <li key={campaign.id} id={`campaign-${campaign.id}`}>
+            <div className="post-list-info">
+              <div className="post-list-summary">
+                {thumbnail === null ? null : (
+                  <img
+                    className="campaign-thumbnail"
+                    src={campaignPreviewSrc(thumbnail.url)}
+                    alt={thumbnail.alt}
+                  />
+                )}
+                <strong>{revision.subject}</strong>
+                <span>{campaignStateLabels[campaign.lifecycleState]}</span>
+              </div>
+              {pendingRequest === null ? null : (
+                <p className="composer-hint">
+                  {pendingRequest.agentName} asked to send this at{" "}
+                  {formatLocalScheduleTime(
+                    pendingRequest.localDateTime,
+                    pendingRequest.ianaTimeZone,
+                  )}
+                  . Open "Sending steps" below to send it then, or decline the
+                  request.{" "}
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={busy}
+                    onClick={() => {
+                      void declineScheduleRequest(pendingRequest.proposalId);
+                    }}
+                  >
+                    Decline
+                  </button>
+                </p>
               )}
-              <strong>{revision.subject}</strong>
-              <span>{campaignStateLabels[campaign.lifecycleState]}</span>
             </div>
             <div className="post-list-actions">
               <button

@@ -102,6 +102,9 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.campaign.get` | `campaign.draft` | None | None |
 | `foundry.campaign.request_test` | `campaign.test` | Exact persisted campaign revision; client confirmation recommended | Test to configured verified recipients |
 | `foundry.campaign.test_readiness` | `campaign.test` | None | None |
+| `foundry.campaign.list` | `campaign.draft` | None | None |
+| `foundry.campaign.status` | `campaign.draft` | None | None |
+| `foundry.campaign.schedule_request` | `publication.schedule` | None; the request itself is what a human approves | Records a send-time request. No schedule, no send |
 | `foundry.publication.schedule` | `publication.schedule` + matching draft scopes | Existing human approval | Scheduled operation |
 | `foundry.publication.cancel` | `publication.schedule` | None; only before claim | Cancels site/blog schedule |
 | `foundry.publication.request` | `publication.publish` + matching draft scopes | Existing human approval | Git/build operation |

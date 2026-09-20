@@ -1431,6 +1431,140 @@ const campaignTestReadinessResult = {
   ],
 } as const;
 
+const campaignListResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    campaigns: {
+      type: "array",
+      maxItems: 500,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          campaignId: campaignIdSchema,
+          version: { type: "integer", minimum: 1 },
+          lifecycleState: { const: "draft" },
+          subject: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+        required: [
+          "campaignId",
+          "version",
+          "lifecycleState",
+          "subject",
+          "createdAt",
+          "updatedAt",
+        ],
+      },
+    },
+  },
+  required: ["campaigns"],
+} as const;
+
+const campaignScheduleRequestResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    requestId: { type: "string", minLength: 1 },
+    campaignId: campaignIdSchema,
+    sendAt: publishAtSchema,
+    reportingTimeZone: { type: "string", minLength: 1 },
+    state: { const: "pending_human_approval" },
+  },
+  required: [
+    "requestId",
+    "campaignId",
+    "sendAt",
+    "reportingTimeZone",
+    "state",
+  ],
+} as const;
+
+/**
+ * Where one campaign stands: states, times and counts. It carries no address
+ * and no person — not the Owner who approved the email, not a test address,
+ * and nobody in the audience. See ADR-0039.
+ */
+const campaignStatusResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    campaignId: campaignIdSchema,
+    version: { type: "integer", minimum: 1 },
+    lifecycleState: { const: "draft" },
+    ownerApproval: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            state: { enum: ["active", "consumed", "invalidated"] },
+            approvedAt: { type: "string", format: "date-time" },
+          },
+          required: ["state", "approvedAt"],
+        },
+      ],
+    },
+    sendSchedule: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            state: {
+              enum: [
+                "active",
+                "claimed",
+                "completed",
+                "cancelled",
+                "blocked",
+                "missed",
+              ],
+            },
+            sendAt: { type: "string", format: "date-time" },
+            reportingTimeZone: { type: "string", minLength: 1 },
+          },
+          required: ["state", "sendAt", "reportingTimeZone"],
+        },
+      ],
+    },
+    send: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            state: { type: "string", minLength: 1 },
+            attempt: { type: "integer", minimum: 0 },
+            recipientCount: {
+              anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+            },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+          required: ["state", "attempt", "recipientCount", "updatedAt"],
+        },
+      ],
+    },
+    scheduleRequest: {
+      anyOf: [{ type: "null" }, campaignScheduleRequestResult],
+    },
+  },
+  required: [
+    "campaignId",
+    "version",
+    "lifecycleState",
+    "ownerApproval",
+    "sendSchedule",
+    "send",
+    "scheduleRequest",
+  ],
+} as const;
+
 const localDateSchema = {
   type: "string",
   pattern: "^\\d{4}-\\d{2}-\\d{2}$",
@@ -2590,6 +2724,63 @@ const descriptors = {
     annotations,
     execution: taskExecution,
   },
+  "foundry.campaign.list": {
+    name: "foundry.campaign.list",
+    description:
+      "List this site's campaigns with their subject and current version, without audience or recipient data.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+    },
+    outputSchema: toolOutputSchema(campaignListResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.status": {
+    name: "foundry.campaign.status",
+    description:
+      "Read where one campaign stands: the owner's approval, a send that is set, a send that has run as a count, and a schedule request waiting for a person.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+      },
+      required: ["campaignId"],
+    },
+    outputSchema: toolOutputSchema(campaignStatusResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.schedule_request": {
+    name: "foundry.campaign.schedule_request",
+    description:
+      "Ask a person to send one campaign at a named time. It records the request only; a person confirms the test, approves the email and starts the send.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+        sendAt: publishAtSchema,
+        reportingTimeZone: {
+          type: "string",
+          minLength: 1,
+          maxLength: 100,
+        },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "campaignId",
+        "sendAt",
+        "reportingTimeZone",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema(campaignScheduleRequestResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
   "foundry.analytics.read": {
     name: "foundry.analytics.read",
     description:
@@ -3212,6 +3403,74 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.testReadiness!(principal, { campaignId }, context);
     },
+    "foundry.campaign.list": async (principal, input, context) => {
+      if (!isRecord(input) || !hasExactKeys(input, [])) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.list",
+          input,
+          context,
+          [mcpCampaignDraftScope],
+        );
+      }
+      return application.listCampaigns!(principal, {}, context);
+    },
+    "foundry.campaign.status": async (principal, input, context) => {
+      const campaignId =
+        isRecord(input) && hasExactKeys(input, ["campaignId"])
+          ? parseCampaignId(input.campaignId)
+          : null;
+      if (campaignId === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.status",
+          input,
+          context,
+          [mcpCampaignDraftScope],
+        );
+      }
+      return application.campaignStatus!(principal, { campaignId }, context);
+    },
+    "foundry.campaign.schedule_request": async (
+      principal,
+      input,
+      context,
+    ) => {
+      const campaignId =
+        isRecord(input) &&
+        hasExactKeys(input, [
+          "campaignId",
+          "sendAt",
+          "reportingTimeZone",
+          "idempotencyKey",
+        ]) &&
+        validIdempotencyKey(input.idempotencyKey) &&
+        typeof input.sendAt === "string" &&
+        publishAtShape.test(input.sendAt) &&
+        typeof input.reportingTimeZone === "string" &&
+        input.reportingTimeZone.trim() !== ""
+          ? parseCampaignId(input.campaignId)
+          : null;
+      if (campaignId === null || !isRecord(input)) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.schedule_request",
+          input,
+          context,
+          [mcpPublicationScheduleScope],
+        );
+      }
+      return application.requestSchedule!(
+        principal,
+        {
+          campaignId,
+          sendAt: input.sendAt as string,
+          reportingTimeZone: input.reportingTimeZone as string,
+          idempotencyKey: input.idempotencyKey as string,
+        },
+        context,
+      );
+    },
     "foundry.analytics.read": async (principal, input, context) => {
       const parsed = parseAnalyticsInput(input);
       if (parsed === null) {
@@ -3303,6 +3562,12 @@ export function createMcpToolRegistry(application: McpReadApplication) {
               name === "foundry.campaign.test_readiness"
             ) {
               return principal.scopes.includes(mcpCampaignTestScope);
+            }
+            // Asking for a send time needs the schedule permission, because
+            // that is the permission it asks about, exactly as
+            // `foundry.blog.schedule_request` does. See ADR-0039.
+            if (name === "foundry.campaign.schedule_request") {
+              return principal.scopes.includes(mcpPublicationScheduleScope);
             }
             return principal.scopes.includes(mcpCampaignDraftScope);
           }

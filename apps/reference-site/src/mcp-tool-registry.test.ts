@@ -369,6 +369,13 @@ describe("MCP draft tool registry", () => {
         if (collectionCommands.includes(tool.name)) {
           expect(properties).toContain("postId");
           expect(properties).not.toContain("workspaceId");
+        } else if (tool.name === "foundry.campaign.schedule_request") {
+          // Asking for a send time names the campaign it asks about. It
+          // writes no draft revision, so it names no workspace and carries
+          // no revision. See ADR-0039.
+          expect(properties).toContain("campaignId");
+          expect(properties).not.toContain("workspaceId");
+          expect(properties).not.toContain("expectedRevision");
         } else if (tool.name === "foundry.media.upload") {
           // Adding a photo to the media library writes no draft revision, so
           // it names no workspace and carries no revision. See ADR-0037.
@@ -887,6 +894,107 @@ describe("MCP campaign and analytics tool registry", () => {
     }
   });
 
+  it("reveals no person and no outside address through any campaign tool", () => {
+    // Issue #172 requires proof that no identity is reachable through the
+    // campaign tools. A campaign tool answers with states, times and counts,
+    // and takes no address of any kind. See ADR-0039.
+    const campaignTools = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpPublicationScheduleScope,
+        ]),
+      )
+      .filter(({ name }) => name.startsWith("foundry.campaign."));
+    expect(campaignTools.map(({ name }) => name)).toEqual([
+      "foundry.campaign.create",
+      "foundry.campaign.edit",
+      "foundry.campaign.get",
+      "foundry.campaign.request_test",
+      "foundry.campaign.test_readiness",
+      "foundry.campaign.list",
+      "foundry.campaign.status",
+      "foundry.campaign.schedule_request",
+    ]);
+    for (const tool of campaignTools) {
+      for (const schema of [tool.inputSchema, tool.outputSchema]) {
+        // `$defs` is the shared Site Definition dictionary every tool output
+        // carries, so only the tool's own shape is scanned here.
+        const { $defs: _shared, ...own } = schema as Record<string, unknown>;
+        const properties = schemaPropertyNames(own);
+        for (const forbidden of [
+          "email",
+          "emailAddress",
+          "address",
+          "addresses",
+          "recipient",
+          "recipients",
+          "recipientIds",
+          "subscriber",
+          "subscribers",
+          "audience",
+          "segment",
+          "member",
+          "members",
+          "owner",
+          "ownerActorId",
+          "actorId",
+          "createdBy",
+          "connectionId",
+          "to",
+        ]) {
+          expect(properties, `${tool.name} ${forbidden}`).not.toContain(
+            forbidden,
+          );
+        }
+      }
+    }
+  });
+
+  it("answers a campaign schedule request as waiting for a person", () => {
+    // An agent never sends. The one thing this tool can answer with is a
+    // request a person still has to act on. See ADR-0039.
+    const scheduleRequest = fullRegistry()
+      .list(principal([mcpInitialScope, mcpPublicationScheduleScope]))
+      .find(({ name }) => name === "foundry.campaign.schedule_request")!;
+    const success = (
+      scheduleRequest.outputSchema as unknown as {
+        oneOf: ReadonlyArray<{
+          properties: { result: { properties: { state: { const: string } } } };
+        }>;
+      }
+    ).oneOf[0]!;
+    expect(success.properties.result.properties.state.const).toBe(
+      "pending_human_approval",
+    );
+    expect(scheduleRequest.annotations.readOnlyHint).toBe(false);
+    expect(scheduleRequest.annotations.destructiveHint).toBe(false);
+  });
+
+  it("offers no campaign tool that sends to the subscriber list", () => {
+    const names = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpPublicationScheduleScope,
+        ]),
+      )
+      .map(({ name }) => name);
+    for (const forbidden of [
+      "foundry.campaign.send",
+      "foundry.campaign.send_now",
+      "foundry.campaign.schedule",
+      "foundry.campaign.authorize",
+      "foundry.campaign.confirm_test",
+    ]) {
+      expect(names).not.toContain(forbidden);
+    }
+  });
+
   it("lets a photo just over the limit reach its named refusal", () => {
     // The schema is the transport bound, not the photo rule. A photo a little
     // over 4 MiB has to reach the application, which refuses it with
@@ -977,7 +1085,7 @@ describe("MCP campaign and analytics tool registry", () => {
         name.startsWith("foundry.campaign.") ||
         name === "foundry.analytics.read",
     );
-    expect(newTools.length).toBe(6);
+    expect(newTools.length).toBe(8);
     for (const tool of newTools) {
       expect(() => validator.compile(tool.inputSchema)).not.toThrow();
       expect(() => validator.compile(tool.outputSchema)).not.toThrow();
@@ -1150,6 +1258,9 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.campaign.get": "campaign.draft",
         "foundry.campaign.request_test": "campaign.test",
         "foundry.campaign.test_readiness": "campaign.test",
+        "foundry.campaign.list": "campaign.draft",
+        "foundry.campaign.status": "campaign.draft",
+        "foundry.campaign.schedule_request": "publication.schedule",
         "foundry.publication.schedule":
           "publication.schedule + matching draft scopes",
         "foundry.publication.cancel": "publication.schedule",
@@ -1175,7 +1286,7 @@ describe("MCP campaign and analytics tool registry", () => {
         mcpAnalyticsReadScope,
       ]),
     );
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(35);
 
     for (const tool of tools) {
       const inputSchema = JSON.parse(

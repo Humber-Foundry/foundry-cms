@@ -8,6 +8,7 @@ import {
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
+  CampaignScheduleProposalError,
   CampaignValidationError,
   createCampaignId,
   createCampaignRevisionId,
@@ -19,9 +20,13 @@ import {
   mcpCampaignDraftScope,
   mcpCampaignTestScope,
   mcpInitialScope,
+  mcpPublicationScheduleScope,
   McpReadError,
   type Campaign,
+  type CampaignBulkResolvedTime,
+  type CampaignBulkStateReport,
   type CampaignRevision,
+  type CampaignScheduleProposal,
   type CampaignTestDeliveryOperation,
   type McpCampaignRuntime,
   type McpConnectionGrant,
@@ -137,8 +142,33 @@ function testOperation(
   };
 }
 
+const emptyBulkState: CampaignBulkStateReport = Object.freeze({
+  authorization: null,
+  schedule: null,
+  sendOperation: null,
+});
+
+const scheduleProposalId = "schedule_request_1";
+
+function sampleScheduleProposal(
+  resolvedTime: Omit<CampaignBulkResolvedTime, "timeZoneDatabaseVersion">,
+): CampaignScheduleProposal {
+  return {
+    id: scheduleProposalId,
+    siteId,
+    campaignId,
+    campaignRevisionId: revisionId,
+    campaignVersion: 1,
+    ...resolvedTime,
+    timeZoneDatabaseVersion: "2026a",
+    createdBy: "mcp-agent-campaign-57",
+    createdAt: now,
+  };
+}
+
 function fixture(runtime: Partial<McpCampaignRuntime> = {}) {
   const audit: McpReadAuditEvent[] = [];
+  const requestScheduleCalls: Array<Record<string, unknown>> = [];
   let grant: McpConnectionGrant | null = null;
   const read = createMcpReadApplication({
     site: createSiteApplication({
@@ -203,6 +233,20 @@ function fixture(runtime: Partial<McpCampaignRuntime> = {}) {
         acceptedAt: now,
       };
     },
+    async listCampaigns() {
+      return [{ campaign: sampleCampaign(), revision: sampleRevision() }];
+    },
+    async campaignStatus() {
+      return {
+        campaign: sampleCampaign(),
+        bulkState: emptyBulkState,
+        pendingScheduleRequest: null,
+      };
+    },
+    async requestSchedule(input) {
+      requestScheduleCalls.push({ ...input });
+      return sampleScheduleProposal(input.resolvedTime);
+    },
   };
   const application = createMcpCampaignApplication({
     base: read,
@@ -212,6 +256,7 @@ function fixture(runtime: Partial<McpCampaignRuntime> = {}) {
     application,
     audit,
     requestTestCalls,
+    requestScheduleCalls,
     setGrant(next: McpConnectionGrant | null) {
       grant = next;
     },
@@ -653,5 +698,206 @@ describe("mcp campaign assistance", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+  });
+});
+
+describe("an agent reads where a campaign stands and asks for a send time", () => {
+  it("lists campaigns with their subject and nothing about the audience", async () => {
+    const harness = fixture();
+    harness.activeGrant([mcpCampaignDraftScope]);
+    const success = (await harness.application.listCampaigns(
+      principal([mcpCampaignDraftScope]),
+      {},
+      context,
+    )) as { result: Record<string, unknown> };
+    expect(success.result).toEqual({
+      campaigns: [
+        {
+          campaignId,
+          version: 1,
+          lifecycleState: "draft",
+          subject: "August news",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    });
+    const written = JSON.stringify(success.result);
+    expect(written).not.toContain("@");
+    expect(written.toLowerCase()).not.toContain("recipient");
+    expect(written.toLowerCase()).not.toContain("subscriber");
+  });
+
+  it("refuses the list without the campaign draft permission", async () => {
+    const harness = fixture();
+    harness.activeGrant([mcpInitialScope]);
+    await expect(
+      harness.application.listCampaigns(
+        principal([mcpInitialScope]),
+        {},
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_SCOPE" });
+  });
+
+  it("reports a send as a state and a count, never a person", async () => {
+    const harness = fixture({
+      async campaignStatus() {
+        return {
+          campaign: sampleCampaign({ version: 2 }),
+          bulkState: {
+            authorization: {
+              id: "authorization-1",
+              campaignFingerprint: "a".repeat(64),
+              testExecutionId: "44444444-4444-4444-8444-444444444444",
+              state: "active",
+              authorizedAt: now,
+            },
+            schedule: {
+              id: "schedule-1",
+              state: "active",
+              localDateTime: "2026-08-20T10:00:00",
+              ianaTimeZone: "America/Vancouver",
+              utcOffsetChoice: "-07:00",
+              executeAtUtc: "2026-08-20T17:00:00.000Z",
+            },
+            sendOperation: {
+              id: "operation-1",
+              state: "sent",
+              attempt: 1,
+              scheduledInstant: "2026-08-20T17:00:00.000Z",
+              recipientCount: 42,
+              detail: null,
+              updatedAt: now,
+            },
+          },
+          pendingScheduleRequest: null,
+        };
+      },
+    });
+    harness.activeGrant([mcpCampaignDraftScope]);
+    const success = (await harness.application.campaignStatus(
+      principal([mcpCampaignDraftScope]),
+      { campaignId },
+      context,
+    )) as { result: Record<string, unknown> };
+    expect(success.result).toEqual({
+      campaignId,
+      version: 2,
+      lifecycleState: "draft",
+      ownerApproval: { state: "active", approvedAt: now },
+      sendSchedule: {
+        state: "active",
+        sendAt: "2026-08-20T17:00:00.000Z",
+        reportingTimeZone: "America/Vancouver",
+      },
+      send: {
+        state: "sent",
+        attempt: 1,
+        recipientCount: 42,
+        updatedAt: now,
+      },
+      scheduleRequest: null,
+    });
+    // The Owner's approval is reported as a state. Its fingerprint and the
+    // test execution it rests on stay inside the dashboard.
+    const written = JSON.stringify(success.result);
+    expect(written).not.toContain("a".repeat(64));
+    expect(written).not.toContain("44444444-4444-4444-8444-444444444444");
+    expect(written).not.toContain("@");
+  });
+
+  it("reports a campaign with nothing set as all empty", async () => {
+    const harness = fixture();
+    harness.activeGrant([mcpCampaignDraftScope]);
+    const success = (await harness.application.campaignStatus(
+      principal([mcpCampaignDraftScope]),
+      { campaignId },
+      context,
+    )) as { result: Record<string, unknown> };
+    expect(success.result).toMatchObject({
+      ownerApproval: null,
+      sendSchedule: null,
+      send: null,
+      scheduleRequest: null,
+    });
+  });
+
+  it("answers a schedule request as waiting for a person", async () => {
+    const harness = fixture();
+    harness.activeGrant([mcpPublicationScheduleScope]);
+    const success = (await harness.application.requestSchedule(
+      principal([mcpPublicationScheduleScope]),
+      {
+        campaignId,
+        sendAt: "2026-08-20T17:00:00.000Z",
+        reportingTimeZone: "America/Vancouver",
+        idempotencyKey,
+      },
+      context,
+    )) as { result: Record<string, unknown> };
+    expect(success.result).toEqual({
+      requestId: scheduleProposalId,
+      campaignId,
+      sendAt: "2026-08-20T17:00:00.000Z",
+      reportingTimeZone: "America/Vancouver",
+      state: "pending_human_approval",
+    });
+    // The connection acts as itself, and the permission it carries is the one
+    // pinned to this command.
+    expect(harness.requestScheduleCalls.at(-1)).toMatchObject({
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-campaign-57",
+        actorId: "agent-campaign-57",
+        operation: "foundry.campaign.schedule_request",
+        requiredScopes: ["publication.schedule"],
+      },
+    });
+  });
+
+  it("refuses a schedule request without the schedule permission", async () => {
+    const harness = fixture();
+    harness.activeGrant([mcpCampaignDraftScope]);
+    await expect(
+      harness.application.requestSchedule(
+        principal([mcpCampaignDraftScope]),
+        {
+          campaignId,
+          sendAt: "2026-08-20T17:00:00.000Z",
+          reportingTimeZone: "America/Vancouver",
+          idempotencyKey,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_SCOPE" });
+  });
+
+  it("repeats the first named reason when a refusal is replayed", async () => {
+    const harness = fixture({
+      async requestSchedule() {
+        throw new CampaignScheduleProposalError("campaign_not_found");
+      },
+    });
+    harness.activeGrant([mcpPublicationScheduleScope]);
+    const attempt = () =>
+      harness.application.requestSchedule(
+        principal([mcpPublicationScheduleScope]),
+        {
+          campaignId,
+          sendAt: "2026-08-20T17:00:00.000Z",
+          reportingTimeZone: "America/Vancouver",
+          idempotencyKey,
+        },
+        context,
+      );
+    await expect(attempt()).rejects.toMatchObject({
+      code: "OBJECT_NOT_FOUND",
+      reason: "campaign_not_found",
+    });
+    await expect(attempt()).rejects.toMatchObject({
+      code: "OBJECT_NOT_FOUND",
+      reason: "campaign_not_found",
+    });
   });
 });

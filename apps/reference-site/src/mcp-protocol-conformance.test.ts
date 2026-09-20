@@ -231,6 +231,43 @@ const results: Record<string, unknown> = {
     ownershipEvidenceId: "ownership-conformance",
     acceptedAt: observedAt,
   },
+  "foundry.campaign.list": {
+    campaigns: [
+      {
+        campaignId,
+        version: 1,
+        lifecycleState: "draft",
+        subject: "Public campaign copy",
+        createdAt: observedAt,
+        updatedAt: observedAt,
+      },
+    ],
+  },
+  "foundry.campaign.status": {
+    campaignId,
+    version: 1,
+    lifecycleState: "draft",
+    ownerApproval: { state: "active", approvedAt: observedAt },
+    sendSchedule: {
+      state: "active",
+      sendAt: "2026-09-01T17:00:00.000Z",
+      reportingTimeZone: "America/Vancouver",
+    },
+    send: {
+      state: "sent",
+      attempt: 1,
+      recipientCount: 12,
+      updatedAt: observedAt,
+    },
+    scheduleRequest: null,
+  },
+  "foundry.campaign.schedule_request": {
+    requestId: "schedule_request_conformance",
+    campaignId,
+    sendAt: "2026-09-01T17:00:00.000Z",
+    reportingTimeZone: "America/Vancouver",
+    state: "pending_human_approval",
+  },
   "foundry.analytics.read": {
     view: "overview",
     data: {
@@ -367,6 +404,14 @@ const inputs: Record<string, unknown> = {
   "foundry.campaign.get": { campaignId },
   "foundry.campaign.request_test": { campaignId, idempotencyKey },
   "foundry.campaign.test_readiness": { campaignId },
+  "foundry.campaign.list": {},
+  "foundry.campaign.status": { campaignId },
+  "foundry.campaign.schedule_request": {
+    campaignId,
+    sendAt: "2026-09-01T17:00:00.000Z",
+    reportingTimeZone: "America/Vancouver",
+    idempotencyKey,
+  },
   "foundry.analytics.read": {
     view: "overview",
     range: { fromLocalDate: "2026-07-10", toLocalDate: "2026-08-06" },
@@ -375,7 +420,7 @@ const inputs: Record<string, unknown> = {
 };
 
 describe("MCP protocol-wrapper emission conformance", () => {
-  it("independently validates protocol-wrapper success and business-error emissions for all 32 descriptors", async () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 35 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {
@@ -413,6 +458,9 @@ describe("MCP protocol-wrapper emission conformance", () => {
       getCampaign: emit("foundry.campaign.get"),
       requestTest: emit("foundry.campaign.request_test"),
       testReadiness: emit("foundry.campaign.test_readiness"),
+      listCampaigns: emit("foundry.campaign.list"),
+      campaignStatus: emit("foundry.campaign.status"),
+      requestSchedule: emit("foundry.campaign.schedule_request"),
       readAnalytics: emit("foundry.analytics.read"),
     } as unknown as McpReadApplication;
     const principal: McpConnectionPrincipal = {

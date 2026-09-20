@@ -17,6 +17,8 @@ import {
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
 import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
+import { mcpScheduleRequestAgentName } from "@/src/mcp-schedule-request-agent";
+import { loadPendingCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
 import type { BlogPostId } from "@humber-foundry/site-definition";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +91,55 @@ async function loadPendingBlogScheduleRequests(
   }
 }
 
+type PendingCampaignScheduleRequest = Readonly<{
+  campaignId: string;
+  subject: string;
+  agentName: string;
+  requestedTime: string;
+}>;
+
+/**
+ * Every campaign with a send-time request nobody has answered yet, newest
+ * first, in the plain words Overview shows: the email's own subject, the time
+ * the app asked for, and the app's name. See ADR-0039.
+ *
+ * Returns an empty list instead of throwing when the newsletter is not
+ * configured, so a missing newsletter setting never blocks Overview.
+ */
+async function loadPendingCampaignRequests(): Promise<
+  ReadonlyArray<PendingCampaignScheduleRequest>
+> {
+  try {
+    const environment = await loadHumanAccessEnvironment();
+    const requests = await loadPendingCampaignScheduleRequests();
+    const named = await Promise.all(
+      requests.map(async (request) => {
+        const agentName = await mcpScheduleRequestAgentName(
+          environment,
+          request.createdBy,
+        );
+        return agentName === null
+          ? null
+          : {
+              campaignId: request.campaignId,
+              subject: request.subject,
+              agentName,
+              requestedTime: formatLocalScheduleTime(
+                request.localDateTime,
+                request.ianaTimeZone,
+              ),
+            };
+      }),
+    );
+    return named.filter(
+      (request): request is PendingCampaignScheduleRequest =>
+        request !== null,
+    );
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Overview answers one question: what should I do next? It shows the state of
  * the draft, anything waiting for attention, and a way into each job. The
@@ -126,6 +177,7 @@ export default async function DashboardOverviewPage({
         access.membership.siteId,
         contentRevision.definition.blog.posts,
       );
+  const pendingCampaignRequests = await loadPendingCampaignRequests();
 
   return (
     <main className="dashboard-main" id="main">
@@ -179,7 +231,8 @@ export default async function DashboardOverviewPage({
         {messages.unreadCount === 0 &&
         messages.heldForReview === 0 &&
         previewsToReview.length === 0 &&
-        pendingScheduleRequests.length === 0 ? (
+        pendingScheduleRequests.length === 0 &&
+        pendingCampaignRequests.length === 0 ? (
           <p className="empty-state">
             Nothing is waiting for you. New messages, anything held as spam,
             and drafts or schedule requests an app made for you appear here.
@@ -205,6 +258,18 @@ export default async function DashboardOverviewPage({
                   )}#blog-post-${encodeURIComponent(request.postId)}`}
                 >
                   {request.agentName} asked to publish "{request.postTitle}"
+                  {" "}at {request.requestedTime}
+                </a>
+              </li>
+            ))}
+            {pendingCampaignRequests.map((request) => (
+              <li key={request.campaignId}>
+                <a
+                  href={`/dash/campaigns#campaign-${encodeURIComponent(
+                    request.campaignId,
+                  )}`}
+                >
+                  {request.agentName} asked to send "{request.subject}"
                   {" "}at {request.requestedTime}
                 </a>
               </li>

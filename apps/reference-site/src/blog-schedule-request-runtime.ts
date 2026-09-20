@@ -3,56 +3,24 @@ import "server-only";
 import type { BlogPostScheduleProposal } from "@humber-foundry/application";
 import type { BlogPostId } from "@humber-foundry/site-definition";
 
-import { mcpConnectionDisplayName } from "./mcp-connection-display";
-import { unnamedConnectedApp } from "./mcp-preview-review-runtime";
+import { mcpScheduleRequestAgentName } from "./mcp-schedule-request-agent";
 import type { HumanAccessEnvironment } from "./human-access-configuration";
 
 export { unnamedConnectedApp } from "./mcp-preview-review-runtime";
-
-const mcpCreatedByPrefix = "mcp-";
+export { isMcpScheduleRequest } from "./mcp-schedule-request-agent";
 
 /**
- * Whether an app asked for this schedule, rather than a person. The blog
+ * The plain name of the app that asked for a post's schedule. The blog
  * commands accept a person's own `proposeSchedule` call too (see
  * `commands.proposeSchedule` in `@humber-foundry/application`), but nothing
  * in this product calls it that way today, and issue #219 shows only the
- * requests an app made.
- */
-export function isMcpScheduleRequest(createdBy: string): boolean {
-  return createdBy.startsWith(mcpCreatedByPrefix);
-}
-
-/**
- * The plain name of the app that asked for a schedule, read from the
- * connection's own registered address the same way draft review names it
- * (see CONTEXT.md "App / Connected app"). Returns `null` for a proposal a
- * person made directly.
+ * requests an app made. Returns `null` for a proposal a person made directly.
  */
 export async function blogScheduleRequestAgentName(
   environment: HumanAccessEnvironment,
   createdBy: string,
 ): Promise<string | null> {
-  if (!isMcpScheduleRequest(createdBy)) {
-    return null;
-  }
-  if (environment.FOUNDRY_DB === undefined) {
-    return unnamedConnectedApp;
-  }
-  const actorId = createdBy.slice(mcpCreatedByPrefix.length);
-  const row = await environment.FOUNDRY_DB
-    .prepare(
-      `SELECT oauth_client_id FROM mcp_connections WHERE actor_id = ?1`,
-    )
-    .bind(actorId)
-    .first<{ oauth_client_id: string | null }>();
-  if (
-    row === null ||
-    row.oauth_client_id === null ||
-    row.oauth_client_id === ""
-  ) {
-    return unnamedConnectedApp;
-  }
-  return mcpConnectionDisplayName(row.oauth_client_id);
+  return mcpScheduleRequestAgentName(environment, createdBy);
 }
 
 /**

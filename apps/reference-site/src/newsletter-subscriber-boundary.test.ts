@@ -200,6 +200,49 @@ describe("agents see counts, never identities", () => {
     ).toBe(false);
   });
 
+  it("offers no campaign tool that names a person or takes an address", () => {
+    // Issue #172 requires proof that no identity is reachable through the
+    // campaign tools, including the ones that read where a campaign stands.
+    // See ADR-0039.
+    const registry = createMcpToolRegistry({
+      openWorkspace() {},
+      requestPublication() {},
+      createCampaign() {},
+    } as unknown as McpReadApplication);
+    const campaignTools = registry
+      .list({
+        connectionId: "connection-boundary",
+        actorId: "actor-boundary",
+        clientId: "https://client.example/mcp.json",
+        siteId,
+        scopes: [
+          "site.read",
+          "campaign.draft",
+          "campaign.test",
+          "publication.schedule",
+        ],
+      })
+      .filter(({ name }) => name.startsWith("foundry.campaign."));
+    expect(campaignTools).not.toHaveLength(0);
+    const surface = JSON.stringify(campaignTools).toLowerCase();
+    for (const forbidden of [
+      "\"email\"",
+      "\"address\"",
+      "\"recipient\"",
+      "\"recipients\"",
+      "\"recipientids\"",
+      "\"subscriber\"",
+      "\"subscribers\"",
+      "\"audience\"",
+      "\"to\"",
+    ]) {
+      expect(surface, forbidden).not.toContain(forbidden);
+    }
+    // A count of people is allowed, and is the only thing a status read says
+    // about the audience.
+    expect(surface).toContain("recipientcount");
+  });
+
   it("reports an eligible count that carries no address", async () => {
     const { application, ledgerStore, sent } = harness();
     await application.requestSignup({

@@ -1,4 +1,16 @@
+import type {
+  CampaignBulkResolvedTime,
+  CampaignBulkStateReport,
+} from "./campaign-bulk-delivery";
 import { campaignSenderDetailsNotConfiguredReason } from "./campaign-channel-state";
+import {
+  CampaignScheduleProposalError,
+  mcpCampaignOperationScopes,
+  resolveCampaignScheduleTime,
+  type CampaignScheduleProposal,
+  type McpCampaignOperation,
+  type McpCampaignOperationAuthority,
+} from "./campaign-schedule-proposals";
 import {
   CampaignConflictError,
   CampaignIdempotencyError,
@@ -16,6 +28,7 @@ import {
   McpReadError,
   mcpCampaignDraftScope,
   mcpCampaignTestScope,
+  mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
   type McpExecutionContext,
   type McpReadAuditEvent,
@@ -57,6 +70,42 @@ export type McpCampaignRuntime = Readonly<{
     principal: McpConnectionPrincipal;
     campaignId: CampaignId;
   }): Promise<McpCampaignTestReadiness>;
+  /**
+   * Every campaign of this site, newest first, each with the revision that is
+   * current now. It carries no audience, no sender identity and no count of
+   * people.
+   */
+  listCampaigns(input: {
+    principal: McpConnectionPrincipal;
+  }): Promise<
+    ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
+  >;
+  /**
+   * Where one campaign has got to: the Owner's approval of a tested email, a
+   * send that is set, a send that has run, and a schedule request waiting for
+   * a person. Counts only; never who is in the audience.
+   */
+  campaignStatus(input: {
+    principal: McpConnectionPrincipal;
+    campaignId: CampaignId;
+  }): Promise<
+    Readonly<{
+      campaign: Campaign;
+      bulkState: CampaignBulkStateReport;
+      pendingScheduleRequest: CampaignScheduleProposal | null;
+    }>
+  >;
+  /**
+   * Record one schedule request under the connection's own authority. It
+   * creates no schedule and sends nothing.
+   */
+  requestSchedule(input: {
+    principal: McpConnectionPrincipal;
+    campaignId: CampaignId;
+    resolvedTime: Omit<CampaignBulkResolvedTime, "timeZoneDatabaseVersion">;
+    idempotencyKey: string;
+    authority: McpCampaignOperationAuthority;
+  }): Promise<CampaignScheduleProposal>;
 }>;
 
 export type McpCampaignRevisionOutcome = Readonly<{
@@ -118,9 +167,15 @@ const campaignSenderDetailsNotConfiguredMessage =
  */
 function campaignError(
   error: unknown,
-  requiredScope: typeof mcpCampaignDraftScope | typeof mcpCampaignTestScope,
+  requiredScope:
+    | typeof mcpCampaignDraftScope
+    | typeof mcpCampaignTestScope
+    | typeof mcpPublicationScheduleScope,
 ): McpReadError {
   if (error instanceof McpReadError) return error;
+  if (error instanceof CampaignScheduleProposalError) {
+    return campaignScheduleRequestError(error, requiredScope);
+  }
   // The MCP campaign runtime refuses to build at all while the sender
   // details are absent (ADR-0030 §5), and `createCampaignApplication` itself
   // refuses the same way if a caller ever reaches it first. Both report this
@@ -176,6 +231,58 @@ function campaignError(
     "TEMPORARILY_UNAVAILABLE",
     "The request could not be completed safely.",
   );
+}
+
+/**
+ * Turn a refused schedule request into the tool error an agent acts on.
+ *
+ * Every refusal carries the command's own named reason, so an agent branches
+ * on the same word twice in a row for the same refusal, and a site owner
+ * reads the same sentence. See ADR-0039.
+ */
+function campaignScheduleRequestError(
+  error: CampaignScheduleProposalError,
+  requiredScope: string,
+): McpReadError {
+  if (
+    error.code === "mcp_schedule_authority_required" ||
+    error.code === "human_authority_required"
+  ) {
+    return new McpReadError(
+      "INSUFFICIENT_SCOPE",
+      "The connection no longer grants permission to ask for a send time.",
+      { requiredScopes: [requiredScope], reason: error.code },
+    );
+  }
+  if (error.code === "schedule_request_idempotency_key_reused") {
+    return new McpReadError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The idempotency key was already used for a different send time.",
+      { reason: error.code },
+    );
+  }
+  if (error.code === "campaign_not_found") {
+    return new McpReadError(
+      "OBJECT_NOT_FOUND",
+      "The requested campaign was not found.",
+      { reason: error.code },
+    );
+  }
+  return new McpReadError(
+    "VALIDATION_FAILED",
+    "The send time asked for is not one this campaign can take.",
+    { reason: error.code },
+  );
+}
+
+function campaignScheduleRequestResult(proposal: CampaignScheduleProposal) {
+  return {
+    requestId: proposal.id,
+    campaignId: proposal.campaignId,
+    sendAt: proposal.executeAtUtc,
+    reportingTimeZone: proposal.ianaTimeZone,
+    state: "pending_human_approval" as const,
+  };
 }
 
 function revisionResult(outcome: McpCampaignRevisionOutcome) {
@@ -331,6 +438,161 @@ export function createMcpCampaignApplication({
             return campaignDocument(campaign, revision);
           } catch (error) {
             throw campaignError(error, mcpCampaignDraftScope);
+          }
+        },
+      });
+    },
+    listCampaigns(
+      principal: McpConnectionPrincipal,
+      input: Readonly<Record<string, never>>,
+      context: McpExecutionContext,
+    ) {
+      return base.executeScoped({
+        principal,
+        operation: "foundry.campaign.list",
+        auditInput: input,
+        requiredScopes: [mcpCampaignDraftScope],
+        context,
+        async run(execution) {
+          try {
+            const campaigns = await execution.run(() =>
+              runtime.listCampaigns({ principal }),
+            );
+            return {
+              campaigns: campaigns.map(({ campaign, revision }) => ({
+                campaignId: campaign.id,
+                version: campaign.version,
+                lifecycleState: campaign.lifecycleState,
+                subject: revision.subject,
+                createdAt: campaign.createdAt,
+                updatedAt: campaign.updatedAt,
+              })),
+            };
+          } catch (error) {
+            throw campaignError(error, mcpCampaignDraftScope);
+          }
+        },
+      });
+    },
+    /**
+     * Where one campaign has got to, in states, times and counts.
+     *
+     * It reports the Owner's approval as a state and never its fingerprint or
+     * its test execution id, and it reports how many people a send reached
+     * without ever naming one.
+     */
+    campaignStatus(
+      principal: McpConnectionPrincipal,
+      input: Readonly<{ campaignId: CampaignId }>,
+      context: McpExecutionContext,
+    ) {
+      return base.executeScoped({
+        principal,
+        operation: "foundry.campaign.status",
+        auditInput: input,
+        requiredScopes: [mcpCampaignDraftScope],
+        context,
+        async run(execution) {
+          try {
+            const status = await execution.run(() =>
+              runtime.campaignStatus({
+                principal,
+                campaignId: input.campaignId,
+              }),
+            );
+            const { authorization, schedule, sendOperation } =
+              status.bulkState;
+            return {
+              campaignId: status.campaign.id,
+              version: status.campaign.version,
+              lifecycleState: status.campaign.lifecycleState,
+              ownerApproval:
+                authorization === null
+                  ? null
+                  : {
+                      state: authorization.state,
+                      approvedAt: authorization.authorizedAt,
+                    },
+              sendSchedule:
+                schedule === null
+                  ? null
+                  : {
+                      state: schedule.state,
+                      sendAt: schedule.executeAtUtc,
+                      reportingTimeZone: schedule.ianaTimeZone,
+                    },
+              send:
+                sendOperation === null
+                  ? null
+                  : {
+                      state: sendOperation.state,
+                      attempt: sendOperation.attempt,
+                      // A count of people, never a person.
+                      recipientCount: sendOperation.recipientCount,
+                      updatedAt: sendOperation.updatedAt,
+                    },
+              scheduleRequest:
+                status.pendingScheduleRequest === null
+                  ? null
+                  : campaignScheduleRequestResult(
+                      status.pendingScheduleRequest,
+                    ),
+            };
+          } catch (error) {
+            throw campaignError(error, mcpCampaignDraftScope);
+          }
+        },
+      });
+    },
+    /**
+     * Ask a person to send one newsletter at a named time.
+     *
+     * This records a request and nothing else. No schedule exists until an
+     * Owner confirms a delivered test of that exact email, approves it, and
+     * sets the send in the dashboard. An agent never sends. See ADR-0039.
+     */
+    requestSchedule(
+      principal: McpConnectionPrincipal,
+      input: Readonly<{
+        campaignId: CampaignId;
+        sendAt: string;
+        reportingTimeZone: string;
+        idempotencyKey: string;
+      }>,
+      context: McpExecutionContext,
+    ) {
+      const operation: McpCampaignOperation =
+        "foundry.campaign.schedule_request";
+      const requiredScopes = [mcpCampaignOperationScopes[operation]];
+      return base.executeScoped({
+        principal,
+        operation,
+        auditInput: input,
+        requiredScopes,
+        context,
+        async run(execution) {
+          try {
+            const proposal = await execution.run(() =>
+              runtime.requestSchedule({
+                principal,
+                campaignId: input.campaignId,
+                resolvedTime: resolveCampaignScheduleTime(
+                  input.sendAt,
+                  input.reportingTimeZone,
+                ),
+                idempotencyKey: input.idempotencyKey,
+                authority: {
+                  kind: "mcp",
+                  connectionId: principal.connectionId,
+                  actorId: principal.actorId,
+                  operation,
+                  requiredScopes,
+                } satisfies McpCampaignOperationAuthority,
+              }),
+            );
+            return campaignScheduleRequestResult(proposal);
+          } catch (error) {
+            throw campaignError(error, mcpPublicationScheduleScope);
           }
         },
       });
