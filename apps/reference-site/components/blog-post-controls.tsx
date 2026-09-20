@@ -1077,10 +1077,6 @@ export function BlogPostControls({
       <div className="dashboard-section-heading">
         <div>
           <h2 id="blog-posts-heading">Posts</h2>
-          <p>
-            Write a post, preview it privately, and publish it when it is
-            ready.
-          </p>
         </div>
         {writingNew || editingPostId !== null ? null : (
           <button
@@ -1094,13 +1090,17 @@ export function BlogPostControls({
         )}
       </div>
       {sitePublishPending ? (
-        <p className="composer-hint">
-          A post here is marked for the next site publish and is not live
-          until then.{" "}
-          <a href="/dash/pages" className="button button-primary">
-            Publish the site
-          </a>
-        </p>
+        <>
+          <p className="composer-hint">
+            A post here is marked for the next site publish and is not live
+            until then.
+          </p>
+          <div className="panel-actions">
+            <a href="/dash/pages" className="button button-primary">
+              Publish the site
+            </a>
+          </div>
+        </>
       ) : null}
       <PublishingConnectionStatus />
       {writingNew ? (
@@ -1171,24 +1171,7 @@ export function BlogPostControls({
                       pendingRequest.ianaTimeZone,
                     )}
                     . Use "Schedule this post" below to publish it then, or
-                    decline the request.{" "}
-                    <button
-                      type="button"
-                      className="copy-button"
-                      disabled={busy}
-                      onClick={() => {
-                        void sendBlogOperation(
-                          {
-                            operation: "decline_schedule_proposal",
-                            postId: post.id,
-                            proposalId: pendingRequest.id,
-                          },
-                          "decline-blog-post-schedule-proposal",
-                        );
-                      }}
-                    >
-                      Decline
-                    </button>
+                    decline the request.
                   </p>
                 )}
               </div>
@@ -1212,6 +1195,25 @@ export function BlogPostControls({
                 >
                   Preview ↗
                 </button>
+                {pendingRequest === null ? null : (
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={busy}
+                    onClick={() => {
+                      void sendBlogOperation(
+                        {
+                          operation: "decline_schedule_proposal",
+                          postId: post.id,
+                          proposalId: pendingRequest.id,
+                        },
+                        "decline-blog-post-schedule-proposal",
+                      );
+                    }}
+                  >
+                    Decline
+                  </button>
+                )}
                 {standingOperation === null ? null : (
                   <button
                     type="button"
