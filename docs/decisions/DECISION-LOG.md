@@ -27,3 +27,4 @@
 | [ADR-0020](ADR-0020-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |
 | [ADR-0021](ADR-0021-connection-status-shared-component.md) | One shared component reports whether email and publishing are connected | Accepted | 2026-09-18 |
 | [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
+| [ADR-0027](ADR-0027-settings-users-first-and-role-change.md) | Settings reads Users first, and a role change is a D1-only application command | Accepted | 2026-09-19 |

@@ -1039,6 +1039,25 @@
   cursor: pointer;
 }
 
+/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean, each
+ * behind its own help tip (#150). A row of short labels, not a grid, since
+ * five items never fill complete rows at every width. */
+.access-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1rem;
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.access-sync-retry-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
 @media (max-width: 720px) {
   .access-invite-form {
     grid-template-columns: 1fr;

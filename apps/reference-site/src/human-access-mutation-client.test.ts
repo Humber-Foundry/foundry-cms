@@ -7,6 +7,7 @@ import {
   isHumanAccessMutationRequestCheckFailed,
   isHumanAccessMutationRequestCheckUnavailable,
   membershipStatusConfirmation,
+  roleChangeConfirmation,
   sendHumanAccessMutationAttempt,
 } from "./human-access-mutation-client";
 import {
@@ -29,6 +30,15 @@ describe("human access mutation client", () => {
     expect(
       membershipStatusConfirmation("editor@example.com", "active"),
     ).toBeNull();
+  });
+
+  it("always asks before a role change, in either direction", () => {
+    expect(roleChangeConfirmation("editor@example.com", "owner")).toBe(
+      "Make editor@example.com an Owner? They will be able to manage users, connections and everything an Editor can.",
+    );
+    expect(roleChangeConfirmation("owner@example.com", "editor")).toBe(
+      "Make owner@example.com an Editor? They will lose Owner tasks such as managing users, connections and subscriber details.",
+    );
   });
 
   it("keeps one idempotency key through two lost responses and a manual retry", async () => {

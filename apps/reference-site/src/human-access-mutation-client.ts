@@ -27,6 +27,22 @@ export function membershipStatusConfirmation(
   return null;
 }
 
+/**
+ * The question asked before a role change takes effect. A role change is
+ * significant enough — it grants or removes Owner tasks such as managing
+ * users, connections and subscriber details — that it always asks first,
+ * unlike reactivating a suspended user.
+ */
+export function roleChangeConfirmation(
+  email: string,
+  role: "owner" | "editor",
+): string {
+  if (role === "owner") {
+    return `Make ${email} an Owner? They will be able to manage users, connections and everything an Editor can.`;
+  }
+  return `Make ${email} an Editor? They will lose Owner tasks such as managing users, connections and subscriber details.`;
+}
+
 export function createHumanAccessMutationAttempt(
   command: unknown,
 ): HumanAccessMutationAttempt {

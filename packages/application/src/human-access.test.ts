@@ -630,4 +630,162 @@ describe("human access application", () => {
       }),
     ).rejects.toEqual(new LastOwnerError());
   });
+
+  describe("role change", () => {
+    it("lets an Owner promote an Editor to Owner", async () => {
+      const editor = activeMembership({
+        id: createHumanMembershipId("membership-editor"),
+        userId: createHumanUserId("user-editor"),
+        email: editorIdentity.email,
+        identityBinding: editorIdentity.binding,
+        role: "editor",
+      });
+      const { application } = createFixture([activeMembership(), editor]);
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: editor.id,
+          role: "owner",
+        }),
+      ).resolves.toMatchObject({ id: editor.id, role: "owner" });
+      await expect(
+        application.queries.requireCapability({
+          actor: editorIdentity,
+          capability: "access.manage",
+        }),
+      ).resolves.toMatchObject({ role: "owner" });
+    });
+
+    it("lets an Owner demote another Owner to Editor when an Owner remains", async () => {
+      const secondOwner = activeMembership({
+        id: createHumanMembershipId("membership-owner-secondary"),
+        userId: createHumanUserId("user-owner-secondary"),
+        email: editorIdentity.email,
+        identityBinding: editorIdentity.binding,
+      });
+      const { application } = createFixture([
+        activeMembership(),
+        secondOwner,
+      ]);
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: secondOwner.id,
+          role: "editor",
+        }),
+      ).resolves.toMatchObject({ id: secondOwner.id, role: "editor" });
+    });
+
+    it("does not let the last active Owner demote themselves, so they cannot lock themselves out", async () => {
+      const { application } = createFixture();
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: createHumanMembershipId("membership-owner"),
+          role: "editor",
+        }),
+      ).rejects.toEqual(new LastOwnerError());
+      await expect(
+        application.queries.requireCapability({
+          actor: ownerIdentity,
+          capability: "access.manage",
+        }),
+      ).resolves.toMatchObject({ role: "owner" });
+    });
+
+    it("treats setting the same role as a harmless no-op, even for the last Owner", async () => {
+      const { application } = createFixture();
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: createHumanMembershipId("membership-owner"),
+          role: "owner",
+        }),
+      ).resolves.toMatchObject({ role: "owner" });
+    });
+
+    it("rejects a role change from anyone but an Owner", async () => {
+      const editor = activeMembership({
+        id: createHumanMembershipId("membership-editor"),
+        userId: createHumanUserId("user-editor"),
+        email: editorIdentity.email,
+        identityBinding: editorIdentity.binding,
+        role: "editor",
+      });
+      const { application } = createFixture([activeMembership(), editor]);
+
+      await expect(
+        application.commands.changeRole({
+          actor: editorIdentity,
+          membershipId: editor.id,
+          role: "owner",
+        }),
+      ).rejects.toEqual(new AccessDeniedError("capability_not_authorized"));
+    });
+
+    it("rejects a role change for a membership that is not there", async () => {
+      const { application } = createFixture();
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: createHumanMembershipId("missing-membership"),
+          role: "owner",
+        }),
+      ).rejects.toEqual(new AccessDeniedError("membership_not_found"));
+    });
+
+    it("rejects a role change for a revoked membership", async () => {
+      const revokedEditor = activeMembership({
+        id: createHumanMembershipId("membership-revoked"),
+        userId: createHumanUserId("user-revoked"),
+        email: editorIdentity.email,
+        identityBinding: editorIdentity.binding,
+        role: "editor",
+        status: "revoked",
+      });
+      const { application } = createFixture([
+        activeMembership(),
+        revokedEditor,
+      ]);
+
+      await expect(
+        application.commands.changeRole({
+          actor: ownerIdentity,
+          membershipId: revokedEditor.id,
+          role: "owner",
+        }),
+      ).rejects.toEqual(
+        new AccessDeniedError("membership_transition_not_allowed"),
+      );
+    });
+
+    it("never calls Access eligibility sync for a role change", async () => {
+      const editor = activeMembership({
+        id: createHumanMembershipId("membership-editor"),
+        userId: createHumanUserId("user-editor"),
+        email: editorIdentity.email,
+        identityBinding: editorIdentity.binding,
+        role: "editor",
+      });
+      let synchronizeCalls = 0;
+      const { application } = createFixture([activeMembership(), editor], {
+        async replaceExactEmailEligibility() {
+          synchronizeCalls += 1;
+        },
+      });
+
+      await application.commands.changeRole({
+        actor: ownerIdentity,
+        membershipId: editor.id,
+        role: "owner",
+      });
+
+      expect(synchronizeCalls).toBe(0);
+    });
+  });
 });
