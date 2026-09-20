@@ -1,9 +1,12 @@
+import { formatLocalScheduleTime } from "@/components/schedule-time-format";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadPreviewsWaitingForReview,
   unnamedConnectedApp,
 } from "@/src/mcp-preview-review-runtime";
+import { loadBlogPostOperationalSummaries } from "@/src/blog-post-operations-runtime";
+import { blogScheduleRequestAgentName } from "@/src/blog-schedule-request-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -13,8 +16,68 @@ import {
   recoveryReasonOf,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
+import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
+import type { BlogPostId } from "@humber-foundry/site-definition";
 
 export const dynamic = "force-dynamic";
+
+type PendingBlogScheduleRequest = Readonly<{
+  postId: BlogPostId;
+  postTitle: string;
+  agentName: string;
+  requestedTime: string;
+}>;
+
+/**
+ * Every post with a schedule request nobody has answered yet, newest post
+ * first, with the plain words Overview shows: the post's own title, the
+ * time the app asked for in its own words (see `formatLocalScheduleTime`),
+ * and the app's name. See ADR-0036 and issue #219.
+ *
+ * Returns an empty list instead of throwing when blog-post operations are
+ * not configured, so a missing schedule backend never blocks Overview.
+ */
+async function loadPendingBlogScheduleRequests(
+  siteId: string,
+  posts: ReadonlyArray<Readonly<{ id: BlogPostId; title: string }>>,
+): Promise<ReadonlyArray<PendingBlogScheduleRequest>> {
+  try {
+    const environment = await loadHumanAccessEnvironment();
+    const summaries = await loadBlogPostOperationalSummaries(
+      environment,
+      siteId,
+      posts.map((post) => post.id),
+    );
+    const requests = await Promise.all(
+      posts.map(async (post) => {
+        const proposal = summaries.get(post.id)?.pendingScheduleProposal;
+        if (proposal === undefined || proposal === null) return null;
+        // Overview only ever shows a request an app made — see issue #219 —
+        // so a proposal a person made directly (agentName === null) is left
+        // out here, not relabelled as an app's.
+        const agentName = await blogScheduleRequestAgentName(
+          environment,
+          proposal.createdBy,
+        );
+        if (agentName === null) return null;
+        return {
+          postId: post.id,
+          postTitle: post.title,
+          agentName,
+          requestedTime: formatLocalScheduleTime(
+            proposal.localDateTime,
+            proposal.ianaTimeZone,
+          ),
+        };
+      }),
+    );
+    return requests.filter(
+      (request): request is PendingBlogScheduleRequest => request !== null,
+    );
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Overview answers one question: what should I do next? It shows the state of
@@ -47,6 +110,12 @@ export default async function DashboardOverviewPage({
   const needsFreshWorkspace =
     dashboardWorkspace.schemaRecovery !== undefined ||
     dashboardWorkspace.contentStale;
+  const pendingScheduleRequests = needsFreshWorkspace
+    ? []
+    : await loadPendingBlogScheduleRequests(
+        access.membership.siteId,
+        contentRevision.definition.blog.posts,
+      );
 
   return (
     <main className="dashboard-main" id="main">
@@ -99,10 +168,11 @@ export default async function DashboardOverviewPage({
         <h2 id="attention">Needs attention</h2>
         {messages.unreadCount === 0 &&
         messages.heldForReview === 0 &&
-        previewsToReview.length === 0 ? (
+        previewsToReview.length === 0 &&
+        pendingScheduleRequests.length === 0 ? (
           <p className="empty-state">
             Nothing is waiting for you. New messages, anything held as spam,
-            and drafts an app prepared for you appear here.
+            and drafts or schedule requests an app made you appear here.
           </p>
         ) : (
           <ul className="attention-list">
@@ -114,6 +184,18 @@ export default async function DashboardOverviewPage({
                   {preview.agentName === unnamedConnectedApp
                     ? "A draft waiting for your review"
                     : `A draft from ${preview.agentName} waiting for your review`}
+                </a>
+              </li>
+            ))}
+            {pendingScheduleRequests.map((request) => (
+              <li key={request.postId}>
+                <a
+                  href={`/dash/blog?workspace=${encodeURIComponent(
+                    dashboardWorkspace.workspaceId,
+                  )}#blog-post-${encodeURIComponent(request.postId)}`}
+                >
+                  {request.agentName} asked to publish "{request.postTitle}"
+                  {" "}at {request.requestedTime}
                 </a>
               </li>
             ))}

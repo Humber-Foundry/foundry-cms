@@ -504,6 +504,115 @@ describe("blog post operations", () => {
     }
   });
 
+  it("shows a post's newest undeclined schedule request, and hides one an active schedule already covers", async () => {
+    const { app, store } = application();
+    const publicationTime = resolvedTime(
+      "2026-11-01T01:30:00",
+      "-07:00",
+      "2026-11-01T08:30:00.000Z",
+    );
+
+    expect(
+      (await app.queries.getPostSummary(
+        "foundry-site",
+        "post-scheduled-release",
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    const proposal = await app.commands.proposeSchedule({
+      actorId: mcpActorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      resolvedTime: publicationTime,
+      idempotencyKey: "attention-proposal-request",
+    });
+    expect(
+      (await app.queries.getPostSummary(
+        "foundry-site",
+        "post-scheduled-release",
+      ))?.pendingScheduleProposal,
+    ).toEqual(proposal);
+
+    await app.commands.activateSchedule({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      approvalId,
+      resolvedTime: publicationTime,
+      idempotencyKey: "attention-activation-request",
+    });
+    expect(
+      (await app.queries.getPostSummary(
+        "foundry-site",
+        "post-scheduled-release",
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+    expect(await store.declineScheduleProposal({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      proposalId: proposal.id,
+      requestId: "attention-decline-after-schedule",
+      occurredAt: now,
+    })).toEqual(proposal);
+  });
+
+  it("removes a pending schedule request once a person declines it, and only a person may decline", async () => {
+    const { app } = application();
+    const publicationTime = resolvedTime(
+      "2026-11-01T01:30:00",
+      "-07:00",
+      "2026-11-01T08:30:00.000Z",
+    );
+    const proposal = await app.commands.proposeSchedule({
+      actorId: mcpActorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      resolvedTime: publicationTime,
+      idempotencyKey: "decline-proposal-request",
+    });
+
+    await expect(app.commands.declineScheduleProposal({
+      actorId: mcpActorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      proposalId: proposal.id,
+      idempotencyKey: "agent-declines-its-own-request",
+    })).rejects.toMatchObject({ code: "human_authority_required" });
+
+    const declined = await app.commands.declineScheduleProposal({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      proposalId: proposal.id,
+      idempotencyKey: "editor-declines-request",
+    });
+    expect(declined).toEqual(proposal);
+    expect(
+      (await app.queries.getPostSummary(
+        "foundry-site",
+        "post-scheduled-release",
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    // Declining twice is a no-op, not an error, so a retried request is safe.
+    await expect(app.commands.declineScheduleProposal({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      proposalId: proposal.id,
+      idempotencyKey: "editor-declines-request-again",
+    })).resolves.toEqual(proposal);
+
+    await expect(app.commands.declineScheduleProposal({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      proposalId: "schedule_proposal_missing",
+      idempotencyKey: "decline-missing-proposal",
+    })).rejects.toMatchObject({ code: "schedule_proposal_not_found" });
+  });
+
   it("projects successor edits after a human-cancelled schedule", async () => {
     const { app, store } = application();
     const schedule = await app.commands.activateSchedule({

@@ -79,6 +79,7 @@ describe("blog post operations endpoint", () => {
         activateSchedule: vi.fn(),
         proposeSchedule: vi.fn(),
         cancelSchedule: vi.fn(),
+        declineScheduleProposal: vi.fn(),
         recordRejectedCommand: vi.fn(),
       },
     });
@@ -323,6 +324,34 @@ describe("blog post operations endpoint", () => {
       postId,
       scheduleId: "schedule_route",
       idempotencyKey: "route-cancel-schedule",
+    });
+  });
+
+  it("routes a person's decline of an app's schedule request", async () => {
+    const application = await mocks.loadApplication();
+    application.commands.declineScheduleProposal.mockResolvedValue({
+      id: "schedule_proposal_route",
+    });
+    mocks.loadApplication.mockResolvedValue(application);
+
+    const response = await POST(
+      request(
+        {
+          operation: "decline_schedule_proposal",
+          postId,
+          proposalId: "schedule_proposal_route",
+        },
+        "route-decline-schedule-proposal",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(application.commands.declineScheduleProposal).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      siteId: "site_foundry_reference",
+      postId,
+      proposalId: "schedule_proposal_route",
+      idempotencyKey: "route-decline-schedule-proposal",
     });
   });
 });

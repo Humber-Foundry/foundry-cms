@@ -71,6 +71,7 @@ describe("D1 blog post operations store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
+      "0034_blog_post_schedule_proposal_declines.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
@@ -1160,6 +1161,86 @@ describe("D1 blog post operations store", () => {
         .bind(referenceSiteDefinition.site.id, postId)
         .first(),
     ).toEqual({ workflow_state: "editing" });
+  });
+
+  it("shows a durable schedule request in the post summary until a person declines it", async () => {
+    const store = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_attention`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const resolvedTime = {
+      localDateTime: "2026-11-01T01:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-07:00",
+      executeAtUtc: now,
+    };
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    const proposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime,
+      idempotencyKey: "durable-attention-proposal",
+    });
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toEqual(proposal);
+
+    const declined = await app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: proposal.id,
+      idempotencyKey: "durable-attention-decline",
+    });
+    expect(declined).toEqual(proposal);
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    // A retried decline is a no-op, not an error, and the row stays immutable.
+    await expect(app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: proposal.id,
+      idempotencyKey: "durable-attention-decline-again",
+    })).resolves.toEqual(proposal);
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM blog_post_schedule_proposal_declines
+           WHERE proposal_id = ?1`,
+        )
+        .bind(proposal.id)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+    await expect(
+      database
+        .prepare(
+          `UPDATE blog_post_schedule_proposal_declines
+           SET declined_at = ?1 WHERE proposal_id = ?2`,
+        )
+        .bind(now, proposal.id)
+        .run(),
+    ).rejects.toThrow(
+      /blog_post_schedule_proposal_declines_are_immutable/u,
+    );
   });
 
   it("keeps durable schedule proposals human-only until issue 56", async () => {

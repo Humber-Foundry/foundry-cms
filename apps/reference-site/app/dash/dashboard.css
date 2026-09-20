@@ -864,13 +864,23 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   padding-block: 0.85rem;
   border-top: 1px solid var(--dash-line);
 }
 
 .post-list > li:first-child {
   border-top: 0;
+}
+
+/* Everything that names the post and its state — the title, and any status
+ * or schedule-request line under it — is one grid cell, so a post can carry
+ * several status lines without pushing the action buttons out of their own
+ * column. See issue #219. */
+.post-list-info {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .post-list-summary {
@@ -888,6 +898,12 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+/* The schedule form (or its "needs a preview first" note) sits under the
+ * title and buttons, the full width of the row. */
+.post-list-full-row {
+  grid-column: 1 / -1;
 }
 
 .post-list-editing {
