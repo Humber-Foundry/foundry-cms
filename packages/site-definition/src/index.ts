@@ -22,9 +22,13 @@ import validateSiteDefinition from "./site-definition-validator.mjs";
 import { isSiteDefinitionWithPageComponents } from "./page-component-registry";
 import {
   homePageSlug,
+  pageMediaOccurrenceId,
+  pageMediaOccurrenceIdPattern,
+  pageMediaSlots,
   pageSlugMaxLength,
   pageSlugPattern,
   reservedPageSlugs,
+  type PageMediaSlot,
 } from "./pages";
 import { everySiteLink, siteHrefPageId } from "./site-href";
 
@@ -155,7 +159,13 @@ export type SiteMediaCrop = Readonly<{
 }>;
 
 export type SiteMediaOccurrence = Readonly<{
-  occurrenceId: "occurrence_home_hero" | "occurrence_home_detail";
+  /**
+   * A page's hero or detail media slot. The home page keeps its two
+   * historical ids, `occurrence_home_hero` and `occurrence_home_detail`; any
+   * other page's id is built from its own page id. See
+   * `pageMediaOccurrenceId` in `pages.ts` and ADR-0026.
+   */
+  occurrenceId: `occurrence_${string}_${PageMediaSlot}`;
   revision: number;
   asset: Readonly<{
     assetId: string;
@@ -484,6 +494,12 @@ export const siteDefinitionSchema = {
         slug: { $ref: "#/$defs/pageSlug" },
         title: { $ref: "#/$defs/text" },
         media: {
+          $comment:
+            "A page holds at most one hero occurrence and at most one " +
+            "detail occurrence. JSON Schema cannot compare an occurrence id " +
+            "to this page's own id, so it only checks the slot suffix here; " +
+            "isBaseSiteDefinition checks that each occurrence id names this " +
+            "page. See ADR-0026.",
           type: "array",
           items: { $ref: "#/$defs/mediaOccurrence" },
           allOf: [
@@ -491,7 +507,7 @@ export const siteDefinitionSchema = {
               contains: {
                 type: "object",
                 properties: {
-                  occurrenceId: { const: "occurrence_home_hero" },
+                  occurrenceId: { type: "string", pattern: "_hero$" },
                 },
                 required: ["occurrenceId"],
               },
@@ -502,7 +518,7 @@ export const siteDefinitionSchema = {
               contains: {
                 type: "object",
                 properties: {
-                  occurrenceId: { const: "occurrence_home_detail" },
+                  occurrenceId: { type: "string", pattern: "_detail$" },
                 },
                 required: ["occurrenceId"],
               },
@@ -683,7 +699,13 @@ export const siteDefinitionSchema = {
       required: ["occurrenceId", "revision", "asset", "crop"],
       properties: {
         occurrenceId: {
-          enum: ["occurrence_home_hero", "occurrence_home_detail"],
+          $comment:
+            "The home page's own two ids, occurrence_home_hero and " +
+            "occurrence_home_detail, match this pattern unchanged. Any " +
+            "other page's id is occurrence_<pageId>_hero or " +
+            "occurrence_<pageId>_detail. See ADR-0026.",
+          type: "string",
+          pattern: pageMediaOccurrenceIdPattern.source,
         },
         revision: { type: "integer", minimum: 1 },
         asset: {
@@ -1078,6 +1100,18 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
       page.sections.forEach((section) => {
         if (section.type === "callToAction") {
           validateRichTextDocument(section.body);
+        }
+      });
+      // JSON Schema cannot compare an occurrence id to the id of the page
+      // that holds it, so this walk rejects an occurrence id built for a
+      // different page — one page's media accidentally carrying another
+      // page's id. See ADR-0026.
+      const ownOccurrenceIds = new Set<string>(
+        pageMediaSlots.map((slot) => pageMediaOccurrenceId(page, slot)),
+      );
+      (page.media ?? []).forEach((occurrence) => {
+        if (!ownOccurrenceIds.has(occurrence.occurrenceId)) {
+          throw new TypeError("site_media_occurrence_page_mismatch");
         }
       });
     });

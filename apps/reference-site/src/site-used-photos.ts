@@ -1,9 +1,6 @@
 import "server-only";
 
-import {
-  homePage,
-  type SiteDefinition,
-} from "@humber-foundry/site-definition";
+import { type SiteDefinition } from "@humber-foundry/site-definition";
 import {
   mediaAssetIdFromPublishedPath,
   siteDefinitionMediaAssetIds,
@@ -19,17 +16,21 @@ import { installedPageComponentRegistry } from "@/foundry/page-components";
  */
 export type SiteImageTile = Readonly<{ src: string; name: string }>;
 
+// Every page contributes, not only the home page, so "all your photos"
+// includes a photo placed on any page. See ADR-0026.
 function imageAddressesOf(definition: SiteDefinition): ReadonlySet<string> {
   const found = new Set<string>();
-  for (const section of homePage(definition).sections) {
-    if (section.type !== "registered") continue;
-    const registration =
-      installedPageComponentRegistry.components[section.component];
-    if (registration === undefined) continue;
-    for (const [key, field] of Object.entries(registration.fields)) {
-      if (field.control !== "image") continue;
-      const value = (section.props as Record<string, unknown>)[key];
-      if (typeof value === "string" && value.trim() !== "") found.add(value);
+  for (const page of definition.pages) {
+    for (const section of page.sections) {
+      if (section.type !== "registered") continue;
+      const registration =
+        installedPageComponentRegistry.components[section.component];
+      if (registration === undefined) continue;
+      for (const [key, field] of Object.entries(registration.fields)) {
+        if (field.control !== "image") continue;
+        const value = (section.props as Record<string, unknown>)[key];
+        if (typeof value === "string" && value.trim() !== "") found.add(value);
+      }
     }
   }
   return found;
