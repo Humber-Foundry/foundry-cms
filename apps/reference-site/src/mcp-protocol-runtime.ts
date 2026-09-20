@@ -229,6 +229,17 @@ function safeErrorMessage(code: McpReadError["code"]) {
   return messages[code];
 }
 
+/**
+ * The message a tool error reports to the client. A `reason` is only ever
+ * set by application code that already prepared one exact, vetted sentence
+ * for that named cause (see `McpReadError.reason`), so that sentence is safe
+ * to send as-is. Every other error keeps the fixed, code-keyed sentence,
+ * never the raw thrown message.
+ */
+function safeToolErrorMessage(error: McpReadError): string {
+  return error.reason !== null ? error.message : safeErrorMessage(error.code);
+}
+
 function toolResult(structuredContent: unknown, isError: boolean) {
   return {
     isError,
@@ -536,7 +547,8 @@ export function createMcpProtocolRuntime({
           invocationId: error.invocationId ?? crypto.randomUUID(),
           error: {
             code: error.code,
-            message: safeErrorMessage(error.code),
+            message: safeToolErrorMessage(error),
+            reason: error.reason,
             retryable: error.retryable,
             requiredScopes:
               error.code === "INSUFFICIENT_SCOPE" ? error.requiredScopes : [],
