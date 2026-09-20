@@ -28,7 +28,6 @@ import {
 } from "@humber-foundry/application";
 
 import { inspectImageSource } from "./image-source-metadata";
-import { loadMediaAssetApplication } from "./media-asset-runtime";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 import { installedPageComponentRegistry } from "../foundry/page-components";
@@ -432,6 +431,9 @@ export function createProductionMcpRuntime(
             "This site stores JPEG, PNG and WebP photos only.",
           );
         }
+        const { loadMediaAssetApplication } = await import(
+          "./media-asset-runtime"
+        );
         const application = await loadMediaAssetApplication(
           createMcpContentActorId(principal),
         );
@@ -460,6 +462,9 @@ export function createProductionMcpRuntime(
         idempotencyKey,
       }) {
         const actorId = createMcpContentActorId(principal);
+        const { loadMediaAssetApplication } = await import(
+          "./media-asset-runtime"
+        );
         const application = await loadMediaAssetApplication(actorId);
         const asset = await application.queries.getAsset(
           createMediaAssetId(assetId),
