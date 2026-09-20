@@ -1167,5 +1167,6 @@ export * from "./design-tokens";
 export * from "./design-presets";
 export * from "./blog";
 export * from "./blog-rendering";
+export * from "./page-lifecycle";
 export * from "./seo";
 export * from "./site-href";

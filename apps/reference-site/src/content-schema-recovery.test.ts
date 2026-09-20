@@ -67,12 +67,22 @@ describe("content schema recovery", () => {
   });
 
   it("carries a durable legacy edit relative to immutable revision zero", () => {
+    // A definition older than the page collection has no page title of its
+    // own: the upgrade gives the home page the site name as its title. So
+    // changing the site name in a legacy draft really does change two of
+    // today's fields, and both are carried back. The page name is a field in
+    // its own right from #159 onward, which is why it appears here at all.
     expect(
       durableSchemaRecoveryEdits(
         legacyDefinition(),
         legacyDefinition("Saved legacy draft"),
       ),
     ).toEqual([
+      {
+        path: "page_home.title",
+        baseValue: "Foundry Reference",
+        value: "Saved legacy draft",
+      },
       {
         path: "site_foundry_reference.name",
         baseValue: "Foundry Reference",

@@ -171,8 +171,10 @@ export function createContentChangeSummary(input: {
     );
   }
 
-  // A page name, a web address, a page's sections and the order of the pages
-  // are not editable fields, so compare them here. A visitor sees them all.
+  // A page's sections and the order of the pages are not editable fields, so
+  // compare them here. A visitor sees both. The page name and the web address
+  // are editable fields, so the loop above already reported them; see
+  // ADR-0033.
   //
   // `goneSections` holds the card heading of every section the draft dropped,
   // so the loop over the base fields below can leave those fields out: one
@@ -182,8 +184,6 @@ export function createContentChangeSummary(input: {
     const before = basePages.get(page.id);
     if (before === undefined) continue;
     const entries = bucket(buckets, `page:${page.id}`);
-    if (before.title !== page.title) entries.content.push("Page name");
-    if (before.slug !== page.slug) entries.content.push("Web address");
     const draftSectionIds = new Set(page.sections.map(({ id }) => id));
     const beforeSectionIds = new Set(before.sections.map(({ id }) => id));
     const gone = new Set<string>();
@@ -312,6 +312,19 @@ export function createContentChangeSummary(input: {
   for (const page of pages) {
     if (page.state !== "removed") continue;
     effects.push(`The page at ${page.path} is gone.`);
+  }
+  // A page that moves needs its own sentence. This summary is what a draft an
+  // agent wrote is reviewed against before it is approved, so a move the agent
+  // made is named here rather than left to be noticed. The owner's own two
+  // ways of changing an address say it where they are: the Rename control,
+  // which knows what is published, and the hint on the Web address field. See
+  // ADR-0033.
+  for (const page of input.draft.pages) {
+    const before = basePages.get(page.id);
+    if (before === undefined || before.slug === page.slug) continue;
+    effects.push(
+      `The page at ${pagePath(before)} moves to ${pagePath(page)}, and the old address stops working.`,
+    );
   }
   for (const page of pages) {
     if (page.state !== "changed") continue;

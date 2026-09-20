@@ -1,25 +1,33 @@
-import {
-  editorPageHref,
-  editorPagePublishedStateLabels,
-  type EditorPageSummary,
-} from "@/src/editor-page-selection";
+import { PageLifecycleList } from "./page-lifecycle-controls";
+import type { PageActionSummary } from "@/src/page-lifecycle-view";
 
 /**
- * Every page of the draft, as a list the owner can open.
+ * Every page of the draft, as a list the owner can open and act on.
  *
  * This is what Pages shows first. Selecting a row opens that page in the same
  * editor, addressed with `?page=<id>`, so the address can be shared and
- * reloaded.
+ * reloaded. The rows and the New page, Rename, Duplicate and Delete controls
+ * are drawn by `PageLifecycleList`, because they need the browser; everything
+ * around them is worked out on the server.
  */
 export function PagesList({
   pages,
   workspaceUrl,
+  workspaceId,
+  schemaVersion,
+  baseRevision,
+  csrfToken,
   lastSaved,
   askedForMissingPage,
 }: {
-  pages: ReadonlyArray<EditorPageSummary>;
+  pages: ReadonlyArray<PageActionSummary>;
   /** The Pages address with the workspace it already carries. */
   workspaceUrl: string;
+  workspaceId: string;
+  schemaVersion: string;
+  /** The revision every page operation on this screen is measured against. */
+  baseRevision: number;
+  csrfToken: string;
   /**
    * When the draft was last saved, already written for a reader. This is one
    * time for the whole draft: a save writes every page together, so the CMS
@@ -36,27 +44,14 @@ export function PagesList({
           That page is not in this draft any more. Here are the pages it has.
         </p>
       ) : null}
-      <ul className="pages-list-rows">
-        {pages.map((page) => (
-          <li key={page.id}>
-            <a
-              className="pages-list-row"
-              href={editorPageHref(workspaceUrl, page.id)}
-            >
-              <span className="pages-list-title">
-                {page.title}
-                {page.isHome ? (
-                  <span className="pages-list-home">Home page</span>
-                ) : null}
-              </span>
-              <span className="pages-list-address">{page.path}</span>
-              <span className="pages-list-state">
-                {editorPagePublishedStateLabels[page.publishedState]}
-              </span>
-            </a>
-          </li>
-        ))}
-      </ul>
+      <PageLifecycleList
+        pages={pages}
+        workspaceUrl={workspaceUrl}
+        workspaceId={workspaceId}
+        schemaVersion={schemaVersion}
+        baseRevision={baseRevision}
+        csrfToken={csrfToken}
+      />
       {lastSaved === undefined ? null : (
         <p className="pages-list-saved">
           You last saved this draft on {lastSaved}.

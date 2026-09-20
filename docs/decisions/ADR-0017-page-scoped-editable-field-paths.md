@@ -63,6 +63,11 @@ and moves the old home page's fields under its page id. Ticket #159 owns the
 slug change that could do this, and already has to call out a slug change on a
 published page before publish.
 
+**Settled by [ADR-0033](ADR-0033-page-lifecycle-operations.md):** #159 keeps
+this out of scope and makes it impossible rather than merely undone. The home
+page may hold only the root address, and no other page may hold it. Moving the
+home page role needs its own ticket and its own decision record.
+
 `listEditableSiteFields` now returns every page's fields. The field list of a
 single-page site is unchanged, in the same order, because the home page is
 read first. The dashboard content editor shows the whole list, so it shows
