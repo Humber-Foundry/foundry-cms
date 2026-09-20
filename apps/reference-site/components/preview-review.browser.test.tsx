@@ -49,6 +49,7 @@ const summary: ContentChangeSummary = {
 let root: ReturnType<typeof createRoot> | undefined;
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   if (root !== undefined) flushSync(() => root!.unmount());
   document.body.replaceChildren();
   await page.viewport(1024, 768);
@@ -88,6 +89,29 @@ function renderScreen() {
   return host;
 }
 
+function approveButton(host: HTMLElement) {
+  const approve = [
+    ...host.querySelectorAll<HTMLButtonElement>("button"),
+  ].find((button) => button.textContent === "Approve this draft");
+  if (approve === undefined) throw new Error("approve_button_missing");
+  return approve;
+}
+
+/**
+ * Press "Open the preview" and let its server read settle. The link opens the
+ * preview in a new tab; the read beside it is what turns Approve on.
+ */
+async function openThePreview(host: HTMLElement) {
+  const link = host.querySelector<HTMLAnchorElement>(
+    ".review-decision a.button",
+  );
+  if (link === null) throw new Error("preview_link_missing");
+  link.removeAttribute("target");
+  link.addEventListener("click", (event) => event.preventDefault());
+  link.click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
 describe("Draft review screen", () => {
   it("keeps every control at the 44px touch size on a phone", async () => {
     await page.viewport(390, 844);
@@ -115,30 +139,53 @@ describe("Draft review screen", () => {
     await page.screenshot({ path: "../../../.shots/review-screen-1440.png" });
   });
 
-  it("turns Approve on only after the person opens the preview", async () => {
+  it("turns Approve on only after the server serves that exact preview", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      return new Response("<html></html>", { status: 200 });
+    });
     const host = renderScreen();
-    const approve = [
-      ...host.querySelectorAll<HTMLButtonElement>("button"),
-    ].find((button) => button.textContent === "Approve this draft");
-    if (approve === undefined) throw new Error("approve_button_missing");
+    const approve = approveButton(host);
 
     expect(approve.disabled).toBe(true);
     // It must also look unavailable, not only report it to a screen reader.
     const offColour = getComputedStyle(approve).backgroundColor;
-    const openPreview = host.querySelector<HTMLAnchorElement>(
-      ".review-decision a.button",
-    );
-    if (openPreview === null) throw new Error("preview_link_missing");
-    // The link opens the canonical preview of this exact revision. Clicking it
-    // is the act the Approve control waits for.
-    openPreview.removeAttribute("target");
-    openPreview.setAttribute("href", "#preview");
-    flushSync(() => openPreview.click());
+    await openThePreview(host);
 
+    expect(asked).toEqual([
+      "/dash/review/preview_11111111-2222-3333-4444-555555555555/preview",
+    ]);
     expect(approve.disabled).toBe(false);
     // `.button` fades its background over 180ms, so read the settled colour.
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(getComputedStyle(approve).backgroundColor).not.toBe(offColour);
+  });
+
+  it("leaves Approve off when the server no longer serves that preview", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response("gone", { status: 404 }),
+    );
+    const host = renderScreen();
+    const approve = approveButton(host);
+
+    await openThePreview(host);
+
+    expect(approve.disabled).toBe(true);
+    expect(host.textContent).toContain("no longer available");
+  });
+
+  it("gives the two controls in the answer one primary colour only", async () => {
+    const host = renderScreen();
+    const primary = [
+      ...host.querySelectorAll<HTMLElement>(".review-decision .button"),
+    ].filter((control) => control.classList.contains("button-primary"));
+
+    // Colour carries the hierarchy, so only the decision itself is primary.
+    expect(primary.map((control) => control.textContent)).toEqual([
+      "Approve this draft",
+    ]);
   });
 
   it("shows the reason field only after Ask for changes is pressed", async () => {

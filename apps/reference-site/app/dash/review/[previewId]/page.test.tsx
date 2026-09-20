@@ -1,11 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(),
   mutationToken: vi.fn(),
   preview: vi.fn(),
-  approve: vi.fn(),
   record: vi.fn(),
 }));
 
@@ -24,12 +23,6 @@ vi.mock("@/src/mcp-preview-review-runtime", () => ({
   loadMcpPreviewForHuman: mocks.preview,
   recordPreviewReviewDecision: mocks.record,
 }));
-vi.mock("@/src/content-publication-runtime", () => ({
-  loadContentPublicationApplication: async () => ({
-    commands: { approve: mocks.approve },
-  }),
-}));
-
 import McpPreviewReviewPage from "./page";
 
 const membership = { id: "membership-owner", siteId: "site_foundry" };
@@ -81,6 +74,10 @@ async function markupFor(selected: unknown) {
 }
 
 describe("Draft review screen", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("names who prepared the draft, what changed and what visitors get", async () => {
     const markup = await markupFor(review());
 
@@ -107,10 +104,14 @@ describe("Draft review screen", () => {
   });
 
   it("approves nothing when the page is opened", async () => {
-    await markupFor(review());
+    const markup = await markupFor(review());
 
-    expect(mocks.approve).not.toHaveBeenCalled();
+    // The page reaches the review runtime, so this proves the read path is the
+    // only one it uses: it looks the preview up and records no decision.
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
     expect(mocks.record).not.toHaveBeenCalled();
+    // Nothing on the screen can post by itself either.
+    expect(markup).not.toContain("<form");
   });
 
   it("shows the reason a person typed as text, not as markup", async () => {

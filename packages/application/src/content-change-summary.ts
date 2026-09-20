@@ -105,14 +105,6 @@ function bucketKey(field: EditableSiteField) {
 }
 
 /**
- * Compare the published definition with the draft definition and describe the
- * difference in the words a site owner uses.
- *
- * Every page is covered, not only the home page: a change on any page, a new
- * page, a removed page, a removed section and a reordered page all appear in
- * the result.
- */
-/**
  * Only the sentences about what a visitor will see.
  *
  * `publicEffect` ends by saying that reading the review neither approves nor
@@ -130,6 +122,14 @@ export function contentChangeVisitorEffect(
     : summary.publicEffect;
 }
 
+/**
+ * Compare the published definition with the draft definition and describe the
+ * difference in the words a site owner uses.
+ *
+ * Every page is covered, not only the home page: a change on any page, a new
+ * page, a removed page, a removed section and a reordered page all appear in
+ * the result.
+ */
 export function createContentChangeSummary(input: {
   base: SiteDefinition;
   draft: SiteDefinition;

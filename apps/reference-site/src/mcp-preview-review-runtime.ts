@@ -44,9 +44,9 @@ type PreviewRow = {
 };
 
 /**
- * The name the connection claimed for itself when it registered. It is the
- * client's own claim, never a verified identity, so every screen that shows it
- * must say so.
+ * A name for the connected app, taken from the web address it gave when it
+ * connected. The app chose that address itself, so the name is the app's own
+ * claim and never a verified identity. Every screen that shows it must say so.
  */
 function claimedAgentName(clientId: string | null | undefined) {
   return clientId === null || clientId === undefined || clientId === ""

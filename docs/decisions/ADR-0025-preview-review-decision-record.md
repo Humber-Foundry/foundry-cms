@@ -56,12 +56,16 @@ the act honest:
 - The route reads no bearer token, so an MCP credential reaches no part of it,
   and no MCP tool calls `commands.approve`.
 
-Approve stays off until the person opens the canonical preview of that exact
-revision in the same session. That gate is client state, exactly as it is
-behind the editor's Publish button and the blog Schedule control, and it is
-what `previewConfirmed: true` reports. The server's own protection is stronger
-and independent: it reloads the preview and refuses unless the stored revision
-is still current and still hashes to the artifact the agent prepared.
+Approve stays off until the person asks for the canonical preview of that exact
+revision in the same session. Pressing "Open the preview" opens it in a new tab
+and reads the same address from the server; Approve turns on only when the
+server still serves that revision. The gate is client state that a server read
+backs, which is the pattern the blog scheduling control already uses, and it is
+what `previewConfirmed: true` reports. It proves the person asked for the
+preview, not that they read it, so it is not the protection the product relies
+on. That protection is the server's own and is independent: recording any
+decision reloads the preview and refuses unless the stored revision is still
+current and still hashes to the artifact the agent prepared.
 
 Approving does not publish. It produces the `approvalId` and nothing else.
 
@@ -122,7 +126,8 @@ length, and the catalog tells clients not to obey it.
 - Previews created before this change keep their bare identifiers and cannot be
   read through `foundry.publication.status`. They remain reviewable from the
   dashboard, which addresses a preview by id and not by shape.
-- `foundry.publication.status` stays visible only to connections holding a
-  publication scope. A connection that drafts but can never publish cannot read
-  its preview's state. That matches the flow the contract describes, where the
-  connection that asks for a review is the one that will publish.
+- A preview read needs only `site.read` plus the exact revision's draft scopes,
+  which is what preparing the preview needed. It does not need a publication
+  scope. Tool discovery is unchanged, so `foundry.publication.status` is still
+  listed only for connections holding a publication scope; a draft-only
+  connection that calls it directly for its own preview is answered.

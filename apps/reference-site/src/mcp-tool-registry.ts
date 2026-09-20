@@ -22,6 +22,7 @@ import {
   type createMcpReadApplication,
 } from "@humber-foundry/application";
 
+import { previewChangeReasonLimit } from "./mcp-preview-review-limits";
 import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   designContract,
@@ -231,7 +232,11 @@ const publicationStatusResult = {
   properties: {
     ...publicationOperationResult.properties,
     approvalId: approvalIdSchema,
-    reviewNote: { type: "string", minLength: 1, maxLength: 1000 },
+    reviewNote: {
+      type: "string",
+      minLength: 1,
+      maxLength: previewChangeReasonLimit,
+    },
   },
 } as const;
 

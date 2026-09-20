@@ -9,24 +9,34 @@ import { previewChangeReasonLimit } from "@/src/mcp-preview-review-limits";
 const reviewsUrl = "/api/foundry-cms/preview-reviews";
 
 const errorMessages: Readonly<Record<string, string>> = {
-  already_decided: "Someone has already answered this draft. Reload the page.",
+  already_decided: "Someone has already answered this draft.",
   preview_not_current:
     "The draft changed after this preview was made. Ask the app to prepare a new preview.",
   not_authorized: "Your account cannot approve changes to this site.",
+  request_check_failed:
+    "Your sign-in went stale. Reload the page and answer again.",
+  request_check_unavailable:
+    "The site could not be reached just now. Try again in a moment.",
   request_in_progress: "That answer is still being recorded. Wait a moment.",
 };
 
-function messageFor(body: unknown) {
-  if (
-    typeof body === "object" &&
+/** Errors that mean the screen is out of date, so it should reload itself. */
+const staleAnswers = new Set(["already_decided", "preview_not_current"]);
+
+function errorCode(body: unknown) {
+  return typeof body === "object" &&
     body !== null &&
     "error" in body &&
-    typeof body.error === "string" &&
-    body.error in errorMessages
-  ) {
-    return errorMessages[body.error]!;
-  }
-  return "That answer was not recorded. Try again.";
+    typeof body.error === "string"
+    ? body.error
+    : null;
+}
+
+function messageFor(body: unknown) {
+  const code = errorCode(body);
+  return code !== null && code in errorMessages
+    ? errorMessages[code]!
+    : "That answer was not recorded. Try again.";
 }
 
 /**
@@ -34,8 +44,10 @@ function messageFor(body: unknown) {
  *
  * Approving is a deliberate act on the exact draft the person looked at, so
  * the Approve button stays off until the person opens the preview in this
- * session. Opening the preview is what `previewConfirmed` reports; nothing
- * here sends it on page load.
+ * session. Pressing "Open the preview" asks the server for that exact preview
+ * first, exactly as the blog scheduling control does, and Approve turns on
+ * only when the server still serves it. That act is what `previewConfirmed`
+ * reports; nothing here sends it on page load.
  */
 export function PreviewReviewDecision({
   previewId,
@@ -54,6 +66,29 @@ export function PreviewReviewDecision({
   const [message, setMessage] = useState<string | null>(null);
   const token = useRef(mutationToken);
 
+  /**
+   * The person asked for the preview. The link itself opens it in a new tab;
+   * this read asks the server for the same address, so Approve turns on only
+   * when the server still serves that exact revision. A draft that moved on
+   * since the screen loaded is refused here, before the person can approve it.
+   */
+  async function openPreview() {
+    setMessage(null);
+    try {
+      const response = await fetch(previewHref, { cache: "no-store" });
+      if (!response.ok) {
+        setMessage(
+          "That preview is no longer available. Ask the app to prepare a new one.",
+        );
+        router.refresh();
+        return;
+      }
+      setPreviewOpened(true);
+    } catch {
+      setMessage("The preview could not be reached. Try again in a moment.");
+    }
+  }
+
   async function send(body: unknown) {
     setBusy(true);
     setMessage(null);
@@ -69,6 +104,9 @@ export function PreviewReviewDecision({
       token.current = result.mutationToken;
       if (!result.response.ok) {
         setMessage(messageFor(result.body));
+        // The screen is showing something that is no longer true, so read it
+        // again rather than asking the person to reload.
+        if (staleAnswers.has(errorCode(result.body) ?? "")) router.refresh();
         return;
       }
       router.refresh();
@@ -86,11 +124,11 @@ export function PreviewReviewDecision({
       </p>
       <p className="panel-actions">
         <a
-          className="button button-primary"
+          className="button"
           href={previewHref}
           target="_blank"
           rel="noreferrer"
-          onClick={() => setPreviewOpened(true)}
+          onClick={openPreview}
         >
           Open the preview
         </a>

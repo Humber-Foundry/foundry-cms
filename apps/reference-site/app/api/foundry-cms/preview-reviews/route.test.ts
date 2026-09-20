@@ -218,7 +218,7 @@ describe("preview review endpoint", () => {
       request({
         operation: "request_changes",
         previewId,
-        reason: "Use the shorter headline",
+        reason: "Use the\u0007 shorter headline",
       }),
     );
 

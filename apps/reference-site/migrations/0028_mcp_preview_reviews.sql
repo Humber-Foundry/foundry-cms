@@ -27,8 +27,11 @@ CREATE TABLE mcp_preview_reviews (
     REFERENCES content_revisions(workspace_id, revision)
 );
 
-CREATE INDEX mcp_preview_reviews_site_decided
-  ON mcp_preview_reviews (site_id, decided_at);
+-- Overview asks one question on every load: which previews for this site have
+-- no decision yet, newest first. `mcp_preview_artifacts` is append-only, so it
+-- only grows and that read needs its own index.
+CREATE INDEX mcp_preview_artifacts_site_created
+  ON mcp_preview_artifacts (site_id, created_at);
 
 CREATE TRIGGER mcp_preview_reviews_prevent_update
 BEFORE UPDATE ON mcp_preview_reviews

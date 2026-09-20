@@ -40,7 +40,8 @@ export function PreviewReviewSummary({
           <h1>Review this draft</h1>
           <p>
             {agentName} prepared this draft {mcpRelativeTime(preparedAt)}. That
-            name is what the app says about itself.
+            name comes from the web address the app gave when it connected, so
+            it is what the app says about itself.
           </p>
         </div>
       </div>
