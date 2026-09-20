@@ -3,6 +3,7 @@ import {
   findPageHrefReferences,
   homePage,
   homePageSlug,
+  pageLinkReferenceName,
   suggestPageSlug,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -61,15 +62,12 @@ export function listPageActions(
   const home = homePage(definition);
   return listEditorPages(definition, publishedDefinition).map((summary) => {
     const page = findPageById(definition, summary.id)!;
+    // The name comes from `pageLinkReferenceName`, the same one the refused
+    // delete puts in its sentence, so the owner reads the same words here as
+    // in the refusal and an MCP caller reads them too. See ADR-0033.
     const blockedBy = findPageHrefReferences(definition, summary.id).map(
       (reference) => ({
-        name:
-          reference.location === "navigation"
-            ? `Navigation — ${reference.label}`
-            : `${
-                findPageById(definition, reference.pageId ?? "")?.title ??
-                "Another page"
-              } — ${reference.label}`,
+        name: pageLinkReferenceName(definition, reference),
         href: editorPageHref(workspaceUrl, reference.pageId ?? home.id),
       }),
     );

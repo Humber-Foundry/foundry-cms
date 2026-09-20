@@ -1179,7 +1179,12 @@ export function createContentRevisionApplication({
     });
   }
 
-  /** The five things every page operation is identified by, minus the key. */
+  /**
+   * What identifies one page operation, apart from what it is being asked to
+   * do: the operation's own name, who is asking, which draft, which schema and
+   * which revision they read. The idempotency key is left out because it is
+   * the receipt this is stored under, not part of what was asked.
+   */
   function pageRequestIdentity(
     operation: string,
     command: PageMutationCommand,

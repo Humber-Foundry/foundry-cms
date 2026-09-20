@@ -173,6 +173,32 @@ describe("content change summary", () => {
     ]);
   });
 
+  it("says before publish that a moved page's old address stops working", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== "page_about" ? page : { ...page, slug: "studio" },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.publicEffect).toContain(
+      "The page at /about moves to /studio, and the old address stops working.",
+    );
+  });
+
+  it("says nothing about a moved address when no page moved", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== "page_about" ? page : { ...page, title: "Our studio" },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.publicEffect).not.toContain("stops working");
+  });
+
   it("keeps settings that belong to no page out of the page list", () => {
     const summary = createContentChangeSummary({
       base: twoPages,

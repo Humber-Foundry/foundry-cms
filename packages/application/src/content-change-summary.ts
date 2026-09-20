@@ -313,6 +313,18 @@ export function createContentChangeSummary(input: {
     if (page.state !== "removed") continue;
     effects.push(`The page at ${page.path} is gone.`);
   }
+  // A page that moves needs its own sentence. The web address is an editable
+  // field, so it can be changed from the Rename control, from the editor, or
+  // by an agent, and only this summary is read on every one of those paths
+  // before publish. Saying it here means the owner is always told that the old
+  // address stops working. See ADR-0033.
+  for (const page of input.draft.pages) {
+    const before = basePages.get(page.id);
+    if (before === undefined || before.slug === page.slug) continue;
+    effects.push(
+      `The page at ${pagePath(before)} moves to ${pagePath(page)}, and the old address stops working.`,
+    );
+  }
   for (const page of pages) {
     if (page.state !== "changed") continue;
     effects.push(`The page at ${page.path} changes.`);

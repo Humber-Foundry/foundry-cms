@@ -407,7 +407,7 @@ export function addPageToDefinition(
  * Copy one link from a duplicated section onto the copy's own page.
  *
  * A link to a section of the page being copied must follow the copy, or the
- * button on the new page would quietly send a visitor to the old page. Both
+ * button on the new page would send a visitor to the old page. Both
  * stored forms are handled: the bare `#section` shorthand, which always means
  * the home page, and `page:<pageId>#<section>`. Every other link — an email
  * address, the blog, another page — is copied exactly as it was. See ADR-0022.
@@ -616,21 +616,27 @@ export function removePageFromDefinition(
   );
 }
 
-/** What one blocking link is called on screen. */
+/**
+ * What one blocking link is called wherever it is shown.
+ *
+ * A navigation item is site-wide, so it is named after the Navigation group. A
+ * button is named after the page it sits on. This is the only place those
+ * names are written: the refusal sentence below and the Pages list both read
+ * them from here, so an owner and an MCP caller read the same words. See
+ * ADR-0033.
+ */
 export function pageLinkReferenceName(
   definition: SiteDefinition,
   reference: PageLinkReference,
 ): string {
   if (reference.location === "navigation") {
-    return `the navigation item "${reference.label}"`;
+    return `Navigation — ${reference.label}`;
   }
   const host =
     reference.pageId === undefined
       ? undefined
       : findPageById(definition, reference.pageId);
-  return host === undefined
-    ? `the button "${reference.label}"`
-    : `the button "${reference.label}" on ${host.title}`;
+  return `${host?.title ?? "Another page"} — ${reference.label}`;
 }
 
 /**
@@ -645,9 +651,5 @@ export function pageDeleteBlockedMessage(
   const names = references.map((reference) =>
     pageLinkReferenceName(definition, reference),
   );
-  const listed =
-    names.length === 1
-      ? names[0]!
-      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]!}`;
-  return `${page.title} at ${pagePath(page)} is still linked from ${listed}. Change those links first, then delete the page.`;
+  return `${page.title} at ${pagePath(page)} is still linked from: ${names.join(", ")}. Change those links first, then delete the page.`;
 }

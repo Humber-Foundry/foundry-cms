@@ -4570,7 +4570,7 @@ h3.media-places-heading {
 }
 
 .page-lifecycle-field input[aria-invalid="true"] {
-  border-color: #8c2f21;
+  border-color: #a94a42;
 }
 
 .page-lifecycle-field span {
@@ -4579,7 +4579,7 @@ h3.media-places-heading {
 }
 
 .page-lifecycle-field span[role="alert"] {
-  color: #8c2f21;
+  color: #8a352f;
 }
 
 .page-lifecycle-layouts {
@@ -4662,9 +4662,12 @@ h3.media-places-heading {
   font-size: var(--dash-text-small);
 }
 
+/* Colour alone carries the refusal, the way every other refusal in this file
+ * reads; only the warning takes a tint, because it is not a refusal. */
 .page-lifecycle-message {
-  background: #f7e9e6;
-  color: #8c2f21;
+  background: none;
+  padding-inline: 0;
+  color: #8a352f;
 }
 
 .page-lifecycle-buttons {

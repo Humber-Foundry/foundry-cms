@@ -490,7 +490,7 @@ describe("removePageFromDefinition", () => {
       { location: "navigation", label: "About us" },
     ]);
     expect(error.fields.pageId).toBe(
-      'About us at /about-us is still linked from the navigation item "About us". Change those links first, then delete the page.',
+      "About us at /about-us is still linked from: Navigation — About us. Change those links first, then delete the page.",
     );
   });
 
@@ -515,7 +515,7 @@ describe("removePageFromDefinition", () => {
       ],
     );
     expect(message).toBe(
-      `About us at /about-us is still linked from the navigation item "About us" and the button "Read more" on ${home.title}. Change those links first, then delete the page.`,
+      `About us at /about-us is still linked from: Navigation — About us, ${home.title} — Read more. Change those links first, then delete the page.`,
     );
   });
 

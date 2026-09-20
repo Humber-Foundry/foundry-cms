@@ -424,7 +424,7 @@ describe("deletePage", () => {
       { location: "navigation", label: navigationItem.label },
     ]);
     expect(blocked.fields.pageId).toContain(
-      `the navigation item "${navigationItem.label}"`,
+      `Navigation — ${navigationItem.label}`,
     );
     expect(blocked.fields.pageId).toContain("Change those links first");
   });

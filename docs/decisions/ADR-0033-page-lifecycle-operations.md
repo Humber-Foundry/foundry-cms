@@ -98,7 +98,7 @@ section by `remapPageSectionNestedIds`.
 
 A link inside a copied section that pointed at a section of the page being
 copied is rewritten to point at the copy's own section. Without that the button
-on the new page would quietly send a visitor to the old page. Every other link
+on the new page would send a visitor to the old page. Every other link
 — an email address, the Blog, a different page — is copied exactly as it was.
 
 Photos are copied by reference: the occurrence id is rebuilt for the new page,
@@ -194,4 +194,5 @@ and there is no benefit to set against that.
 **Move the home page role when a page is given the root address.** It was
 rejected for this ticket because it re-paths both pages' fields, renames
 published files and invalidates stored draft paths (ADR-0017). Refusing it
-outright is honest and reversible; doing it quietly is neither.
+outright is honest and reversible; moving the home page role without saying so
+is neither.
