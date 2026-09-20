@@ -58,6 +58,12 @@ type CancelScheduleCommand = Readonly<{
   scheduleId: string;
 }>;
 
+type DeclineScheduleProposalCommand = Readonly<{
+  operation: "decline_schedule_proposal";
+  postId: string;
+  proposalId: string;
+}>;
+
 type ArchiveCommand = Readonly<{
   operation: "archive";
   postId: string;
@@ -92,6 +98,7 @@ type BlogCommand =
   | ActivateScheduleCommand
   | ProposeScheduleCommand
   | CancelScheduleCommand
+  | DeclineScheduleProposalCommand
   | ArchiveCommand
   | ContinueArchiveWithdrawalCommand
   | RecoverArchiveWithdrawalAccessCommand
@@ -107,6 +114,9 @@ const operationMetadata = Object.freeze({
   },
   cancel_schedule: {
     commandType: "blog.post.schedule.cancel",
+  },
+  decline_schedule_proposal: {
+    commandType: "blog.post.schedule.decline",
   },
   archive: {
     commandType: "blog.post.archive",
@@ -143,6 +153,12 @@ const commandReaders: {
     return typeof candidate.postId === "string" &&
       typeof candidate.scheduleId === "string"
       ? candidate as CancelScheduleCommand
+      : null;
+  },
+  decline_schedule_proposal(candidate) {
+    return typeof candidate.postId === "string" &&
+      typeof candidate.proposalId === "string"
+      ? candidate as DeclineScheduleProposalCommand
       : null;
   },
   retry_execution(candidate) {
@@ -452,6 +468,19 @@ export async function POST(request: Request) {
                 idempotencyKey,
               });
               return Response.json({ schedule }, { status: 200 });
+            }
+            case "decline_schedule_proposal": {
+              const application =
+                await loadBlogPostOperationsApplication(environment);
+              const proposal =
+                await application.commands.declineScheduleProposal({
+                  actorId,
+                  siteId: installedSiteDefinition.site.id,
+                  postId,
+                  proposalId: command.proposalId,
+                  idempotencyKey,
+                });
+              return Response.json({ proposal }, { status: 200 });
             }
           }
         } catch (error) {

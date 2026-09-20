@@ -91,6 +91,7 @@ describe("blog schedule standing", () => {
       archiveRequestId: null,
       activeSchedule: null,
       latestExecution: null,
+      pendingScheduleProposal: null,
       ...overrides,
     };
   }
@@ -177,6 +178,7 @@ describe("blog execution failure note", () => {
       archiveRequestId: null,
       activeSchedule: null,
       latestExecution: null,
+      pendingScheduleProposal: null,
       ...overrides,
     };
   }

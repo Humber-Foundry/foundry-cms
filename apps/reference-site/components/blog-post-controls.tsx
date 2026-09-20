@@ -29,6 +29,7 @@ import { RichTextEditor } from "./rich-text-editor";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
 import { PublishingConnectionStatus } from "./connection-status";
+import { formatLocalScheduleTime } from "./schedule-time-format";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -441,30 +442,7 @@ export function blogHasPendingSitePublish(
   );
 }
 
-/**
- * A local date and time, e.g. "November 1, 2026, 1:30 AM (America/Vancouver)".
- * `localDateTime` is already civil time in `ianaTimeZone` — no further zone
- * conversion is needed, so this formats it as a UTC instant with the same
- * clock digits and labels the zone name alongside it.
- */
-export function formatLocalScheduleTime(
-  localDateTime: string,
-  ianaTimeZone: string,
-): string {
-  const [datePart, timePart] = localDateTime.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
-  const asIfUtc = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  const formatted = new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(asIfUtc);
-  return `${formatted} (${ianaTimeZone})`;
-}
+export { formatLocalScheduleTime } from "./schedule-time-format";
 
 /**
  * The plain-words line under a post about its schedule, and whether the
@@ -747,6 +725,7 @@ export function BlogPostControls({
   verifiedPublicPostIds,
   postSummaries,
   archivedPosts,
+  pendingScheduleRequestAgentNames,
 }: {
   revision: ContentRevision;
   csrfToken: string;
@@ -754,6 +733,12 @@ export function BlogPostControls({
   verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
   postSummaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
   archivedPosts: ReadonlyArray<ArchivedBlogPostSummary>;
+  /**
+   * The app's own name for each post with a pending schedule request,
+   * keyed by post id. A post missing from this map still shows the request
+   * with the plain word "An app" — see CONTEXT.md "App / Connected app".
+   */
+  pendingScheduleRequestAgentNames: ReadonlyMap<BlogPostId, string>;
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1160,20 +1145,53 @@ export function BlogPostControls({
               </li>
             );
           }
+          const pendingRequest = summary?.pendingScheduleProposal ?? null;
+          const pendingRequestAgentName =
+            pendingScheduleRequestAgentNames.get(post.id) ?? "An app";
           return (
-            <li key={post.id}>
-              <div className="post-list-summary">
-                <strong>{post.title}</strong>
-                <span>{standing.label}</span>
+            <li key={post.id} id={`blog-post-${post.id}`}>
+              <div className="post-list-info">
+                <div className="post-list-summary">
+                  <strong>{post.title}</strong>
+                  <span>{standing.label}</span>
+                </div>
+                {scheduleStanding.line === null ? null : (
+                  <p className="composer-hint">{scheduleStanding.line}</p>
+                )}
+                {executionFailure === null ? null : (
+                  <p className="composer-hint" role="alert">
+                    {executionFailure}
+                  </p>
+                )}
+                {pendingRequest === null ? null : (
+                  <p className="composer-hint">
+                    {pendingRequestAgentName} asked to publish this at{" "}
+                    {formatLocalScheduleTime(
+                      pendingRequest.localDateTime,
+                      pendingRequest.ianaTimeZone,
+                    )}
+                    . Use "Schedule this post" below to publish it then, or
+                    decline the request.{" "}
+                    <button
+                      type="button"
+                      className="copy-button"
+                      disabled={busy}
+                      onClick={() => {
+                        void sendBlogOperation(
+                          {
+                            operation: "decline_schedule_proposal",
+                            postId: post.id,
+                            proposalId: pendingRequest.id,
+                          },
+                          "decline-blog-post-schedule-proposal",
+                        );
+                      }}
+                    >
+                      Decline
+                    </button>
+                  </p>
+                )}
               </div>
-              {scheduleStanding.line === null ? null : (
-                <p className="composer-hint">{scheduleStanding.line}</p>
-              )}
-              {executionFailure === null ? null : (
-                <p className="composer-hint" role="alert">
-                  {executionFailure}
-                </p>
-              )}
               <div className="post-list-actions">
                 <button
                   type="button"
@@ -1283,21 +1301,24 @@ export function BlogPostControls({
                   Archive
                 </button>
               </div>
-              {scheduleStanding.canSchedule &&
-              previewedRevision === revision.revision ? (
-                <details className="composer-settings">
-                  <summary>Schedule this post</summary>
-                  <ScheduleForm
-                    busy={busy}
-                    onSchedule={(localValue) =>
-                      void schedulePost(post, localValue)}
-                  />
-                </details>
-              ) : null}
-              {scheduleStanding.canSchedule &&
-              previewedRevision !== revision.revision ? (
-                <p className="composer-hint">{scheduleNeedsApprovalMessage}</p>
-              ) : null}
+              {!scheduleStanding.canSchedule ? null : (
+                <div className="post-list-full-row">
+                  {previewedRevision === revision.revision ? (
+                    <details className="composer-settings">
+                      <summary>Schedule this post</summary>
+                      <ScheduleForm
+                        busy={busy}
+                        onSchedule={(localValue) =>
+                          void schedulePost(post, localValue)}
+                      />
+                    </details>
+                  ) : (
+                    <p className="composer-hint">
+                      {scheduleNeedsApprovalMessage}
+                    </p>
+                  )}
+                </div>
+              )}
             </li>
           );
         })}
