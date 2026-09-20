@@ -63,11 +63,15 @@ function stopServer(child) {
  * The nine destinations `DashboardNav` links to — the same list
  * `verify-dashboard-spacing-browser.mjs` already checks. A dynamic detail
  * page reached from inside one of these (a single message at
- * `/dash/forms/[receiptId]`, the MCP redirect at `/dash/review/[previewId]`)
- * needs seeded data or a live MCP preview to reach, so it is not one of
- * these nine and is not swept here. Their markup still follows the same
- * plain-word and `HelpTip` rules; add one once a seeded fixture exists to
- * open it from.
+ * `/dash/forms/[receiptId]`, the draft review screen at
+ * `/dash/review/[previewId]` and the preview it opens at
+ * `/dash/review/[previewId]/preview`) needs seeded data or a live MCP preview
+ * to reach, so it is not one of these nine and is not swept here. The review
+ * screen's control size and layout are checked at 1440px and 390px by
+ * `apps/reference-site/components/preview-review.browser.test.tsx`; that test
+ * runs no axe check. Add one here once a seeded fixture exists to open the
+ * screen from. Their markup still follows the same plain-word and `HelpTip`
+ * rules.
  */
 const destinations = [
   ["Overview", "/dash"],

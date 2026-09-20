@@ -31,6 +31,7 @@ import {
   type ContentPublication,
   type ContentPublicationClaim,
   type McpConnectionGrant,
+  type McpPreviewReview,
   type McpConnectionPrincipal,
   type McpPublicationAuditEvent,
   type McpReadAuditEvent,
@@ -46,6 +47,7 @@ const approvalId = createContentApprovalId(
 const publicationId = createContentPublicationId(
   "publish_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 );
+const previewId = "preview_cccccccc-dddd-4eee-8fff-000000000000";
 const principal: McpConnectionPrincipal = {
   connectionId: "connection-publication-56",
   actorId: "agent-publication-56",
@@ -108,10 +110,12 @@ async function fixture({
     value: "MCP approved publication",
   }],
   blogOperations = null,
+  previewReview = null,
 }: {
   connectionAt?: (read: number) => McpConnectionGrant | null;
   seedEdits?: ReadonlyArray<{ path: string; value: string }>;
   blogOperations?: BlogOperationsStub | null;
+  previewReview?: McpPreviewReview | null;
 } = {}) {
   const actorId = createContentActorId("mcp-agent-publication-56");
   const revisionApplication = createContentRevisionApplication({
@@ -199,6 +203,9 @@ async function fixture({
   const application = createMcpPublicationApplication({
     base: read,
     runtime: {
+      async loadPreviewReview() {
+        return previewReview;
+      },
       async loadRevision() {
         return revisionApplication;
       },
@@ -1162,5 +1169,135 @@ describe("MCP publication orchestration", () => {
       },
     });
     expect(publish).toHaveBeenCalledTimes(1);
+  });
+  it("reports that a prepared preview is still waiting for a person", async () => {
+    const { application } = await fixture({
+      previewReview: {
+        previewId,
+        connectionId: principal.connectionId,
+        workspaceId,
+        revision: 1,
+        state: "pending_human_review",
+        approvalId: null,
+        reviewNote: null,
+      },
+    });
+
+    await expect(
+      application.publicationStatus(
+        principal,
+        { workspaceId, revision: 1, operationId: previewId },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      result: {
+        operationId: previewId,
+        state: "pending_human_review",
+        replayed: false,
+      },
+    });
+  });
+
+  it("hands the agent the approval id only after a person approved", async () => {
+    const { application } = await fixture({
+      previewReview: {
+        previewId,
+        connectionId: principal.connectionId,
+        workspaceId,
+        revision: 1,
+        state: "approved",
+        approvalId,
+        reviewNote: null,
+      },
+    });
+
+    await expect(
+      application.publicationStatus(
+        principal,
+        { workspaceId, revision: 1, operationId: previewId },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      result: { operationId: previewId, state: "approved", approvalId },
+    });
+  });
+
+  it("returns the reason a person typed when they asked for changes", async () => {
+    const { application } = await fixture({
+      previewReview: {
+        previewId,
+        connectionId: principal.connectionId,
+        workspaceId,
+        revision: 1,
+        state: "changes_requested",
+        approvalId: null,
+        reviewNote: "Use the shorter headline",
+      },
+    });
+
+    const answer = await application.publicationStatus(
+      principal,
+      { workspaceId, revision: 1, operationId: previewId },
+      context,
+    );
+
+    expect(answer).toMatchObject({
+      result: {
+        state: "changes_requested",
+        reviewNote: "Use the shorter headline",
+      },
+    });
+    expect(answer).not.toMatchObject({ result: { approvalId } });
+  });
+
+  it("hides a preview prepared by another connection", async () => {
+    const { application } = await fixture({
+      previewReview: {
+        previewId,
+        connectionId: "connection-somebody-else",
+        workspaceId,
+        revision: 1,
+        state: "approved",
+        approvalId,
+        reviewNote: null,
+      },
+    });
+
+    await expect(
+      application.publicationStatus(
+        principal,
+        { workspaceId, revision: 1, operationId: previewId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+  });
+
+  it("denies preview status to a connection without the draft scopes", async () => {
+    // Reading a review decision is reading about a draft, so it needs the
+    // same draft scopes that preparing the preview needed.
+    const readOnly: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [mcpInitialScope],
+    };
+    const { application } = await fixture({
+      connectionAt: () => ({ ...readOnly, status: "active" }),
+      previewReview: {
+        previewId,
+        connectionId: readOnly.connectionId,
+        workspaceId,
+        revision: 1,
+        state: "approved",
+        approvalId,
+        reviewNote: null,
+      },
+    });
+
+    await expect(
+      application.publicationStatus(
+        readOnly,
+        { workspaceId, revision: 1, operationId: previewId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_SCOPE" });
   });
 });

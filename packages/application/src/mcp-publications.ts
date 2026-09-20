@@ -30,6 +30,7 @@ import {
   McpReadError,
   mcpContentDraftScope,
   mcpDesignDraftScope,
+  mcpInitialScope,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type McpConnectionGrant,
@@ -81,7 +82,35 @@ export type McpPublicationAuditEvent = McpReadAuditEvent &
     replayed: boolean;
   }>;
 
+/** What a person decided about one prepared preview, if anyone has yet. */
+export type McpPreviewReviewState =
+  | "pending_human_review"
+  | "approved"
+  | "changes_requested";
+
+/**
+ * One prepared preview and the person's decision about it.
+ *
+ * `approvalId` is present only after a person approved. It is the approval the
+ * connection must pass to `foundry.publication.request`; an agent can never
+ * create one. `reviewNote` is the reason a person typed when they asked for
+ * changes. It is text a person wrote, so a client must render it as text.
+ */
+export type McpPreviewReview = Readonly<{
+  previewId: string;
+  connectionId: string;
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+  state: McpPreviewReviewState;
+  approvalId: string | null;
+  reviewNote: string | null;
+}>;
+
 export type McpPublicationRuntime = Readonly<{
+  loadPreviewReview(input: {
+    principal: McpConnectionPrincipal;
+    previewId: string;
+  }): Promise<McpPreviewReview | null>;
   loadRevision(input: {
     principal: McpConnectionPrincipal;
     workspaceId: ContentWorkspaceId;
@@ -236,17 +265,26 @@ type McpPublicationResult = Readonly<{
   operationId: string;
   state: string;
   replayed: boolean;
+  approvalId?: string;
+  reviewNote?: string;
 }>;
 
 function createMcpPublicationResult(
   operationId: string,
   state: string,
   replayed: boolean,
+  review?: Readonly<{ approvalId: string | null; reviewNote: string | null }>,
 ): McpPublicationResult {
   return {
     operationId,
     state,
     replayed,
+    ...(review?.approvalId === null || review?.approvalId === undefined
+      ? {}
+      : { approvalId: review.approvalId }),
+    ...(review?.reviewNote === null || review?.reviewNote === undefined
+      ? {}
+      : { reviewNote: review.reviewNote }),
   };
 }
 
@@ -261,6 +299,15 @@ function hashMcpPublicationResult(result: McpPublicationResult) {
  */
 function namesPublication(operationId: string) {
   return operationId.startsWith("publish_");
+}
+
+/**
+ * A preview receipt names a draft waiting for a person, not a publication. Its
+ * authority is the draft scopes of the exact revision, which is what preparing
+ * the preview required, plus ownership of the preview itself.
+ */
+function namesPreview(operationId: string) {
+  return operationId.startsWith("preview_");
 }
 
 /**
@@ -843,19 +890,58 @@ export function createMcpPublicationApplication({
       }>,
       context: McpExecutionContext,
     ) {
-      const requiredScope = namesPublication(input.operationId)
-        ? mcpPublicationPublishScope
-        : mcpPublicationScheduleScope;
+      const requiredScope = namesPreview(input.operationId)
+        ? mcpInitialScope
+        : namesPublication(input.operationId)
+          ? mcpPublicationPublishScope
+          : mcpPublicationScheduleScope;
+      let scopesEvaluated: ReadonlyArray<string> = [requiredScope];
       return base.executeScoped({
         principal,
         operation: "foundry.publication.status",
         auditInput: input,
         requiredScopes: [requiredScope],
+        successfulScopesEvaluated: () => scopesEvaluated,
         context,
         async run(execution) {
           const workspaceId = createContentWorkspaceId(
             input.workspaceId,
           );
+          if (namesPreview(input.operationId)) {
+            const scoped = await authorizedRevision(
+              principal,
+              workspaceId,
+              input.revision,
+              execution,
+            );
+            scopesEvaluated = [
+              requiredScope,
+              ...scoped.requiredDraftScopes,
+            ];
+            const review = await execution.run(() =>
+              runtime.loadPreviewReview({
+                principal,
+                previewId: input.operationId,
+              }),
+            );
+            if (
+              review === null ||
+              review.connectionId !== principal.connectionId ||
+              review.workspaceId !== workspaceId ||
+              review.revision !== input.revision
+            ) {
+              throw new McpReadError(
+                "OBJECT_NOT_FOUND",
+                "The requested object was not found.",
+              );
+            }
+            return createMcpPublicationResult(
+              review.previewId,
+              review.state,
+              false,
+              review,
+            );
+          }
           await revisionForSite(
             principal,
             workspaceId,

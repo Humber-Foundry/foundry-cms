@@ -6,6 +6,8 @@ import {
   type McpConnectionGrant,
   type McpConnectionSummary,
   type McpConnectionStore,
+  type ContentWorkspaceId,
+  type McpPreviewReview,
   type McpPublicationAuditEvent,
   type McpReadAuditEvent,
   type McpRegisteredClient,
@@ -164,7 +166,50 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
     recordPublicationInvocation(
       event: McpPublicationAuditEvent,
     ): Promise<void>;
+    findPreviewReview(input: {
+      connectionId: string;
+      siteId: SiteId;
+      previewId: string;
+    }): Promise<McpPreviewReview | null>;
   } = {
+    /**
+     * One prepared preview and the person's decision about it. A connection
+     * reads only a preview it prepared itself, so one agent can never see
+     * what a person said to another.
+     */
+    async findPreviewReview(input) {
+      const row = await database
+        .prepare(
+          `SELECT artifact.preview_id, artifact.workspace_id,
+                  artifact.revision, review.decision, review.approval_id,
+                  review.reason
+           FROM mcp_preview_artifacts AS artifact
+           LEFT JOIN mcp_preview_reviews AS review
+             ON review.preview_id = artifact.preview_id
+           WHERE artifact.preview_id = ?1
+             AND artifact.connection_id = ?2
+             AND artifact.site_id = ?3`,
+        )
+        .bind(input.previewId, input.connectionId, input.siteId)
+        .first<{
+          preview_id: string;
+          workspace_id: string;
+          revision: number;
+          decision: "approved" | "changes_requested" | null;
+          approval_id: string | null;
+          reason: string | null;
+        }>();
+      if (row === null) return null;
+      return {
+        previewId: row.preview_id,
+        connectionId: input.connectionId,
+        workspaceId: row.workspace_id as ContentWorkspaceId,
+        revision: row.revision,
+        state: row.decision ?? "pending_human_review",
+        approvalId: row.approval_id,
+        reviewNote: row.reason,
+      };
+    },
     async createAuthorizationGrant(input) {
       const scopes = input.scopes ?? [mcpInitialScope];
       if (
