@@ -1118,6 +1118,92 @@
   font-weight: 700;
 }
 
+.state-label-unsubscribed {
+  background: #eceef0;
+  color: #4a5157;
+}
+
+.state-label-suppressed {
+  background: #fbe4e1;
+  color: #96291b;
+}
+
+/* Subscribers -------------------------------------------------------------
+ *
+ * One row is one subscriber: the address, a state pill and the date they
+ * gave consent. The same two-size rule as every other dashboard table: body
+ * size for the address, small size for the column headings. */
+.subscriber-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.subscriber-table th,
+.subscriber-table td {
+  padding: 0.75rem 1rem 0.75rem 0;
+  border-bottom: 1px solid var(--dash-line);
+}
+
+.subscriber-table thead th {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+}
+
+@media (max-width: 40rem) {
+  .subscriber-table,
+  .subscriber-table thead,
+  .subscriber-table tbody,
+  .subscriber-table tr {
+    display: block;
+  }
+
+  .subscriber-table thead {
+    /* Column headings do not read as a row on a phone; each cell below
+       carries its own label instead. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .subscriber-table tr {
+    min-height: var(--dash-control-height);
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--dash-line);
+  }
+
+  .subscriber-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-bottom: 0;
+    word-break: break-word;
+  }
+
+  .subscriber-table td::before {
+    flex-shrink: 0;
+    color: var(--dash-ink-soft);
+    font-size: var(--dash-text-small);
+  }
+
+  .subscriber-table td:nth-child(1)::before {
+    content: "Email address";
+  }
+
+  .subscriber-table td:nth-child(2)::before {
+    content: "State";
+  }
+
+  .subscriber-table td:nth-child(3)::before {
+    content: "Consent date";
+  }
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

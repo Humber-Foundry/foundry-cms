@@ -81,6 +81,7 @@ const destinations = [
   ["Design", "/dash/design"],
   ["Messages", "/dash/forms"],
   ["Newsletter", "/dash/campaigns"],
+  ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
 ];

@@ -59,6 +59,11 @@ export const audienceDestinations: ReadonlyArray<DashboardDestination> = [
     description: "Write and send campaigns",
   },
   {
+    href: "/dash/subscribers",
+    label: "Subscribers",
+    description: "See who is on your list, and export it",
+  },
+  {
     href: "/dash/analytics",
     label: "Visitors",
     description: "See how the site is used",

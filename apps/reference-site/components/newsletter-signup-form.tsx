@@ -134,6 +134,10 @@ export function NewsletterSignupForm({
         widgetId.current = window.turnstile?.render(challenge.current, {
           sitekey: siteKey,
           action: newsletterSignupTurnstileAction,
+          // Flexible sizing fills the widget's container instead of the
+          // fixed 300px "normal" width, so it stays as wide as the field
+          // and button row it sits under rather than narrower than it.
+          size: "flexible",
           callback: (value: string) => {
             token.current = value;
           },

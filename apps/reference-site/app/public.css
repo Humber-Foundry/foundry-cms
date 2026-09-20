@@ -748,7 +748,14 @@
 }
 
 /* The automated-traffic check. It is empty until the widget draws itself, so
-   it takes its spacing only once it holds something. */
+   it takes its spacing only once it holds something. Its own width is set
+   to the full row, so the widget (rendered with Turnstile's "flexible"
+   size) is exactly as wide as the field-and-button row above it, never
+   narrower. */
+.newsletter-signup-check {
+  width: 100%;
+}
+
 .newsletter-signup-check:not(:empty) {
   margin-top: 1rem;
 }

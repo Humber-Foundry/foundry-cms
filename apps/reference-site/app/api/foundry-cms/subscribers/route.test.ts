@@ -98,6 +98,63 @@ describe("subscriber ledger endpoint", () => {
     expect(mocks.exportLedger).toHaveBeenCalledWith({ actor: identity });
   });
 
+  it("downloads the subscriber list as an audited CSV", async () => {
+    mocks.exportLedger.mockResolvedValue({
+      schemaVersion: 1,
+      siteId: "site_reference",
+      exportedAt: "2026-07-27T18:00:00.000Z",
+      subscribers: [
+        {
+          id: "subscriber-1",
+          siteId: "site_reference",
+          identityKey: "a".repeat(64),
+          email: "person@example.com",
+          state: "active",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      events: [],
+    });
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/subscribers?format=csv",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("content-disposition")).toContain(
+      "subscribers.csv",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const body = await response.text();
+    expect(body).toContain("Email address,State,Consent date");
+    expect(body).toContain("person@example.com,Confirmed");
+    // The export goes through the same Owner-only, audited query the table
+    // uses — the CSV that reaches an Editor's request refuses exactly like
+    // that query does, with no separate unaudited path.
+    expect(mocks.exportLedger).toHaveBeenCalledWith({ actor: identity });
+  });
+
+  it("refuses the CSV export when the human is unauthorized", async () => {
+    mocks.exportLedger.mockRejectedValueOnce(
+      new AccessDeniedError("capability_not_authorized"),
+    );
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/subscribers?format=csv",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "not_authorized",
+    });
+  });
+
   it("does not expose identities when the human is unauthorized", async () => {
     mocks.listIdentities.mockRejectedValueOnce(
       new AccessDeniedError("capability_not_authorized"),

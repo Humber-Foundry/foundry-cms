@@ -9,6 +9,11 @@ import {
 } from "@humber-foundry/application";
 
 import {
+  countSubscribersByDisplayState,
+  type SubscriberStateCounts,
+} from "./subscriber-display";
+
+import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanAccessRequestContext,
   loadHumanIdentityRequestContext,
@@ -111,6 +116,21 @@ export async function loadSubscriberLedgerRequestContext(
     humanContext: await loadHumanAccessRequestContext(requestHeaders),
     ...dependencies,
   });
+}
+
+/**
+ * How many subscribers are in each display state, with no actor and no
+ * identity in the answer. This is what an Editor or an MCP client sees on the
+ * Subscribers screen: it reads the same ledger `listIdentities` reads, but it
+ * can never return an address, so it never needs an authorization check or a
+ * sensitive-access audit record.
+ */
+export async function loadSubscriberStateCounts(): Promise<SubscriberStateCounts> {
+  const { store } = await loadDependencies();
+  const subscribers = await store.listSubscribers(
+    installedSite.application.siteId,
+  );
+  return countSubscribersByDisplayState(subscribers);
 }
 
 export { loadHumanIdentityRequestContext };

@@ -26,6 +26,7 @@ import {
   recordedHumanMutationResult,
 } from "../../../../src/human-mutation-protocol";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
+import { subscribersToCsv } from "../../../../src/subscriber-csv";
 import {
   authorizeSubscriberLedgerIdentity,
   loadHumanIdentityRequestContext,
@@ -153,6 +154,22 @@ export async function GET(request: Request) {
         headers: {
           "content-disposition":
             'attachment; filename="foundry-subscriber-ledger.json"',
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (format === "csv") {
+      // exportLedger is the same Owner-only, audited query the Subscribers
+      // screen's table reads through listIdentities — the CSV a person
+      // downloads and the table they read on screen can never disagree, and
+      // an Editor's request fails here exactly as it fails for that screen.
+      const ledger = await context.application.queries.exportLedger({
+        actor: context.identity,
+      });
+      return new Response(subscribersToCsv(ledger.subscribers), {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": 'attachment; filename="subscribers.csv"',
           "cache-control": "private, no-store",
         },
       });
