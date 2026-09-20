@@ -197,6 +197,27 @@ describe("Delete", () => {
     expect(button.disabled).toBe(true);
   });
 
+  it("explains why the home page cannot be deleted", () => {
+    const host = mount([homeRow]);
+    const trigger = host.querySelector<HTMLButtonElement>(
+      '.help-tip-trigger[aria-label="Why can\'t I delete the home page?"]',
+    );
+    expect(trigger).not.toBeNull();
+    flushSync(() => trigger!.click());
+    const panel = host.querySelector(".help-tip-panel");
+    expect(panel?.textContent).toContain("The home page cannot be deleted");
+  });
+
+  it("shows no such explanation next to a page that can be deleted", () => {
+    const host = mount([homeRow, publishedRow]);
+    const trigger = host.querySelector(
+      '.help-tip-trigger[aria-label="Why can\'t I delete the home page?"]',
+    );
+    expect(trigger).not.toBeNull();
+    // Only one HelpTip: the home row's, not the deletable row's.
+    expect(host.querySelectorAll(".help-tip-trigger").length).toBe(1);
+  });
+
   it("names every link that must change first, and offers to open each one", () => {
     const host = mount([homeRow, linkedRow]);
     press(host, "Delete Contact");

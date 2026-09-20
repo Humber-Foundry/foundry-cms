@@ -1,13 +1,17 @@
 import type { NewsletterDeliveryHealth } from "@humber-foundry/application";
 
+import {
+  isLongEnoughSecret,
+  isNonEmptyJsonObject,
+  isPresent,
+} from "./settings-presence";
 import type { HumanAccessEnvironment } from "./human-access-configuration";
 
 /**
  * The document that tells an installer how to connect email delivery. The
  * readiness result carries this path so every screen points at one guide.
  */
-export const campaignDeliverySetupGuide =
-  "docs/operations/brevo-test-delivery-readiness.md";
+export { emailDeliverySetupGuide as campaignDeliverySetupGuide } from "./settings-presence";
 
 /**
  * How one installation's email delivery is connected.
@@ -108,10 +112,6 @@ export const campaignSenderSettingNames = Object.freeze([
 export type CampaignSenderSettingName =
   (typeof campaignSenderSettingNames)[number];
 
-function isPresent(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
-}
-
 /**
  * An address a reader can open from inside an email. It must be absolute and
  * `https://`, and must carry no username or password, because the footer is
@@ -169,33 +169,6 @@ export function listMissingCampaignSenderSettings(
     campaignSenderSettingNames.filter(
       (name) => !campaignSenderSettingChecks[name](environment),
     ),
-  );
-}
-
-/**
- * A secret is long enough when it holds at least 32 characters. The readers in
- * `human-access-configuration.ts` measure the untrimmed value, so this check
- * measures it the same way. A different rule here would report a setting as
- * installed that the reader then rejects.
- */
-function isLongEnoughSecret(value: string | undefined): boolean {
-  return isPresent(value) && value!.length >= 32;
-}
-
-/** A JSON object with at least one entry, such as the sender mapping. */
-function isNonEmptyJsonObject(value: string | undefined): boolean {
-  if (!isPresent(value)) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value!);
-  } catch {
-    return false;
-  }
-  return (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    Object.keys(parsed).length > 0
   );
 }
 

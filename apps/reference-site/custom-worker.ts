@@ -22,6 +22,10 @@ import {
   type PublicFormNotificationEnvironment,
 } from "./src/public-form-notification-runtime";
 import {
+  deliverNewsletterConfirmationsIfDue,
+  type NewsletterConfirmationEnvironment,
+} from "./src/newsletter-confirmation-runtime";
+import {
   runPublicFormBackupMaintenanceIfDue,
   runPublicFormRetentionMaintenanceIfDue,
   type PublicFormPrivacyEnvironment,
@@ -68,9 +72,15 @@ async function runScheduledWork(
   environment: HumanAccessEnvironment &
     PublicFormNotificationEnvironment &
     PublicFormPrivacyEnvironment &
+    NewsletterConfirmationEnvironment &
     AnalyticsProjectionEnvironment,
 ) {
   await Promise.all([
+    deliverNewsletterConfirmationsIfDue(environment).catch(() => {
+      // Never log the request or the address. A failed run leaves the pending
+      // requests in place, and the next run picks them up.
+      console.error("scheduled_newsletter_confirmation_failed");
+    }),
     reconcileHumanAccessEligibilityIfDue(environment),
     runScheduledBlogPostPublications(environment).catch(() => {
       console.error("scheduled_blog_publication_failed");
@@ -154,6 +164,7 @@ export default {
     environment: HumanAccessEnvironment &
       PublicFormNotificationEnvironment &
       PublicFormPrivacyEnvironment &
+      NewsletterConfirmationEnvironment &
       AnalyticsProjectionEnvironment,
     context: ExecutionContext,
   ) {

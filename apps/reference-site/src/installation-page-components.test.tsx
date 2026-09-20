@@ -41,6 +41,7 @@ function registeredComponentFixture() {
     ["photoBand", "section_gathering"],
     ["connectorCards", "section_connectors"],
     ["invitationNewsletter", "section_invitation"],
+    ["newsletterSignup", "section_signup"],
   ].map(([type, id]) =>
     installedPageComponentRegistry.createDefault(type!, id!, {
       definition,

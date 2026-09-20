@@ -117,6 +117,17 @@
         ]
       },
       {
+        "id": "section_newsletter",
+        "type": "registered",
+        "component": "newsletterSignup",
+        "props": {
+          "title": "Get the newsletter",
+          "body": "A short note every month or so about the work and what we learned from it.",
+          "actionLabel": "Sign up",
+          "consentNote": "We send you the newsletter and nothing else. Unsubscribe from any message."
+        }
+      },
+      {
         "id": "section_contact",
         "type": "callToAction",
         "variant": "moss",

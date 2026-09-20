@@ -21,6 +21,7 @@ import {
   type PageComponentRenderer,
 } from "./page-component-renderers";
 import { AttentionNotes } from "../components/attention-notes";
+import { NewsletterSignupForm } from "../components/newsletter-signup-form";
 
 export const imageCopyStoryComponent = createRegisteredPageComponent({
   type: "imageCopyStory",
@@ -88,6 +89,43 @@ export const invitationNewsletterComponent = createRegisteredPageComponent({
     actionLabel: { control: "text", label: "Action label", defaultValue: "Join the list" },
     actionHref: { control: "url", label: "Action URL", defaultValue: "mailto:hello@example.com" },
     note: { control: "text", label: "Privacy note", defaultValue: "A thoughtful note now and then. Unsubscribe anytime." },
+  },
+});
+
+/**
+ * The newsletter signup block a site owner can put on any page.
+ *
+ * The owner writes the words. The address field, the automated-traffic check
+ * and the confirmation step are fixed, because they are what makes the signup
+ * lawful. `consentNote` is the sentence the person agrees to, and it is stored
+ * with their consent record, so changing it is a real change.
+ */
+export const newsletterSignupComponent = createRegisteredPageComponent({
+  type: "newsletterSignup",
+  label: "Newsletter signup",
+  fields: {
+    title: {
+      control: "text",
+      label: "Title",
+      defaultValue: "Get the newsletter",
+    },
+    body: {
+      control: "textarea",
+      label: "Body",
+      defaultValue:
+        "A short note every month or so about the work and what we learned from it.",
+    },
+    actionLabel: {
+      control: "text",
+      label: "Button label",
+      defaultValue: "Sign up",
+    },
+    consentNote: {
+      control: "text",
+      label: "Consent sentence",
+      defaultValue:
+        "We send you the newsletter and nothing else. Unsubscribe from any message.",
+    },
   },
 });
 
@@ -341,6 +379,25 @@ const installedRegistrations = Object.freeze([
           {props.actionLabel}
         </a>
         <small>{props.note}</small>
+      </section>
+    );
+  }),
+  installPageComponent(newsletterSignupComponent, ({ section, editingSurface }) => {
+    const props = registeredProps(newsletterSignupComponent, section);
+    return (
+      <section
+        className="newsletter-section"
+        id={section.id}
+        aria-labelledby={`${section.id}_title`}
+      >
+        <NewsletterSignupForm
+          title={props.title}
+          body={props.body}
+          actionLabel={props.actionLabel}
+          consentNote={props.consentNote}
+          titleId={`${section.id}_title`}
+          previewOnly={editingSurface === true}
+        />
       </section>
     );
   }),
