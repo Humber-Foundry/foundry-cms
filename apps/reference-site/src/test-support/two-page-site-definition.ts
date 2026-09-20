@@ -9,11 +9,11 @@ import {
 /**
  * A second-page test fixture.
  *
- * PR #188 (not merged when this ticket started) was expected to add a shared
- * `two-page-site-definition.ts` fixture. It has not landed yet, so this file
- * is a small fixture of its own, built the same way `public-page.test.ts`
- * already builds one: the reference definition's home page plus one more
- * page below it.
+ * The reference installation has one page, and creating a page is ticket #159,
+ * so every test that needs two pages builds them here: the reference
+ * definition's home page plus one more page below it. Ticket #157 reads it for
+ * the Pages list and the page switcher; ticket #162 reads it for per-page
+ * analytics and media.
  *
  * The second page carries its own section, so a test can prove a per-page
  * public subject id, and its own detail media occurrence, so a test can

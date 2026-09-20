@@ -131,6 +131,13 @@ async function main() {
         .click();
       await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
 
+      // Pages opens on the list of every page. Open the home page from it to
+      // reach the editor.
+      await page.locator(".pages-list-row").first().click();
+      await page.waitForURL(
+        /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u,
+      );
+
       if (viewport.name === "390") {
         await page.locator(".editor-mobile-menu").click();
       }
