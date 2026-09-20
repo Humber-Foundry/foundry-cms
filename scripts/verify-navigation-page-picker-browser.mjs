@@ -123,28 +123,12 @@ async function main() {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
 
-      // Each viewport reuses the one dev server, so the second pass finds the
-      // workspace the first pass already started.
+      // The dashboard creates the draft workspace on the server, so Overview
+      // links straight into the page editor.
       await page.goto(`${origin}/dash`);
-      const startWorkspace = page.getByRole("button", { name: "Start workspace" });
-      const continueEditing = page.getByRole("link", { name: "Continue editing" });
-      await Promise.race([
-        startWorkspace.waitFor({ state: "visible" }),
-        continueEditing.waitFor({ state: "visible" }),
-      ]);
-      if (await startWorkspace.isVisible()) {
-        await Promise.all([
-          page.waitForResponse(
-            (response) =>
-              response.request().method() === "POST" &&
-              new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
-              response.status() === 201,
-          ),
-          startWorkspace.click(),
-        ]);
-      } else {
-        await continueEditing.click();
-      }
+      await page
+        .getByRole("link", { name: /^(Start|Continue) editing$/u })
+        .click();
       await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
 
       if (viewport.name === "390") {
