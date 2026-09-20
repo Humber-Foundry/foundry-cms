@@ -8,9 +8,16 @@ import {
   createContentActorId,
   createContentWorkspaceId,
   type ArchivedBlogPostSummary,
+  type BlogPostOperationalSummary,
+  type BlogPostScheduleProposal,
   type ContentRevision,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+  type BlogPost,
+} from "@humber-foundry/site-definition";
 
 import { BlogPostControls } from "./blog-post-controls";
 
@@ -50,6 +57,64 @@ function stalledArchivedPost(): ArchivedBlogPostSummary {
     excerpt: "What the tides taught us.",
     archivedAt: null,
     archiveRequestId: "archive-request-0001",
+  };
+}
+
+const pendingPostId = createBlogPostId(
+  "00000000-0000-4000-8000-00000000f001",
+);
+
+function pendingSchedulePost(): BlogPost {
+  return {
+    id: pendingPostId,
+    revision: 1,
+    collectionState: "active",
+    targetVisibility: "public",
+    slug: "tide-notes",
+    title: "Tide notes",
+    excerpt: "What the tides taught us.",
+    seo: { title: "", description: "", keywords: [], shareImage: null },
+    mainImage: null,
+    body: createRichTextDocumentFromPlainText("What the tides taught us."),
+  };
+}
+
+function pendingScheduleProposal(): BlogPostScheduleProposal {
+  return {
+    id: "proposal-0001",
+    siteId: referenceSiteDefinition.site.id,
+    postId: pendingPostId,
+    workspaceId,
+    contentRevision: 4,
+    postRevisionId: "post-revision-1",
+    authorityVersion: 1,
+    localDateTime: "2026-10-01T09:00",
+    ianaTimeZone: "America/Vancouver",
+    utcOffsetChoice: "-07:00",
+    executeAtUtc: "2026-10-01T16:00:00.000Z",
+    timeZoneDatabaseVersion: "2026a",
+    createdBy: createContentActorId("mcp-connection-agent"),
+    proposalAuditId: "audit-0001",
+    createdAt: "2026-09-20T00:00:00.000Z",
+  };
+}
+
+function pendingScheduleSummary(): BlogPostOperationalSummary {
+  return {
+    siteId: referenceSiteDefinition.site.id,
+    postId: pendingPostId,
+    workspaceId,
+    contentRevision: 4,
+    postRevision: 1,
+    postRevisionId: "post-revision-1",
+    collectionState: "active",
+    workflowState: "editing",
+    liveRevisionId: null,
+    version: 1,
+    archiveRequestId: null,
+    activeSchedule: null,
+    latestExecution: null,
+    pendingScheduleProposal: pendingScheduleProposal(),
   };
 }
 
@@ -376,5 +441,137 @@ describe("blog post controls browser acceptance", () => {
     expect(buttonLabels).not.toContain("Preview the site without this post ↗");
     expect(buttonLabels).not.toContain("Confirm and continue archiving");
     expect(buttonLabels).not.toContain("Recover access");
+  });
+
+  /**
+   * Issue #222: neither the site-publish notice nor a pending schedule
+   * request may put a button inside the sentence of text — the button
+   * belongs in its own row or action group. This post's `targetVisibility`
+   * is "public" but is not yet in `verifiedPublicPostIds`, which is exactly
+   * the state `blogHasPendingSitePublish` reports as pending, and it also
+   * carries a pending schedule proposal, so both banners render together.
+   */
+  function renderWithPendingSchedule() {
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    flushSync(() => {
+      root!.render(
+        createElement(BlogPostControls, {
+          revision: {
+            ...revision,
+            definition: {
+              ...revision.definition,
+              blog: {
+                ...revision.definition.blog,
+                posts: [pendingSchedulePost()],
+              },
+            },
+          },
+          csrfToken: "csrf-token",
+          siteImages: [],
+          verifiedPublicPostIds: [],
+          postSummaries: new Map([[pendingPostId, pendingScheduleSummary()]]),
+          archivedPosts: [],
+          pendingScheduleRequestAgentNames: new Map([
+            [pendingPostId, "Draft Assistant"],
+          ]),
+        }),
+      );
+    });
+    return host;
+  }
+
+  it("never nests the site-publish or decline button inside a sentence of text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
+        return Response.json({});
+      },
+    );
+
+    renderWithPendingSchedule();
+
+    await expect
+      .element(
+        page.getByText(
+          "A post here is marked for the next site publish and is not live until then.",
+        ),
+      )
+      .toBeInTheDocument();
+    const publishLink = document.querySelector<HTMLAnchorElement>(
+      'a[href="/dash/pages"]',
+    );
+    expect(publishLink?.textContent).toBe("Publish the site");
+    // The button sits in its own row, never inside the sentence's <p>.
+    expect(publishLink?.closest("p")).toBeNull();
+
+    await expect
+      .element(
+        page.getByText(
+          /Draft Assistant asked to publish this at/u,
+        ),
+      )
+      .toBeInTheDocument();
+    const declineButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Decline");
+    expect(declineButton).toBeDefined();
+    // The Decline button sits in the post's action row next to Edit and
+    // Preview, never inside the sentence's <p>.
+    expect(declineButton!.closest("p")).toBeNull();
+    expect(declineButton!.closest(".post-list-actions")).not.toBeNull();
+    // No paragraph anywhere in the Blog list carries a button as a child —
+    // the owner's rule for every screen this ticket covers.
+    expect(document.querySelectorAll("p button")).toHaveLength(0);
+  });
+
+  it("declines the pending schedule request from its action-row button", async () => {
+    const submitted: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
+        submitted.push({ url, body: String(init?.body) });
+        // A non-2xx result is enough to check the request the button sent
+        // without triggering the success path's page navigation, which the
+        // browser test environment cannot follow.
+        return Response.json(
+          { error: "archive_request_not_found" },
+          { status: 422 },
+        );
+      },
+    );
+
+    renderWithPendingSchedule();
+
+    await userEvent.click(page.getByRole("button", { name: "Decline" }));
+
+    await waitFor(() => submitted.length > 0);
+    expect(submitted[0]!.url).toBe("/api/foundry-cms/blog-operations");
+    expect(JSON.parse(submitted[0]!.body)).toMatchObject({
+      operation: "decline_schedule_proposal",
+      postId: pendingPostId,
+      proposalId: "proposal-0001",
+    });
   });
 });
