@@ -205,6 +205,15 @@ export function pagePath(page: SitePage): `/${string}` {
 }
 
 /**
+ * The name an owner reads for a page: its own title, or its path when the
+ * title is left blank. Used wherever a page is named in place of its
+ * internal id — a review summary, the Visitors report.
+ */
+export function pageDisplayTitle(page: SitePage): string {
+  return page.title.trim() === "" ? pagePath(page) : page.title;
+}
+
+/**
  * The metadata one page emits, after every blank field has its fallback.
  *
  * On the home page the title falls back to the site name alone, with no page

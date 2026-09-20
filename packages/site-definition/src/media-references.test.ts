@@ -122,6 +122,38 @@ describe("siteDefinitionMediaAssetIds", () => {
     expect([...siteDefinitionMediaAssetIds(definition)]).toContain("asset_hero");
   });
 
+  it("collects an occurrence asset placed on a page below the home page", () => {
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      pages: [
+        homePage(referenceSiteDefinition),
+        {
+          id: "page_about",
+          slug: "about",
+          title: "About",
+          seo: { title: "", description: "", keywords: [], shareImage: null },
+          media: [
+            {
+              occurrenceId: "occurrence_page_about_detail",
+              revision: 1,
+              asset: {
+                assetId: "asset_about_detail",
+                width: 800,
+                height: 600,
+                contentType: "image/jpeg",
+              },
+              crop: null,
+            },
+          ],
+          sections: [],
+        },
+      ],
+    };
+    expect([...siteDefinitionMediaAssetIds(definition)]).toContain(
+      "asset_about_detail",
+    );
+  });
+
   it("collects assets referenced by page-component image fields", () => {
     const definition = withSections([
       {

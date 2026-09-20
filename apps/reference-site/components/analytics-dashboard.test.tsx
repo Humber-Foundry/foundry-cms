@@ -77,6 +77,7 @@ function dashboard(
       sources: [],
     },
     content: { ...envelope, items: [] },
+    contentTitles: {},
     forms: { ...envelope, items: [] },
     audience: { ...envelope, metrics: [] },
     campaigns: { ...envelope, items: [] },
@@ -191,6 +192,59 @@ describe("the analytics panel", () => {
     expect(oneSource).not.toContain("analytics-note");
     expect(twoSources).toContain("analytics-note");
     expect(twoSources).toContain("other_web");
+  });
+
+  it("shows a page's title in Content, never its internal id", () => {
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          content: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range,
+            items: [
+              {
+                subjectId: "page_about",
+                readings: [
+                  reading({ subjectType: "content", subjectId: "page_about" }),
+                ],
+                vitals: [],
+              },
+            ],
+          },
+          contentTitles: { page_about: "About" },
+        })}
+      />,
+    );
+
+    expect(markup).toContain("<h4>About</h4>");
+    expect(markup).not.toContain("page_about</h4>");
+  });
+
+  it("falls back to the id when a content subject has no known title", () => {
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          content: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range,
+            items: [
+              {
+                subjectId: "page_gone",
+                readings: [
+                  reading({ subjectType: "content", subjectId: "page_gone" }),
+                ],
+                vitals: [],
+              },
+            ],
+          },
+          contentTitles: {},
+        })}
+      />,
+    );
+
+    expect(markup).toContain("<h4>page_gone</h4>");
   });
 
   it("states the retention windows beside the numbers", () => {

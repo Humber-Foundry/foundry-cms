@@ -13,6 +13,10 @@ import {
   type AnalyticsRangeRequest,
   type ExternalHumanIdentity,
 } from "@humber-foundry/application";
+import {
+  pageDisplayTitle,
+  type SiteDefinition,
+} from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 
@@ -121,11 +125,32 @@ export async function createAnalyticsDashboardContext(
 export type AnalyticsDashboardData = Readonly<{
   overview: AnalyticsOverviewView;
   content: AnalyticsContentView;
+  /**
+   * The page or blog post title an owner reads for one content subject id.
+   * The Content section shows this in place of the internal id. A subject
+   * with no known title (a removed page, a tombstoned post) is left out, and
+   * the id is shown as a last resort.
+   */
+  contentTitles: Readonly<Record<string, string>>;
   forms: AnalyticsFormsView;
   audience: AnalyticsAudienceView;
   campaigns: AnalyticsCampaignsView;
   health: AnalyticsHealthView;
 }>;
+
+/** The page and blog post title for every content id the site currently has. */
+function contentTitlesFor(
+  definition: SiteDefinition,
+): Readonly<Record<string, string>> {
+  const titles: Record<string, string> = {};
+  for (const page of definition.pages) {
+    titles[page.id] = pageDisplayTitle(page);
+  }
+  for (const post of definition.blog.posts) {
+    titles[post.id] = post.title;
+  }
+  return titles;
+}
 
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
@@ -146,7 +171,15 @@ export async function loadAnalyticsDashboard(
         application.queries.campaigns({ actor, range, limit: 10 }),
         application.queries.health({ actor, range }),
       ]);
-    return { overview, content, forms, audience, campaigns, health };
+    return {
+      overview,
+      content,
+      contentTitles: contentTitlesFor(installedSiteDefinition),
+      forms,
+      audience,
+      campaigns,
+      health,
+    };
   } catch (error) {
     if (isContractFailure(error)) throw error;
     // A site that has no analytics tables yet still renders the rest of the

@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { AnalyticsPrivacyViolationError } from "@humber-foundry/application";
+import {
+  homePage,
+  pageDisplayTitle,
+} from "@humber-foundry/site-definition";
 
 import {
   AnalyticsDashboardError,
@@ -11,6 +15,7 @@ import {
   defaultReportingTimeZone,
   loadAnalyticsDashboard,
 } from "./analytics-dashboard-runtime";
+import { installedSiteDefinition } from "../foundry/site-definition";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
 
 function unauthorizedContext(): HumanAccessRequestContext {
@@ -32,6 +37,47 @@ function contextThatFailsWith(
   return (async () => {
     throw failure;
   }) as unknown as typeof createAnalyticsDashboardContext;
+}
+
+const emptyEnvelope = {
+  schemaVersion: "foundry.analytics.v1" as const,
+  siteId: installedSiteDefinition.site.id,
+  range: {
+    timeZone: defaultReportingTimeZone,
+    fromLocalDate: "2026-06-06",
+    toLocalDate: "2026-07-03",
+    startUtc: "2026-06-06T07:00:00.000Z",
+    endUtc: "2026-07-04T07:00:00.000Z",
+    granularity: "day" as const,
+    containsIncompleteBucket: false,
+    clampedToRetention: false,
+  },
+};
+
+/** Stands in for the query application, succeeding with empty views. */
+function contextThatSucceeds(): typeof createAnalyticsDashboardContext {
+  return (async () => ({
+    queries: {
+      overview: async () => ({
+        ...emptyEnvelope,
+        metrics: [],
+        referrers: [],
+        comparison: null,
+        sources: [],
+      }),
+      content: async () => ({ ...emptyEnvelope, items: [] }),
+      forms: async () => ({ ...emptyEnvelope, items: [] }),
+      audience: async () => ({ ...emptyEnvelope, metrics: [] }),
+      campaigns: async () => ({ ...emptyEnvelope, items: [] }),
+      health: async () => ({
+        ...emptyEnvelope,
+        sources: [],
+        retention: { aggregateFactMonths: 25 },
+        earliestFactInstant: null,
+        disagreements: [],
+      }),
+    },
+  })) as unknown as typeof createAnalyticsDashboardContext;
 }
 
 describe("the default reporting range", () => {
@@ -75,6 +121,20 @@ describe("loading the dashboard", () => {
         ),
       ),
     ).rejects.toThrow(AnalyticsPrivacyViolationError);
+  });
+
+  it("names every page's title by its content id, for the Content section", async () => {
+    const data = await loadAnalyticsDashboard(
+      authorizedContext(),
+      () => "2026-07-03T00:00:00.000Z",
+      contextThatSucceeds(),
+    );
+
+    const home = homePage(installedSiteDefinition);
+    expect(data?.contentTitles[home.id]).toBe(pageDisplayTitle(home));
+    // The stored fact shape stays an aggregate: this map holds a title
+    // string keyed by a public content id, never a visitor or session field.
+    expect(Object.keys(data ?? {})).not.toContain("visitorId");
   });
 
   it("propagates AnalyticsVocabularyError to the Next.js error boundary", async () => {
