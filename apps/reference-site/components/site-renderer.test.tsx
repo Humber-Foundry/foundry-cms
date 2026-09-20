@@ -6,9 +6,12 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   homePage,
+  isBaseSiteDefinition,
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
+  type SiteHref,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 
 import { SiteRenderer, SiteSection } from "./site-renderer";
@@ -169,9 +172,10 @@ describe("SiteRenderer controlled design projection", () => {
       />,
     );
 
-    expect(home).toContain(
-      'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#section_services"',
-    );
+    // The preview shows the home page, so its own anchors jump within the
+    // page it is already on instead of reloading the preview address. See
+    // ADR-0022.
+    expect(home).toContain('href="#section_services"');
     expect(home).toContain(
       'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#blog_index_title"',
     );
@@ -335,5 +339,107 @@ describe("site renderer media placement", () => {
       'data-media-occurrence="occurrence_home_hero"',
     );
     expect(duplicateMarkup).not.toContain("data-media-occurrence");
+  });
+});
+
+/**
+ * The reference definition, plus a second page. The published reference
+ * content keeps its one page; this fixture adds a second page so a hero or
+ * call-to-action button's link to it can be proven.
+ */
+function withSecondPage(): SiteDefinition {
+  const home = homePage(referenceSiteDefinition);
+  const about: SitePage = {
+    id: "page_about",
+    slug: "about",
+    title: "About",
+    seo: { title: "", description: "", keywords: [], shareImage: null },
+    sections: [],
+  };
+  return { ...referenceSiteDefinition, pages: [home, about] };
+}
+
+describe("hero and call-to-action buttons render every SiteHref, not only #anchor and mailto:", () => {
+  it("resolves a hero button's page: link to the target page's path", () => {
+    const definition = withSecondPage();
+    const home = homePage(definition);
+    const hero = home.sections.find((section) => section.type === "hero");
+    if (hero?.type !== "hero") throw new Error("expected_home_hero");
+    const withPageLink: SiteDefinition = {
+      ...definition,
+      pages: [
+        {
+          ...home,
+          sections: home.sections.map((section) =>
+            section.id === hero.id
+              ? { ...hero, primaryAction: { ...hero.primaryAction, href: "page:page_about" as SiteHref } }
+              : section,
+          ),
+        },
+        definition.pages[1]!,
+      ],
+    };
+
+    const markup = renderToStaticMarkup(
+      <SiteRenderer definition={withPageLink} page={homePage(withPageLink)} />,
+    );
+
+    expect(markup).toContain(`href="/about"`);
+  });
+
+  it("resolves a call-to-action button's page: link to the target page's path", () => {
+    const definition = withSecondPage();
+    const home = homePage(definition);
+    const cta = home.sections.find((section) => section.type === "callToAction");
+    if (cta?.type !== "callToAction") throw new Error("expected_home_cta");
+    const withPageLink: SiteDefinition = {
+      ...definition,
+      pages: [
+        {
+          ...home,
+          sections: home.sections.map((section) =>
+            section.id === cta.id
+              ? { ...cta, action: { ...cta.action, href: "page:page_about" as SiteHref } }
+              : section,
+          ),
+        },
+        definition.pages[1]!,
+      ],
+    };
+
+    const markup = renderToStaticMarkup(
+      <SiteRenderer definition={withPageLink} page={homePage(withPageLink)} />,
+    );
+
+    expect(markup).toContain(`href="/about"`);
+  });
+
+  it("refuses a hero or call-to-action link to a page id that does not exist", () => {
+    const definition = withSecondPage();
+    const home = homePage(definition);
+    const hero = home.sections.find((section) => section.type === "hero");
+    if (hero?.type !== "hero") throw new Error("expected_home_hero");
+    const withDanglingLink: SiteDefinition = {
+      ...definition,
+      pages: [
+        {
+          ...home,
+          sections: home.sections.map((section) =>
+            section.id === hero.id
+              ? {
+                  ...hero,
+                  secondaryAction: {
+                    ...hero.secondaryAction,
+                    href: "page:page_missing" as SiteHref,
+                  },
+                }
+              : section,
+          ),
+        },
+        definition.pages[1]!,
+      ],
+    };
+
+    expect(isBaseSiteDefinition(withDanglingLink)).toBe(false);
   });
 });

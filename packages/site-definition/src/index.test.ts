@@ -547,10 +547,15 @@ describe("reference Site Definition", () => {
           value:
             "An executable Foundry CMS reference installation, built for client ownership.",
         }),
+        // A navigation item's link is editable through the page picker
+        // (#155), alongside its label. See ADR-0022.
+        expect.objectContaining({
+          path: "nav_work.href",
+          value: "#section_services",
+        }),
       ]),
     );
     expect(fields.some((field) => field.path.endsWith(".id"))).toBe(false);
-    expect(fields.some((field) => field.path.endsWith(".href"))).toBe(false);
   });
 
   it("labels each Page field with the section card it belongs to", () => {

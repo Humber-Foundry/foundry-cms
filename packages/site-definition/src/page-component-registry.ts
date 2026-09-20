@@ -5,6 +5,7 @@ import type {
 } from "./index";
 import { isBaseSiteDefinition } from "./index";
 import { homePage } from "./pages";
+import { parseSiteHref } from "./site-href";
 import { designContract } from "./design-tokens";
 import {
   RICH_TEXT_VERSION,
@@ -226,12 +227,24 @@ function validateField(
   if (field.control === "image" && !validateSafeImage(value)) {
     errors[path] = "Use a safe site image path or HTTPS image URL.";
   } else if (
-    (field.control === "url" || field.control === "siteHref") &&
+    // A "siteHref" field — a hero or call-to-action button's link — accepts
+    // every `SiteHref` form `parseSiteHref` recognizes: #anchor, mailto:,
+    // page:<id>, page:<id>#<anchor>, and blog. This is the same widened set
+    // $defs/href accepts (ADR-0022); whether a `page:` id names a real page
+    // is checked separately by `isBaseSiteDefinition`, the same as it is for
+    // navigation. A "url" field is a different, narrower control — an
+    // installation-registered component's own link, which stays #anchor,
+    // mailto:, or an HTTPS address.
+    field.control === "siteHref" &&
+    parseSiteHref(value).kind === "unrecognized"
+  ) {
+    errors[path] = "Use a safe page, email, or HTTPS URL.";
+  } else if (
+    field.control === "url" &&
     !(
       /^#[a-z][a-z0-9_]*$/u.test(value) ||
       /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) ||
-      (field.control === "url" &&
-        /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s]*)?$/u.test(value))
+      /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s]*)?$/u.test(value)
     )
   ) {
     errors[path] = "Use a safe page, email, or HTTPS URL.";
