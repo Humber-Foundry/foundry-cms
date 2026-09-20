@@ -496,6 +496,17 @@ commit, a Cloudflare deployment, an approval fingerprint) kept in "Published
 history" for support and developers, with one help tip on the section
 explaining what each is for.
 
+**App / Connected app** — The dashboard's word for what this glossary calls
+an **MCP agent**. The dashboard says "an app", "the app that made this
+draft", or the app's own name; it never shows the words MCP, agent,
+connection id or actor id as page copy. When the connection record names no
+client, the dashboard says "A connected app".
+
+**Draft review** — The dashboard's word for the screen where a person
+answers a draft an app prepared (`/dash/review/<previewId>`). It carries two
+answers, Approve and Ask for changes. The preview id never appears as page
+copy.
+
 **Receipt** — The dashboard's word for a form submission's identifier. Kept
 as a word, with a help tip, because it is what a visitor or support quotes
 to find one exact message again.

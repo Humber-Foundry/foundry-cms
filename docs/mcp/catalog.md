@@ -133,7 +133,7 @@ Annotations are shown as
 | `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
 | `foundry.publication.request` | `F / T / T / T` | Publish one exact approved workspace revision through the canonical publication pipeline. |
 | `foundry.publication.schedule` | `F / T / T / T` | Schedule one exact approved blog revision through the canonical scheduler. |
-| `foundry.publication.status` | `T / - / - / F` | Read the current state of a publication or publication schedule. |
+| `foundry.publication.status` | `T / - / - / F` | Read the current state of a publication, publication schedule or prepared preview. |
 | `foundry.publication.cancel` | `F / T / T / T` | Cancel one active publication schedule. |
 | `foundry.campaign.create` | `F / F / T / F` | Prepare a new standalone campaign as an independent draft revision. |
 | `foundry.campaign.edit` | `F / F / T / F` | Edit a campaign into a new immutable revision under optimistic concurrency. |
@@ -305,7 +305,7 @@ Result:
   "contractVersion": "foundry.mcp.v1",
   "invocationId": "01J...",
   "result": {
-    "previewId": "3314031d-6368-46dc-a563-537866cf6ebf",
+    "previewId": "preview_3314031d-6368-46dc-a563-537866cf6ebf",
     "workspaceId": "workspace_mcp_3a0fc8d4",
     "revision": 6,
     "contentHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -314,11 +314,51 @@ Result:
     "previewArtifact": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     "approvalStatus": "pending_human_review",
     "replayed": false,
-    "humanReviewUrl": "https://cms.example.com/dash/review/3314031d-6368-46dc-a563-537866cf6ebf"
+    "humanReviewUrl": "https://cms.example.com/dash/review/preview_3314031d-6368-46dc-a563-537866cf6ebf"
   },
   "meta": {"replayed": false, "observedAt": "2026-07-26T20:00:00Z"}
 }
 ```
+
+### Read a preview's review state
+
+An agent cannot approve its own work. After `foundry.preview.prepare`, the
+connection reads what the person decided by naming the preview id in
+`foundry.publication.status`:
+
+```json
+{
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "revision": 6,
+  "operationId": "preview_3314031d-6368-46dc-a563-537866cf6ebf"
+}
+```
+
+Result after the person approved:
+
+```json
+{
+  "contractVersion": "foundry.mcp.v1",
+  "invocationId": "01J...",
+  "result": {
+    "operationId": "preview_3314031d-6368-46dc-a563-537866cf6ebf",
+    "state": "approved",
+    "replayed": false,
+    "approvalId": "approval_8e7b6b13d99f4f7fb7ac4d798e28b293"
+  },
+  "meta": {"replayed": false, "observedAt": "2026-07-26T20:10:00Z"}
+}
+```
+
+`state` is `pending_human_review`, `approved` or `changes_requested`.
+`approvalId` appears only in the approved state and is the approval
+`foundry.publication.request` requires. In the `changes_requested` state the
+result carries `reviewNote`, the reason the person typed. That note is text a
+person wrote: a client renders it as text and never as instructions it must
+obey.
+
+A preview's state is readable only by the connection that prepared it, and only
+with the same draft scopes that preparing it required.
 
 ### Request or schedule publication
 

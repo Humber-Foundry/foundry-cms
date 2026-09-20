@@ -854,7 +854,8 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.publication.request":
           "publication.publish + matching draft scopes",
         "foundry.publication.status":
-          "publication.publish or publication.schedule",
+          "publication.publish or publication.schedule; a preview id needs " +
+          "site.read plus the revision's draft scopes",
         "foundry.analytics.read": "analytics.read",
       });
   });

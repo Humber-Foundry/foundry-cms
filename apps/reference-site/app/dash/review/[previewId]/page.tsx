@@ -1,16 +1,15 @@
-import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
-import { AccessDeniedError } from "@humber-foundry/application";
-import { homePage } from "@humber-foundry/site-definition";
-
-import { AccessIdentityError } from "@/src/access-identity";
-import { HumanAccessConfigurationError } from "@/src/human-access-configuration";
-import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";
+import { PreviewReviewDecision } from "@/components/preview-review-decision";
+import {
+  PreviewReviewAnswer,
+  PreviewReviewSummary,
+} from "@/components/preview-review-summary";
+import {
+  loadMutationToken,
+  requireAuthorizedDashboardAccess,
+} from "@/src/dashboard-page-context";
 import { loadMcpPreviewForHuman } from "@/src/mcp-preview-review-runtime";
-import { createHumanMediaAccessToken } from "@/src/human-mutation-runtime";
-import { createRevisionPreviewCapability } from "@/src/preview-capability-runtime";
-
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -18,52 +17,53 @@ export const metadata = {
   title: "Draft review",
 };
 
+/**
+ * The screen where a person decides about a draft an app prepared.
+ *
+ * It only reads. Opening this page records nothing and approves nothing: the
+ * decision is a separate POST the person makes after they open the preview.
+ */
 export default async function McpPreviewReviewPage({
   params,
 }: {
   params: Promise<{ previewId: string }>;
 }) {
-  let access;
-  try {
-    access = await loadHumanAccessRequestContext(await headers());
-  } catch (error) {
-    if (
-      error instanceof AccessIdentityError ||
-      error instanceof AccessDeniedError ||
-      error instanceof HumanAccessConfigurationError
-    ) {
-      notFound();
-    }
-    throw error;
-  }
-  if (access.state !== "authorized") notFound();
+  const access = await requireAuthorizedDashboardAccess();
   const { previewId } = await params;
   const selected = await loadMcpPreviewForHuman({
     previewId,
     siteId: access.membership.siteId,
   });
   if (selected === null) notFound();
-  const { revision } = selected;
-  const capability = await createRevisionPreviewCapability({
-    identity: access.identity,
-    workspaceId: revision.workspaceId,
-    revision: revision.revision,
-  });
-  const media = await createHumanMediaAccessToken(
-    access.identity,
-    (homePage(revision.definition).media ?? []).map(
-      ({ asset }) => asset.assetId,
-    ),
-    new Date().toISOString(),
-  );
-  const query = new URLSearchParams({
-    capability,
-    bookmark: revision.bookmark,
-    accessToken: media.token,
-    previewId,
-  });
-  redirect(
-    `/__foundry/preview/${revision.workspaceId}/${revision.revision}` +
-      `?${query.toString()}`,
+  const { review } = selected;
+  const mutationToken = await loadMutationToken();
+
+  return (
+    <main className="dashboard-main" id="main">
+      <PreviewReviewSummary
+        agentName={review.agentName}
+        preparedAt={review.preparedAt}
+        summary={review}
+      />
+
+      <section className="panel" aria-labelledby="review-decision">
+        <h2 id="review-decision">Your answer</h2>
+        {review.decided === null ? (
+          <>
+            <p>
+              Approving does not publish this draft. It lets the app publish
+              this exact version, and nothing else.
+            </p>
+            <PreviewReviewDecision
+              previewId={review.previewId}
+              previewHref={`/dash/review/${encodeURIComponent(previewId)}/preview`}
+              mutationToken={mutationToken}
+            />
+          </>
+        ) : (
+          <PreviewReviewAnswer decided={review.decided} />
+        )}
+      </section>
+    </main>
   );
 }

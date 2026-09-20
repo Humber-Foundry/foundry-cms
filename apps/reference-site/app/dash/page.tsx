@@ -1,6 +1,10 @@
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
+  loadPreviewsWaitingForReview,
+  unnamedConnectedApp,
+} from "@/src/mcp-preview-review-runtime";
+import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
@@ -33,6 +37,9 @@ export default async function DashboardOverviewPage({
   );
   const mutationToken = await loadMutationToken();
   const messages = await loadMessagesAttention(access);
+  const previewsToReview = await loadPreviewsWaitingForReview({
+    siteId: access.membership.siteId,
+  });
 
   // The draft workspace always exists, so Overview reports the draft. It only
   // offers a fresh start when this draft can no longer accept changes.
@@ -90,13 +97,26 @@ export default async function DashboardOverviewPage({
 
       <section aria-labelledby="attention">
         <h2 id="attention">Needs attention</h2>
-        {messages.unreadCount === 0 && messages.heldForReview === 0 ? (
+        {messages.unreadCount === 0 &&
+        messages.heldForReview === 0 &&
+        previewsToReview.length === 0 ? (
           <p className="empty-state">
-            Nothing is waiting for you. New messages, and anything held as
-            spam, appear here.
+            Nothing is waiting for you. New messages, anything held as spam,
+            and drafts an app prepared for you appear here.
           </p>
         ) : (
           <ul className="attention-list">
+            {previewsToReview.map((preview) => (
+              <li key={preview.previewId}>
+                <a
+                  href={`/dash/review/${encodeURIComponent(preview.previewId)}`}
+                >
+                  {preview.agentName === unnamedConnectedApp
+                    ? "A draft waiting for your review"
+                    : `A draft from ${preview.agentName} waiting for your review`}
+                </a>
+              </li>
+            ))}
             {messages.unreadCount > 0 ? (
               <li>
                 <a href="/dash/forms">
