@@ -156,7 +156,7 @@ describe("scheduled blog post execution runtime", () => {
     );
     const revokedStore = {
       ...store,
-      async hasMcpScheduleAuthority() {
+      async hasMcpBlogOperationAuthority() {
         return false;
       },
     };

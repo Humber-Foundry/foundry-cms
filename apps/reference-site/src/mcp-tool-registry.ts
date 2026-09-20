@@ -13,10 +13,12 @@ import {
   mcpPublicationScheduleScope,
   type CampaignId,
   type McpAnalyticsView,
+  type McpBlogPostContent,
   type McpContentPatchOperation,
   type McpConnectionPrincipal,
   type McpExecutionContext,
   type createMcpAnalyticsApplication,
+  type createMcpBlogApplication,
   type createMcpCampaignApplication,
   type createMcpDraftApplication,
   type createMcpPublicationApplication,
@@ -45,6 +47,7 @@ import { hasExactKeys, isRecord } from "./mcp-http-support";
 export type McpReadApplication = ReturnType<
   typeof createMcpReadApplication
 > &
+  Partial<ReturnType<typeof createMcpBlogApplication>> &
   Partial<ReturnType<typeof createMcpDraftApplication>> &
   Partial<ReturnType<typeof createMcpPublicationApplication>> &
   Partial<ReturnType<typeof createMcpCampaignApplication>> &
@@ -201,6 +204,8 @@ const publishAtSchema = {
   pattern:
     "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$",
 } as const;
+
+const publishAtShape = new RegExp(publishAtSchema.pattern, "u");
 
 const scheduleIdPattern =
   "schedule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -443,6 +448,63 @@ const pageMutationResult = {
   },
   required: [...draftMutationResult.required, "pageId", "previewArtifact"],
 } as const;
+/**
+ * What an agent writes into one blog post. It is the Site Definition's own
+ * blog post shape, minus the three fields the blog owns rather than the
+ * writer: the post's id, its revision number and whether it is on the site. A
+ * post's tags are `seo.keywords`, which is where the blog keeps them.
+ *
+ * Every picture in a post has to be one of this site's own photos. That is
+ * the draft's answer, not the schema's, so the refusal names the address it
+ * turned down. See ADR-0036.
+ */
+const blogPostContentSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    slug: siteDefinitionSchema.$defs.blogPost.properties.slug,
+    title: { $ref: "#/$defs/text" },
+    excerpt: { $ref: "#/$defs/text" },
+    seo: { $ref: "#/$defs/seoMetadata" },
+    mainImage: siteDefinitionSchema.$defs.blogPost.properties.mainImage,
+    body: { $ref: "#/$defs/richTextDocument" },
+  },
+  required: ["slug", "title", "excerpt", "seo", "mainImage", "body"],
+} as const;
+
+const blogPostIdSchema = siteDefinitionSchema.$defs.blogPost.properties.id;
+
+const blogPostIdShape = new RegExp(blogPostIdSchema.pattern, "u");
+
+function isBlogPostId(value: unknown): value is string {
+  return typeof value === "string" && blogPostIdShape.test(value);
+}
+
+/**
+ * What a blog post write gives back: the draft mutation result with the post
+ * the write acted on.
+ */
+const blogPostMutationResult = {
+  ...draftMutationResult,
+  properties: {
+    ...draftMutationResult.properties,
+    postId: blogPostIdSchema,
+    previewArtifact: { type: "string", pattern: "^[0-9a-f]{64}$" },
+  },
+  required: [...draftMutationResult.required, "postId", "previewArtifact"],
+} as const;
+
+/** What a blog command outside the draft takes: one post and one retry key. */
+const blogPostCommandInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    postId: blogPostIdSchema,
+    idempotencyKey: idempotencyKeySchema,
+  },
+  required: ["postId", "idempotencyKey"],
+} as const;
+
 const canonicalDefinitionResult = {
   type: "object",
   additionalProperties: false,
@@ -618,6 +680,92 @@ function parsePatchInput(input: unknown) {
  * names the fields this particular operation adds, so a key that belongs to
  * another page tool is rejected rather than ignored.
  */
+/**
+ * Read one blog post's content, or answer `null`.
+ *
+ * The exact field set is the Site Definition's own blog post shape. Whether
+ * the pictures it names are this site's photos, and whether the rich text is
+ * canonical, are the draft's answers, so they are checked there and refused
+ * with a named reason.
+ */
+function parseBlogPostContent(value: unknown): McpBlogPostContent | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "slug",
+      "title",
+      "excerpt",
+      "seo",
+      "mainImage",
+      "body",
+    ]) ||
+    typeof value.slug !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.excerpt !== "string" ||
+    !isRecord(value.seo) ||
+    !isRecord(value.body) ||
+    (value.mainImage !== null && !isRecord(value.mainImage))
+  ) {
+    return null;
+  }
+  return value as unknown as McpBlogPostContent;
+}
+
+function parseCreateBlogPostInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["post"]);
+  if (common === null || !isRecord(input)) return null;
+  const post = parseBlogPostContent(input.post);
+  return post === null ? null : { ...common, post };
+}
+
+function parseUpdateBlogPostInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["postId", "post"]);
+  if (common === null || !isRecord(input) || !isBlogPostId(input.postId)) {
+    return null;
+  }
+  const post = parseBlogPostContent(input.post);
+  return post === null ? null : { ...common, postId: input.postId, post };
+}
+
+function parseBlogPostCommandInput(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, ["postId", "idempotencyKey"]) ||
+    !isBlogPostId(input.postId) ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  return { postId: input.postId, idempotencyKey: input.idempotencyKey };
+}
+
+function parseBlogScheduleRequestInput(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, [
+      "postId",
+      "publishAt",
+      "reportingTimeZone",
+      "idempotencyKey",
+    ]) ||
+    !isBlogPostId(input.postId) ||
+    typeof input.publishAt !== "string" ||
+    !publishAtShape.test(input.publishAt) ||
+    typeof input.reportingTimeZone !== "string" ||
+    input.reportingTimeZone.length < 1 ||
+    input.reportingTimeZone.length > 100 ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  return {
+    postId: input.postId,
+    publishAt: input.publishAt,
+    reportingTimeZone: input.reportingTimeZone,
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
 function parsePageMutationInput(
   input: unknown,
   extraKeys: ReadonlyArray<string>,
@@ -1837,6 +1985,153 @@ const descriptors = {
     annotations: mutationAnnotations,
     execution: taskExecution,
   },
+  "foundry.blog.create": {
+    name: "foundry.blog.create",
+    description:
+      "Start a new blog post in the draft, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        post: blogPostContentSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "post",
+      ],
+      $defs: siteDefinitionSchema.$defs,
+    },
+    outputSchema: toolOutputSchema(blogPostMutationResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.blog.update": {
+    name: "foundry.blog.update",
+    description:
+      "Rewrite one blog post in the draft, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        postId: blogPostIdSchema,
+        post: blogPostContentSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "postId",
+        "post",
+      ],
+      $defs: siteDefinitionSchema.$defs,
+    },
+    outputSchema: toolOutputSchema(blogPostMutationResult),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.blog.archive": {
+    name: "foundry.blog.archive",
+    description:
+      "Take one post out of the blog. A post that is on the site comes off it only after a person approves the removal.",
+    inputSchema: blogPostCommandInputSchema,
+    outputSchema: toolOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        postId: blogPostIdSchema,
+        archiveRequestId: { type: "string", minLength: 1 },
+        collectionState: { enum: ["archiving", "archived"] },
+        removalFromSiteNeedsApproval: { type: "boolean" },
+      },
+      required: [
+        "postId",
+        "archiveRequestId",
+        "collectionState",
+        "removalFromSiteNeedsApproval",
+      ],
+    }),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.blog.restore": {
+    name: "foundry.blog.restore",
+    description:
+      "Put one archived post back as an unpublished draft.",
+    inputSchema: blogPostCommandInputSchema,
+    outputSchema: toolOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        postId: blogPostIdSchema,
+        workspaceId: { type: "string", pattern: "^workspace_[a-z0-9_]+$" },
+        revision: { type: "integer", minimum: 0 },
+        postRevision: { type: "integer", minimum: 1 },
+        targetVisibility: { const: "unpublished" },
+      },
+      required: [
+        "postId",
+        "workspaceId",
+        "revision",
+        "postRevision",
+        "targetVisibility",
+      ],
+    }),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.blog.schedule_request": {
+    name: "foundry.blog.schedule_request",
+    description:
+      "Ask a person to publish one post at a named time. It records the request only; a person approves the post and starts the schedule.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        postId: blogPostIdSchema,
+        publishAt: publishAtSchema,
+        reportingTimeZone: {
+          type: "string",
+          minLength: 1,
+          maxLength: 100,
+        },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "postId",
+        "publishAt",
+        "reportingTimeZone",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        requestId: { type: "string", minLength: 1 },
+        postId: blogPostIdSchema,
+        publishAt: publishAtSchema,
+        reportingTimeZone: { type: "string", minLength: 1 },
+        state: { const: "pending_human_approval" },
+      },
+      required: [
+        "requestId",
+        "postId",
+        "publishAt",
+        "reportingTimeZone",
+        "state",
+      ],
+    }),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
   "foundry.preview.prepare": {
     name: "foundry.preview.prepare",
     description:
@@ -2345,6 +2640,71 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.patchDesign!(principal, parsed, context);
     },
+    "foundry.blog.create": async (principal, input, context) => {
+      const parsed = parseCreateBlogPostInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.blog.create",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.createBlogPost!(principal, parsed, context);
+    },
+    "foundry.blog.update": async (principal, input, context) => {
+      const parsed = parseUpdateBlogPostInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.blog.update",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.updateBlogPost!(principal, parsed, context);
+    },
+    "foundry.blog.archive": async (principal, input, context) => {
+      const parsed = parseBlogPostCommandInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.blog.archive",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.archiveBlogPost!(principal, parsed, context);
+    },
+    "foundry.blog.restore": async (principal, input, context) => {
+      const parsed = parseBlogPostCommandInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.blog.restore",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.restoreBlogPost!(principal, parsed, context);
+    },
+    "foundry.blog.schedule_request": async (principal, input, context) => {
+      const parsed = parseBlogScheduleRequestInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.blog.schedule_request",
+          input,
+          context,
+          [mcpPublicationScheduleScope],
+        );
+      }
+      return application.requestBlogSchedule!(principal, parsed, context);
+    },
     "foundry.preview.prepare": async (principal, input, context) => {
       const parsed = parseWorkspaceMutation(input, false);
       if (parsed === null) {
@@ -2628,6 +2988,9 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         application.createCampaign !== undefined;
       const supportsAnalytics =
         application.readAnalytics !== undefined;
+      const supportsBlogDrafts = application.createBlogPost !== undefined;
+      const supportsBlogOperations =
+        application.archiveBlogPost !== undefined;
       return Object.entries(descriptors)
         .filter(([name]) => {
           if (
@@ -2638,6 +3001,36 @@ export function createMcpToolRegistry(application: McpReadApplication) {
             name === "foundry.preview.prepare"
           ) {
             if (!supportsDrafts) return false;
+          }
+          // The two blog draft writes are draft work and need the content
+          // draft scope. Archive and restore are blog collection work and
+          // need the same scope. Asking for a schedule needs the schedule
+          // scope, because that is the permission it asks about. See
+          // ADR-0036.
+          if (
+            name === "foundry.blog.create" ||
+            name === "foundry.blog.update"
+          ) {
+            return (
+              supportsDrafts &&
+              supportsBlogDrafts &&
+              principal.scopes.includes(mcpContentDraftScope)
+            );
+          }
+          if (
+            name === "foundry.blog.archive" ||
+            name === "foundry.blog.restore"
+          ) {
+            return (
+              supportsBlogOperations &&
+              principal.scopes.includes(mcpContentDraftScope)
+            );
+          }
+          if (name === "foundry.blog.schedule_request") {
+            return (
+              supportsBlogOperations &&
+              principal.scopes.includes(mcpPublicationScheduleScope)
+            );
           }
           if (name.startsWith("foundry.campaign.")) {
             if (!supportsCampaigns) return false;
@@ -2717,6 +3110,22 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       if (
         application.requestPublication === undefined &&
         name.startsWith("foundry.publication.")
+      ) {
+        return null;
+      }
+      if (
+        application.createBlogPost === undefined &&
+        (name === "foundry.blog.create" || name === "foundry.blog.update")
+      ) {
+        return null;
+      }
+      if (
+        application.archiveBlogPost === undefined &&
+        (
+          name === "foundry.blog.archive" ||
+          name === "foundry.blog.restore" ||
+          name === "foundry.blog.schedule_request"
+        )
       ) {
         return null;
       }

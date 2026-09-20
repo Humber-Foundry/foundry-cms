@@ -20,12 +20,7 @@ describe("mcpAgentCapabilityDescriptions", () => {
     const affirmativeText = Object.values(mcpAgentCapabilityDescriptions)
       .join(" ")
       .toLowerCase();
-    for (const forbidden of [
-      "write a blog post",
-      "writes a blog post",
-      "upload a photo",
-      "uploads a photo",
-    ]) {
+    for (const forbidden of ["upload a photo", "uploads a photo"]) {
       expect(affirmativeText.includes(forbidden)).toBe(false);
     }
   });
@@ -39,12 +34,26 @@ describe("mcpAgentNeverDoes", () => {
     expect(text).toContain("approv");
   });
 
-  it("no longer says a page change is out of reach, because it is not", () => {
-    // The page tools (#161) and the section tools (#171) ship, so a screen
-    // that still said an agent cannot make a page would mislead the owner
-    // deciding whether to grant the content draft permission.
+  it("no longer says a page or post is out of reach, because it is not", () => {
+    // The page tools (#161) and the blog tools (#171) ship, so a screen that
+    // still said an agent cannot make a page or write a post would mislead
+    // the owner deciding whether to grant the content draft permission.
     const text = mcpAgentNeverDoes.join(" ").toLowerCase();
     expect(text).not.toContain("cannot create a new page");
-    expect(text).toContain("blog post from nothing");
+    expect(text).not.toContain("blog post from nothing");
+  });
+
+  it("still says an agent cannot upload a photo", () => {
+    // Uploading is #172. Until it ships, the consent screen has to say so.
+    const text = mcpAgentNeverDoes.join(" ").toLowerCase();
+    expect(text).toContain("cannot upload a photo");
+  });
+
+  it("says a live post only comes off the site with the owner's approval", () => {
+    // `foundry.blog.archive` starts the removal. The removal itself is an
+    // ordinary publication the owner approves, and the screen must say so.
+    const text = mcpAgentNeverDoes.join(" ").toLowerCase();
+    expect(text).toContain("cannot take a post that is on your site off it");
+    expect(text).toContain("you approve that removal");
   });
 });

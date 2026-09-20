@@ -143,6 +143,11 @@ Annotations are shown as
 | `foundry.page.restructure` | `F / T / T / F` | Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision. |
 | `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their section styles and their editable fields. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
+| `foundry.blog.create` | `F / F / T / F` | Start a new blog post in the draft, as a new immutable revision. |
+| `foundry.blog.update` | `F / T / T / F` | Rewrite one blog post in the draft, as a new immutable revision. |
+| `foundry.blog.archive` | `F / T / T / F` | Take one post out of the blog. A post that is on the site comes off it only after a person approves the removal. |
+| `foundry.blog.restore` | `F / F / T / F` | Put one archived post back as an unpublished draft. |
+| `foundry.blog.schedule_request` | `F / F / T / F` | Ask a person to publish one post at a named time. It records the request only; a person approves the post and starts the schedule. |
 | `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
 | `foundry.publication.request` | `F / T / T / T` | Publish one exact approved workspace revision through the canonical publication pipeline. |
 | `foundry.publication.schedule` | `F / T / T / T` | Schedule one exact approved blog revision through the canonical scheduler. |
@@ -370,6 +375,101 @@ every section type this installation registers, the words an owner reads for
 it, the section styles it offers, and the fields `foundry.content.patch` can
 write on it. A field the Site Definition protects is not listed, because
 editing it is always refused.
+
+### Write a blog post
+
+```json
+{
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "expectedRevision": 5,
+  "idempotencyKey": "6c1f0a42-9d3b-4a71-8e2f-0b5c7d9e1a33",
+  "post": {
+    "slug": "spring-open-day",
+    "title": "Spring open day",
+    "excerpt": "What to expect on the day.",
+    "seo": {
+      "title": "Spring open day",
+      "description": "What to expect on the day.",
+      "keywords": ["events", "spring"],
+      "shareImage": {"url": "/api/media/asset_open_day", "alt": "The workshop"}
+    },
+    "mainImage": {"url": "/api/media/asset_open_day", "alt": "The workshop"},
+    "body": {
+      "version": "1.0.0",
+      "type": "document",
+      "children": [
+        {"type": "paragraph", "children": [{"type": "text", "text": "Doors open at ten."}]}
+      ]
+    }
+  }
+}
+```
+
+`foundry.blog.create` starts a new post and `foundry.blog.update` rewrites one,
+both as a new immutable revision, and both need `content.draft`. The field set
+is the Site Definition's own blog post shape. A post's tags are
+`seo.keywords`; the blog has no separate tag field. An update sends the whole
+post, the way the dashboard's editor saves it, so a field the request leaves
+out is cleared rather than kept.
+
+An agent never chooses a post's id. `foundry.blog.create` mints it from the
+request itself, so sending the same request twice mints the same id and leaves
+one post. The result reports it as `postId`.
+
+Every picture in a post — the header image, the share image and every picture
+in the body — has to be one of this site's own photos, named by its media path
+`/api/media/<assetId>`. An agent can use a photo the media library already
+holds; it cannot add one, and it cannot point the site at a picture somewhere
+else. A picture that is not a media path is refused with the named reason
+`blog_media_not_in_library`. Uploading a photo is not an MCP tool.
+
+Other refusals carry the blog's own named `reason`: `slug_already_exists`,
+`post_not_found`, `post_already_exists`, `schema_invalid`, and
+`blog_post_refused` when the draft turns the write down without a blog code of
+its own.
+
+### Take a post out of the blog, or put one back
+
+```json
+{
+  "postId": "1f6b9d2c-0b1a-4d6f-8f3a-2c5d7e9a1b40",
+  "idempotencyKey": "9b2c0d41-6a7e-4c19-b3f0-5d8e1a2b3c4d"
+}
+```
+
+`foundry.blog.archive` and `foundry.blog.restore` both need `content.draft` and
+both act on the post as it stands; an agent does not pick a revision.
+
+Archiving a post that was never on the site archives it at once. Archiving a
+post that is on the site sets it to `archiving` and prepares the removal. The
+removal is an ordinary publication: a person reviews and approves it like any
+other change, so an agent can never take a live post off the public site on its
+own. The result says which happened, through `collectionState` and
+`removalFromSiteNeedsApproval`.
+
+Restoring brings an archived post back as an unpublished draft in a new
+workspace revision. It never puts a post back on the site.
+
+Refusals carry the blog's own named `reason`, such as `post_already_archived`,
+`post_not_archived` and `revision_not_found`.
+
+### Ask for a blog post to be published at a time
+
+```json
+{
+  "postId": "1f6b9d2c-0b1a-4d6f-8f3a-2c5d7e9a1b40",
+  "publishAt": "2026-10-01T15:00:00Z",
+  "reportingTimeZone": "America/Vancouver",
+  "idempotencyKey": "3d5e7f91-2a4b-4c6d-8e0f-1a2b3c4d5e6f"
+}
+```
+
+`foundry.blog.schedule_request` needs `publication.schedule`. It records a
+request and nothing else: it creates no schedule, and it publishes nothing. A
+person opens the post in the dashboard, approves that exact revision and turns
+the request into a schedule, which is when `foundry.publication.schedule`'s
+rules apply. The result answers `state: "pending_human_approval"` with the
+request's own id.
 
 ### Patch design
 

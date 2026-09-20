@@ -342,7 +342,7 @@ const inputs: Record<string, unknown> = {
 };
 
 describe("MCP protocol-wrapper emission conformance", () => {
-  it("independently validates protocol-wrapper success and business-error emissions for all 24 descriptors", async () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 29 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {

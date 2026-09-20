@@ -14,6 +14,7 @@ import {
   type BlogPostScheduleExecution,
   type BlogPostScheduleExecutionLease,
   type ContentPublicationStatus,
+  type McpBlogOperationAuthority,
 } from "@humber-foundry/application";
 
 import {
@@ -161,7 +162,7 @@ export async function advanceScheduledBlogPostExecution(
       schedule.activatedBy.startsWith("mcp-") &&
       (
         mcpAuthority === null ||
-        !(await store.hasMcpScheduleAuthority({
+        !(await store.hasMcpBlogOperationAuthority({
           siteId: schedule.siteId,
           connectionId: mcpAuthority.connectionId,
           actorId: mcpAuthority.actorId,
@@ -200,7 +201,7 @@ export async function advanceScheduledBlogPostExecution(
       mcpAuthority === null
         ? undefined
         : () =>
-            store.hasMcpScheduleAuthority({
+            store.hasMcpBlogOperationAuthority({
               siteId: schedule.siteId,
               connectionId: mcpAuthority.connectionId,
               actorId: mcpAuthority.actorId,
@@ -411,17 +412,31 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
   postId: BlogPostId;
   selectedPostRevisionId: string;
   idempotencyKey: string;
+  authority?: McpBlogOperationAuthority;
 }) {
   if (input.environment.FOUNDRY_DB === undefined) {
     throw new BlogPostOperationError("blog_post_operations_not_configured");
   }
   const database = input.environment.FOUNDRY_DB;
   const operationsStore = createD1BlogPostOperationsStore(database);
-  if (!(await operationsStore.hasHumanContentAuthority({
-    siteId: installedSiteDefinition.site.id,
-    actorId: input.actorId,
-  }))) {
-    throw new BlogPostOperationError("human_authority_required");
+  if (
+    !(input.authority === undefined
+      ? await operationsStore.hasHumanContentAuthority({
+          siteId: installedSiteDefinition.site.id,
+          actorId: input.actorId,
+        })
+      : await operationsStore.hasMcpBlogOperationAuthority({
+          siteId: installedSiteDefinition.site.id,
+          connectionId: input.authority.connectionId,
+          actorId: input.authority.actorId,
+          requiredScopes: input.authority.requiredScopes,
+        }))
+  ) {
+    throw new BlogPostOperationError(
+      input.authority === undefined
+        ? "human_authority_required"
+        : "mcp_blog_authority_required",
+    );
   }
   const priorRestore = await database.prepare(
     `SELECT record.restored_workspace_id,
@@ -481,6 +496,9 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
     selectedPostRevisionId: input.selectedPostRevisionId,
     idempotencyKey: input.idempotencyKey,
     occurredAt: new Date().toISOString(),
+    ...(input.authority === undefined
+      ? {}
+      : { authority: input.authority }),
   });
   const source = await database
     .prepare(
@@ -551,10 +569,13 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
       error instanceof Error &&
       error.message.includes("blog_post_restore_aggregate_not_advanced")
     ) {
-      if (!(await operationsStore.hasHumanContentAuthority({
-        siteId: installedSiteDefinition.site.id,
-        actorId: input.actorId,
-      }))) {
+      if (
+        input.authority === undefined &&
+        !(await operationsStore.hasHumanContentAuthority({
+          siteId: installedSiteDefinition.site.id,
+          actorId: input.actorId,
+        }))
+      ) {
         throw new BlogPostOperationError("human_authority_required");
       }
       throw new BlogPostOperationError("post_restore_conflict");
@@ -620,6 +641,7 @@ export async function restoreArchivedBlogPostAsDraft(input: {
   postId: BlogPostId;
   selectedPostRevisionId: string;
   idempotencyKey: string;
+  authority?: McpBlogOperationAuthority;
 }) {
   try {
     return await restoreArchivedBlogPostAsDraftCommand(input);
@@ -656,6 +678,7 @@ export async function archiveBlogPostWithWithdrawal(input: {
   postId: BlogPostId;
   selectedPostRevisionId: string;
   idempotencyKey: string;
+  authority?: McpBlogOperationAuthority;
 }) {
   if (input.environment.FOUNDRY_DB === undefined) {
     throw new BlogPostOperationError("blog_post_operations_not_configured");
@@ -670,6 +693,9 @@ export async function archiveBlogPostWithWithdrawal(input: {
     postId: input.postId,
     selectedPostRevisionId: input.selectedPostRevisionId,
     idempotencyKey: input.idempotencyKey,
+    ...(input.authority === undefined
+      ? {}
+      : { authority: input.authority }),
   });
   return prepareArchiveWithdrawal({
     environment: {

@@ -1,6 +1,8 @@
 import {
+  createContentActorId,
   createInMemoryPublishedSiteRepository,
   createMcpAnalyticsApplication,
+  createMcpBlogApplication,
   createMcpCampaignApplication,
   createMcpContentActorId,
   createMcpDraftApplication,
@@ -9,6 +11,8 @@ import {
   createPublishedSiteBundle,
   createSiteApplication,
 } from "@humber-foundry/application";
+
+import { createBlogPostId } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 import { installedPageComponentRegistry } from "../foundry/page-components";
@@ -20,7 +24,12 @@ import { authenticateCloudflareAccessIdentity } from "./access-authentication";
 import { createD1HumanAccessStore } from "./d1-human-access-store";
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { createD1McpPreviewStore } from "./d1-mcp-preview-store";
-import { loadBlogPostOperationsApplication } from "./blog-post-operations-runtime";
+import {
+  archiveBlogPostWithWithdrawal,
+  loadBlogPostOperationsApplication,
+  restoreArchivedBlogPostAsDraft,
+} from "./blog-post-operations-runtime";
+import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
 import { createContentPublicationApplicationForEnvironment } from "./content-publication-environment-runtime";
 import {
   mcpPreviewReviewUrl,
@@ -321,6 +330,49 @@ export function createProductionMcpRuntime(
       },
     },
   });
+  const blogApplication = createMcpBlogApplication({
+    base: readApplication,
+    runtime: {
+      findPost({ postId }) {
+        return createD1BlogPostOperationsStore(database).findPost(
+          installedSiteDefinition.site.id,
+          postId,
+        );
+      },
+      archivePost(input) {
+        return archiveBlogPostWithWithdrawal({
+          environment,
+          actorId: createContentActorId(input.actorId),
+          postId: createBlogPostId(input.postId),
+          selectedPostRevisionId: input.selectedPostRevisionId,
+          idempotencyKey: input.idempotencyKey,
+          authority: input.authority,
+        });
+      },
+      restorePost(input) {
+        return restoreArchivedBlogPostAsDraft({
+          environment,
+          actorId: createContentActorId(input.actorId),
+          postId: createBlogPostId(input.postId),
+          selectedPostRevisionId: input.selectedPostRevisionId,
+          idempotencyKey: input.idempotencyKey,
+          authority: input.authority,
+        });
+      },
+      async requestSchedule(input) {
+        const operations =
+          await loadBlogPostOperationsApplication(environment);
+        return operations.commands.proposeSchedule({
+          actorId: createContentActorId(input.actorId),
+          siteId: installedSiteDefinition.site.id,
+          postId: createBlogPostId(input.postId),
+          resolvedTime: input.resolvedTime,
+          idempotencyKey: input.idempotencyKey,
+          authority: input.authority,
+        });
+      },
+    },
+  });
   const humanStore = createD1HumanAccessStore(database);
   const campaignApplication = createMcpCampaignApplication({
     base: readApplication,
@@ -345,6 +397,7 @@ export function createProductionMcpRuntime(
     readApplication: Object.assign(
       readApplication,
       draftApplication,
+      blogApplication,
       publicationApplication,
       campaignApplication,
       analyticsApplication,

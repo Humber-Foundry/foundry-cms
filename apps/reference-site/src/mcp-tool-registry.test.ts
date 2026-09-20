@@ -46,6 +46,8 @@ function registry() {
   const application = {
     openWorkspace() {},
     requestPublication() {},
+    createBlogPost() {},
+    archiveBlogPost() {},
   } as unknown as McpReadApplication;
   return createMcpToolRegistry(application);
 }
@@ -137,6 +139,7 @@ describe("MCP draft tool registry", () => {
       "foundry.content.list",
       "foundry.content.get",
       "foundry.section.list",
+      "foundry.blog.schedule_request",
       "foundry.publication.schedule",
       "foundry.publication.status",
       "foundry.publication.cancel",
@@ -289,6 +292,10 @@ describe("MCP draft tool registry", () => {
       "foundry.page.delete",
       "foundry.page.restructure",
       "foundry.section.list",
+      "foundry.blog.create",
+      "foundry.blog.update",
+      "foundry.blog.archive",
+      "foundry.blog.restore",
       "foundry.preview.prepare",
     ]);
     expect(names([mcpInitialScope, mcpDesignDraftScope])).toEqual([
@@ -342,7 +349,13 @@ describe("MCP draft tool registry", () => {
       );
       if (tool.annotations.readOnlyHint === false) {
         expect(properties).toContain("idempotencyKey");
-        expect(properties).toContain("expectedRevision");
+        // A tool that writes a draft revision has to carry the revision the
+        // agent read before it decided. A blog command that acts on the
+        // collection rather than the draft names no workspace and has no
+        // revision to carry. See ADR-0036.
+        if (properties.includes("workspaceId")) {
+          expect(properties).toContain("expectedRevision");
+        }
       }
     }
     expect(
@@ -719,6 +732,8 @@ describe("MCP campaign and analytics tool registry", () => {
     const application = {
       openWorkspace() {},
       requestPublication() {},
+      createBlogPost() {},
+      archiveBlogPost() {},
       createCampaign() {},
       editCampaign() {},
       getCampaign() {},
@@ -1029,6 +1044,11 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.section.list": "site.read",
         "foundry.design.patch": "design.draft",
         "foundry.preview.prepare": "matching draft scopes",
+        "foundry.blog.create": "content.draft",
+        "foundry.blog.update": "content.draft",
+        "foundry.blog.archive": "content.draft",
+        "foundry.blog.restore": "content.draft",
+        "foundry.blog.schedule_request": "publication.schedule",
         "foundry.campaign.create": "campaign.draft",
         "foundry.campaign.edit": "campaign.draft",
         "foundry.campaign.get": "campaign.draft",
@@ -1059,7 +1079,7 @@ describe("MCP campaign and analytics tool registry", () => {
         mcpAnalyticsReadScope,
       ]),
     );
-    expect(tools).toHaveLength(24);
+    expect(tools).toHaveLength(29);
 
     for (const tool of tools) {
       const inputSchema = JSON.parse(
@@ -1093,6 +1113,27 @@ describe("MCP campaign and analytics tool registry", () => {
             version: "1.0.0",
             type: "document",
             children: [],
+          };
+        }
+        if (
+          tool.name === "foundry.blog.create" ||
+          tool.name === "foundry.blog.update"
+        ) {
+          // The example builder does not follow `$ref`, so the post's rich
+          // text and SEO fields are supplied here, as the campaign tools
+          // supply their email content.
+          input.post = {
+            slug: "conformance-post",
+            title: "Conformance post",
+            excerpt: "One paragraph.",
+            seo: {
+              title: "Conformance post",
+              description: "One paragraph.",
+              keywords: [],
+              shareImage: null,
+            },
+            mainImage: null,
+            body: { version: "1.0.0", type: "document", children: [] },
           };
         }
         expect(

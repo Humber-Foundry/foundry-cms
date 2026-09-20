@@ -13,6 +13,7 @@ import {
   type BlogPostScheduleExecution,
   type BlogPostScheduleProposal,
   type ContentActorId,
+  type McpBlogOperationAuthority,
   type McpBlogScheduleAuthority,
   type RestoredBlogPostDraft,
 } from "@humber-foundry/application";
@@ -24,6 +25,64 @@ import {
   recordD1BlogPostAudit,
 } from "./d1-blog-post-operation-audit";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+
+/**
+ * The SQL that says who may run a blog command that needs content authority.
+ *
+ * It is either an active owner or editor of this site, or an active MCP
+ * connection that holds every permission the request evaluated. A connection
+ * is its own actor, so it never borrows a person's membership, and the three
+ * MCP binds are NULL when a person ran the command. See ADR-0036.
+ */
+function contentAuthoritySql(binds: {
+  site: string;
+  actor: string;
+  connection: string;
+  mcpActor: string;
+  scopes: string;
+}) {
+  return `(
+               EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE site_id = ${binds.site} AND id = ${binds.actor}
+                   AND status = 'active'
+                   AND role IN ('owner', 'editor')
+               )
+               OR (
+                 ${binds.connection} IS NOT NULL
+                 AND EXISTS (
+                   SELECT 1 FROM mcp_connections AS authority
+                   WHERE authority.id = ${binds.connection}
+                     AND authority.site_id = ${binds.site}
+                     AND authority.actor_id = ${binds.mcpActor}
+                     AND authority.status = 'active'
+                     AND NOT EXISTS (
+                       SELECT 1
+                       FROM json_each(COALESCE(${binds.scopes}, '[]'))
+                         AS required
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM mcp_connection_scopes AS granted
+                         WHERE granted.connection_id = authority.id
+                           AND granted.scope = required.value
+                       )
+                     )
+                 )
+               )
+             )`;
+}
+
+/** The three MCP authority binds, or nulls when a person ran the command. */
+function mcpAuthorityBinds(
+  authority: McpBlogOperationAuthority | undefined,
+): readonly [string | null, string | null, string | null] {
+  return authority === undefined
+    ? [null, null, null]
+    : [
+        authority.connectionId,
+        authority.actorId,
+        JSON.stringify(authority.requiredScopes),
+      ];
+}
 
 type ScheduleRow = {
   id: string;
@@ -748,14 +807,11 @@ export function createD1BlogPostOperationsStore(
         .bind(input.siteId, input.actorId)
         .first<{ id: string }>()) !== null;
     },
-    async hasMcpScheduleAuthority(input) {
+    async hasMcpBlogOperationAuthority(input) {
       return (await database
         .prepare(
           `SELECT connection.id
            FROM mcp_connections AS connection
-           JOIN mcp_connection_scopes AS scope
-             ON scope.connection_id = connection.id
-            AND scope.scope = 'publication.schedule'
            WHERE connection.id = ?1
              AND connection.actor_id = ?2
              AND connection.site_id = ?3
@@ -869,7 +925,7 @@ export function createD1BlogPostOperationsStore(
         candidates.results[0]!.post_id,
       );
     },
-    async saveScheduleProposal(proposal, idempotencyKey) {
+    async saveScheduleProposal(proposal, idempotencyKey, authority) {
       const replay = await database
         .prepare(
           `SELECT id, site_id, post_id, workspace_id, content_revision,
@@ -922,14 +978,13 @@ export function createD1BlogPostOperationsStore(
                  AND post.current_revision_id = ?14
                  AND post.version = ?15
              )
-             AND EXISTS (
-               SELECT membership.id
-               FROM human_memberships AS membership
-               WHERE membership.site_id = ?2
-                 AND membership.id = ?11
-                 AND membership.status = 'active'
-                 AND membership.role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?2",
+               actor: "?11",
+               connection: "?17",
+               mcpActor: "?18",
+               scopes: "?19",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?2
@@ -955,6 +1010,7 @@ export function createD1BlogPostOperationsStore(
             proposal.postRevisionId,
             proposal.authorityVersion,
             proposal.proposalAuditId,
+            ...mcpAuthorityBinds(authority),
           ),
         prepareAcceptedBlogPostAudit(
           database,
@@ -997,14 +1053,23 @@ export function createD1BlogPostOperationsStore(
         }
         if (
           concurrentReplay === null &&
-          !(await store.hasScheduleProposalAuthority({
-            siteId: proposal.siteId,
-            postId: proposal.postId,
-            actorId: proposal.createdBy,
-          }))
+          !(authority === undefined
+            ? await store.hasScheduleProposalAuthority({
+                siteId: proposal.siteId,
+                postId: proposal.postId,
+                actorId: proposal.createdBy,
+              })
+            : await store.hasMcpBlogOperationAuthority({
+                siteId: proposal.siteId,
+                connectionId: authority.connectionId,
+                actorId: authority.actorId,
+                requiredScopes: authority.requiredScopes,
+              }))
         ) {
           throw new BlogPostOperationError(
-            "schedule_proposal_authority_required",
+            authority === undefined
+              ? "schedule_proposal_authority_required"
+              : "mcp_schedule_authority_required",
           );
         }
         throw new BlogPostOperationError(
@@ -1393,7 +1458,7 @@ export function createD1BlogPostOperationsStore(
                 siteId: schedule.siteId,
                 actorId: schedule.activatedBy,
               })
-            : await store.hasMcpScheduleAuthority({
+            : await store.hasMcpBlogOperationAuthority({
                 siteId: schedule.siteId,
                 connectionId: authority.connectionId,
                 actorId: authority.actorId,
@@ -1675,7 +1740,7 @@ export function createD1BlogPostOperationsStore(
               siteId: input.siteId,
               actorId: input.actorId,
             })
-          : await store.hasMcpScheduleAuthority({
+          : await store.hasMcpBlogOperationAuthority({
               siteId: input.siteId,
               connectionId: input.authority.connectionId,
               actorId: input.authority.actorId,
@@ -2612,12 +2677,13 @@ export function createD1BlogPostOperationsStore(
                    )
                  )
              )
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?1 AND id = ?6
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?1",
+               actor: "?6",
+               connection: "?13",
+               mcpActor: "?14",
+               scopes: "?15",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?1
@@ -2675,12 +2741,13 @@ export function createD1BlogPostOperationsStore(
                version = blog_post_collection_states.version + 1,
                updated_at = excluded.updated_at
              WHERE blog_post_collection_states.collection_state = 'active'
-               AND EXISTS (
-                 SELECT 1 FROM human_memberships
-                 WHERE site_id = ?1 AND id = ?6
-                   AND status = 'active'
-                   AND role IN ('owner', 'editor')
-               )
+               AND ${contentAuthoritySql({
+               site: "?1",
+               actor: "?6",
+               connection: "?13",
+               mcpActor: "?14",
+               scopes: "?15",
+             })}
                AND NOT EXISTS (
                  SELECT 1 FROM blog_post_operation_audit_events
                  WHERE site_id = ?1
@@ -2752,6 +2819,7 @@ export function createD1BlogPostOperationsStore(
             post.postRevisionId,
             post.version,
             post.liveRevisionId,
+            ...mcpAuthorityBinds(input.authority),
           ),
         database
           .prepare(
@@ -3456,13 +3524,13 @@ export function createD1BlogPostOperationsStore(
                updated_at = ?4
            WHERE site_id = ?5 AND post_id = ?6
              AND collection_state = 'archived'
-             AND EXISTS (
-               SELECT 1 FROM human_memberships AS current_actor
-               WHERE current_actor.site_id = ?5
-                 AND current_actor.id = ?3
-                 AND current_actor.status = 'active'
-                 AND current_actor.role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?5",
+               actor: "?3",
+               connection: "?7",
+               mcpActor: "?8",
+               scopes: "?9",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?5
@@ -3494,6 +3562,7 @@ export function createD1BlogPostOperationsStore(
           input.occurredAt,
           input.siteId,
           input.postId,
+          ...mcpAuthorityBinds(input.authority),
         )
         .run();
       if ((claimed.meta.changes ?? 0) !== 1) {
@@ -3591,12 +3660,13 @@ export function createD1BlogPostOperationsStore(
                    AND command_type = 'blog.post.restore'
                    AND request_id = ?4 AND outcome = 'accepted'
                )
-               AND EXISTS (
-                 SELECT 1 FROM human_memberships
-                 WHERE site_id = ?2 AND id = ?6
-                   AND status = 'active'
-                   AND role IN ('owner', 'editor')
-               )`,
+               AND ${contentAuthoritySql({
+                 site: "?2",
+                 actor: "?6",
+                 connection: "?7",
+                 mcpActor: "?8",
+                 scopes: "?9",
+               })}`,
           )
           .bind(
             input.occurredAt,
@@ -3605,6 +3675,7 @@ export function createD1BlogPostOperationsStore(
             input.idempotencyKey,
             input.selectedPostRevisionId,
             input.actorId,
+            ...mcpAuthorityBinds(input.authority),
           ),
         database
           .prepare(

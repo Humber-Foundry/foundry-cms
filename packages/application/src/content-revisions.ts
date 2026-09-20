@@ -12,6 +12,7 @@ import {
   type PageLifecycleErrorCode,
   type PageLinkReference,
   createBlogPostDefinition,
+  createBlogPostId,
   editBlogPostDefinition,
   republishBlogPostDefinition,
   unpublishBlogPostDefinition,
@@ -157,6 +158,18 @@ export type EditBlogPostCommand = BlogPostMutationCommand &
       "id" | "revision" | "collectionState" | "targetVisibility"
     >;
   }>;
+
+/**
+ * What a blog post write gives back: the new revision, the post it acted on,
+ * and whether the store answered from the record of an earlier identical
+ * request. It is the saved revision with two extra fields, so every caller
+ * that already read the revision keeps reading it unchanged.
+ *
+ * `postId` and `replayed` are what an MCP tool has to report, the same two
+ * things `PageMutationResult` reports for a page. See ADR-0036.
+ */
+export type BlogPostMutationResult = SavedContentRevision &
+  Readonly<{ postId: BlogPostId; replayed: boolean }>;
 
 export type UnpublishBlogPostCommand = BlogPostMutationCommand &
   Readonly<{ postId: BlogPostId }>;
@@ -328,6 +341,44 @@ export async function mintedContentPageId(
       workspaceId: input.workspaceId,
       idempotencyKey: input.idempotencyKey,
     }),
+  );
+}
+
+/**
+ * The blog post id an agent's create mints for this request.
+ *
+ * A blog post id is a version 4 UUID, and the same request must always mint
+ * the same one, so the bytes come from the request's own digest rather than
+ * from a random source. The digest is built from the idempotency key inside
+ * its workspace, exactly as `mintedContentPageId` builds a page id, so a
+ * retry after an unknown result can never leave two posts behind.
+ *
+ * An agent never chooses the id. The MCP blog tools call this to mint it, and
+ * call it again to name the post a stored receipt was for. See ADR-0036.
+ */
+export async function mintedContentBlogPostId(
+  input: Readonly<{
+    workspaceId: ContentWorkspaceId;
+    idempotencyKey: string;
+  }>,
+): Promise<BlogPostId> {
+  const digest = await sha256CanonicalJson({
+    purpose: "foundry.blog.post.id",
+    workspaceId: input.workspaceId,
+    idempotencyKey: input.idempotencyKey,
+  });
+  // Version 4 and variant 10xx, so the value passes `createBlogPostId` and
+  // reads as a UUID everywhere a post id is shown or stored.
+  const version = `4${digest.slice(13, 16)}`;
+  const variant = `${"89ab"[Number.parseInt(digest[16]!, 16) % 4]}${digest.slice(17, 20)}`;
+  return createBlogPostId(
+    [
+      digest.slice(0, 8),
+      digest.slice(8, 12),
+      version,
+      variant,
+      digest.slice(20, 32),
+    ].join("-"),
   );
 }
 
@@ -1525,55 +1576,71 @@ export function createContentRevisionApplication({
           },
         );
       },
-      async createBlogPost(command: CreateBlogPostCommand) {
+      async createBlogPost(
+        command: CreateBlogPostCommand,
+      ): Promise<BlogPostMutationResult> {
         return executeBlogMutation(
           "blog.post.create",
           command,
           [command.post.id],
-          () =>
-          persistDefinitionMutation({
-            command,
-            requestIdentity: { operation: "create_blog_post", ...command },
-            mutate: (definition) =>
-              createBlogPostDefinition(
-                definition,
-                command.siteId,
-                command.post,
-                isDefinition,
-              ),
-            blogTransitions: [
-              {
-                commandType: "blog.post.create",
-                postId: command.post.id,
-              },
-            ],
-          }),
+          async () => {
+            const persisted = await persistDefinitionMutationWithReplay({
+              command,
+              requestIdentity: { operation: "create_blog_post", ...command },
+              mutate: (definition) =>
+                createBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.post,
+                  isDefinition,
+                ),
+              blogTransitions: [
+                {
+                  commandType: "blog.post.create",
+                  postId: command.post.id,
+                },
+              ],
+            });
+            return {
+              ...persisted.revision,
+              postId: command.post.id,
+              replayed: persisted.replayed,
+            };
+          },
         );
       },
-      async editBlogPost(command: EditBlogPostCommand) {
+      async editBlogPost(
+        command: EditBlogPostCommand,
+      ): Promise<BlogPostMutationResult> {
         return executeBlogMutation(
           "blog.post.edit",
           command,
           [command.postId],
-          () =>
-          persistDefinitionMutation({
-            command,
-            requestIdentity: { operation: "edit_blog_post", ...command },
-            mutate: (definition) =>
-              editBlogPostDefinition(
-                definition,
-                command.siteId,
-                command.postId,
-                command.post,
-                isDefinition,
-              ),
-            blogTransitions: [
-              {
-                commandType: "blog.post.edit",
-                postId: command.postId,
-              },
-            ],
-          }),
+          async () => {
+            const persisted = await persistDefinitionMutationWithReplay({
+              command,
+              requestIdentity: { operation: "edit_blog_post", ...command },
+              mutate: (definition) =>
+                editBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.postId,
+                  command.post,
+                  isDefinition,
+                ),
+              blogTransitions: [
+                {
+                  commandType: "blog.post.edit",
+                  postId: command.postId,
+                },
+              ],
+            });
+            return {
+              ...persisted.revision,
+              postId: command.postId,
+              replayed: persisted.replayed,
+            };
+          },
         );
       },
       async unpublishBlogPost(command: UnpublishBlogPostCommand) {

@@ -33,6 +33,7 @@ export * from "./analytics-projection";
 export * from "./analytics-provider";
 export * from "./analytics-queries";
 export * from "./mcp-read";
+export * from "./mcp-blog";
 export * from "./mcp-drafts";
 export * from "./mcp-publications";
 export * from "./mcp-campaign";
