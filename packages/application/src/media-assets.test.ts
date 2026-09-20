@@ -466,7 +466,7 @@ describe("media asset application", () => {
     ).resolves.toMatchObject({ revision: 1, assetId: assetA });
   });
 
-  it("rejects occurrence identities that do not map to rendered Site Definition slots", async () => {
+  it("rejects an occurrence id with no hero or detail slot", async () => {
     const { application } = setup();
     await upload(application);
 
@@ -480,6 +480,29 @@ describe("media asset application", () => {
         idempotencyKey: "place-unmapped-occurrence",
       }),
     ).rejects.toEqual(expect.objectContaining({ field: "occurrenceId" }));
+  });
+
+  it("saves a hero or detail occurrence for a page other than home", async () => {
+    // The occurrence id type is no longer the two home slots (ADR-0026): any
+    // page's own hero/detail id is accepted by the write path, even before
+    // any editor screen offers it.
+    const { application } = setup();
+    await upload(application);
+
+    const placed = await application.commands.replaceOccurrence({
+      actorId: editor,
+      workspaceId: workspaceB,
+      occurrenceId: createMediaOccurrenceId("occurrence_page_about_detail"),
+      assetId: assetA,
+      baseRevision: 0,
+      idempotencyKey: "place-about-page-detail",
+    });
+
+    expect(placed).toMatchObject({
+      occurrenceId: "occurrence_page_about_detail",
+      revision: 1,
+      assetId: assetA,
+    });
   });
 
   it("replays completed mutation keys without duplicating revisions or audit facts", async () => {

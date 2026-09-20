@@ -250,11 +250,10 @@ describe("editorPageForLinkPath", () => {
 });
 
 describe("the second-page fixture", () => {
-  it("gives the second page the same section ids as the home page", () => {
-    const home = homePage(twoPages);
-    expect(secondPage.sections.map(({ id }) => id)).toEqual(
-      home.sections.map(({ id }) => id),
-    );
+  it("puts the home page first and the second page after it", () => {
+    expect(twoPages.pages).toHaveLength(2);
+    expect(twoPages.pages[0]).toEqual(homePage(referenceSiteDefinition));
+    expect(secondPage.slug).not.toBe(homePage(twoPages).slug);
   });
 
   it("accepts a page written by the caller", () => {

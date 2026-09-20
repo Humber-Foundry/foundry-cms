@@ -1,6 +1,5 @@
 import type { SiteDefinition } from "./index";
 import { publishedMediaPath } from "./seo";
-import { homePage } from "./pages";
 
 /**
  * A page-component image field holds either a static bundled path
@@ -68,6 +67,9 @@ function collectMediaAssetIds(value: unknown, into: Set<string>): void {
  * for the published site, and the authenticated preview capability covers them
  * for the draft.
  *
+ * Every page contributes, not only the home page, so a photo placed on any
+ * page keeps the asset servable and protected from deletion. See ADR-0026.
+ *
  * Only published posts (`targetVisibility === "public"`) contribute, so an
  * unpublished post's photos are not made publicly serveable by its presence in
  * the stored definition. See ADR-0013.
@@ -76,10 +78,12 @@ export function siteDefinitionMediaAssetIds(
   definition: SiteDefinition,
 ): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const occurrence of homePage(definition).media ?? []) {
-    ids.add(occurrence.asset.assetId);
+  for (const page of definition.pages) {
+    for (const occurrence of page.media ?? []) {
+      ids.add(occurrence.asset.assetId);
+    }
+    collectMediaAssetIds(page.sections, ids);
   }
-  collectMediaAssetIds(homePage(definition).sections, ids);
   for (const post of definition.blog?.posts ?? []) {
     if (post.targetVisibility !== "public") continue;
     collectMediaAssetIds(post.mainImage, ids);
