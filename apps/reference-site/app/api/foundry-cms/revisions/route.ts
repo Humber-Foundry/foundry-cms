@@ -2,6 +2,7 @@ import {
   AccessDeniedError,
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
+  ContentPageOperationError,
   ContentRevisionValidationError,
   ContentRevisionConfigurationError,
   ContentRevisionStaleError,
@@ -252,6 +253,154 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     postId: createBlogPostId(candidate.postId),
     post: content,
   };
+}
+
+/**
+ * A page operation asked for by the dashboard.
+ *
+ * Every one carries the same four things as a save: which draft, which
+ * schema, which revision the owner read before they decided, and — in the
+ * request header — the key that makes a retry safe. The page id is minted by
+ * the application, never sent by the browser, so a create cannot be talked
+ * into taking an id that is already in use. See ADR-0033.
+ */
+type PageMutationCommon = Readonly<{
+  workspaceId: ReturnType<typeof createContentWorkspaceId>;
+  schemaVersion: SiteDefinition["schemaVersion"];
+  baseRevision: number;
+}>;
+
+type PageMutationBody =
+  | (PageMutationCommon &
+      Readonly<{
+        operation: "create_page";
+        title: string;
+        slug: string;
+        startingLayout: string;
+      }>)
+  | (PageMutationCommon &
+      Readonly<{
+        operation: "rename_page";
+        pageId: string;
+        title: string;
+        slug: string;
+      }>)
+  | (PageMutationCommon &
+      Readonly<{
+        operation: "duplicate_page";
+        pageId: string;
+        title: string;
+        slug: string;
+      }>)
+  | (PageMutationCommon &
+      Readonly<{ operation: "delete_page"; pageId: string }>);
+
+const pageMutationOperations = [
+  "create_page",
+  "rename_page",
+  "duplicate_page",
+  "delete_page",
+] as const;
+
+function isPageMutationOperation(
+  value: unknown,
+): value is PageMutationBody["operation"] {
+  return (pageMutationOperations as ReadonlyArray<unknown>).includes(value);
+}
+
+function parsePageMutation(value: unknown): PageMutationBody | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!isPageMutationOperation(candidate.operation)) {
+    return null;
+  }
+  if (
+    typeof candidate.workspaceId !== "string" ||
+    candidate.schemaVersion !== installedSiteDefinition.schemaVersion ||
+    !Number.isSafeInteger(candidate.baseRevision) ||
+    (candidate.baseRevision as number) < 0
+  ) {
+    throw new TypeError("page_command_invalid");
+  }
+  const common = {
+    workspaceId: createContentWorkspaceId(candidate.workspaceId),
+    schemaVersion: candidate.schemaVersion,
+    baseRevision: candidate.baseRevision as number,
+  };
+  if (candidate.operation === "delete_page") {
+    if (typeof candidate.pageId !== "string") {
+      throw new TypeError("page_command_invalid");
+    }
+    return { operation: "delete_page", ...common, pageId: candidate.pageId };
+  }
+  if (typeof candidate.title !== "string" || typeof candidate.slug !== "string") {
+    throw new TypeError("page_command_invalid");
+  }
+  if (candidate.operation === "create_page") {
+    if (typeof candidate.startingLayout !== "string") {
+      throw new TypeError("page_command_invalid");
+    }
+    return {
+      operation: "create_page",
+      ...common,
+      title: candidate.title,
+      slug: candidate.slug,
+      startingLayout: candidate.startingLayout,
+    };
+  }
+  if (typeof candidate.pageId !== "string") {
+    throw new TypeError("page_command_invalid");
+  }
+  return {
+    operation: candidate.operation,
+    ...common,
+    pageId: candidate.pageId,
+    title: candidate.title,
+    slug: candidate.slug,
+  };
+}
+
+async function savePageMutation(
+  application: Awaited<ReturnType<typeof loadContentRevisionApplication>>,
+  mutation: PageMutationBody,
+  command: {
+    actorId: ReturnType<typeof createContentActorId>;
+    workspaceId: PageMutationBody["workspaceId"];
+    schemaVersion: SiteDefinition["schemaVersion"];
+    baseRevision: number;
+    idempotencyKey: string;
+  },
+) {
+  switch (mutation.operation) {
+    case "create_page":
+      return application.commands.createPage({
+        ...command,
+        title: mutation.title,
+        slug: mutation.slug,
+        startingLayout: mutation.startingLayout,
+      });
+    case "rename_page":
+      return application.commands.renamePage({
+        ...command,
+        pageId: mutation.pageId,
+        title: mutation.title,
+        slug: mutation.slug,
+      });
+    case "duplicate_page":
+      return application.commands.duplicatePage({
+        ...command,
+        pageId: mutation.pageId,
+        title: mutation.title,
+        slug: mutation.slug,
+      });
+    case "delete_page":
+      return application.commands.deletePage({
+        ...command,
+        pageId: mutation.pageId,
+      });
+  }
 }
 
 async function saveBlogMutation(
@@ -667,6 +816,33 @@ export async function POST(request: Request) {
         { status: 201 },
       );
     }
+    const pageMutation = parsePageMutation(submitted);
+    if (pageMutation !== null) {
+      const application = await loadContentRevisionApplication(
+        pageMutation.workspaceId,
+        actorId,
+      );
+      const result = await savePageMutation(application, pageMutation, {
+        actorId,
+        workspaceId: pageMutation.workspaceId,
+        schemaVersion: pageMutation.schemaVersion,
+        baseRevision: pageMutation.baseRevision,
+        idempotencyKey,
+      });
+      return Response.json(
+        {
+          ...result.revision,
+          // The page the operation acted on: the new page for a create or a
+          // duplicate, so the dashboard can open it straight away.
+          pageId: result.pageId,
+          previewUrl: revisionPreviewGatewayUrl(
+            result.revision.workspaceId,
+            result.revision.revision,
+          ),
+        },
+        { status: 201 },
+      );
+    }
     const operation =
       typeof submitted === "object" &&
       submitted !== null &&
@@ -819,6 +995,20 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    // A refused page operation is a validation failure with two extra things
+    // the dashboard shows: the stable reason, and the links that still point
+    // at a page whose delete was refused.
+    if (error instanceof ContentPageOperationError) {
+      return Response.json(
+        {
+          error: "validation_failed",
+          fields: error.fields,
+          reason: error.code,
+          references: error.references,
+        },
+        { status: 422 },
+      );
+    }
     if (error instanceof ContentRevisionValidationError) {
       return Response.json(
         { error: "validation_failed", fields: error.fields },

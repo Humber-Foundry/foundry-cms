@@ -15,6 +15,7 @@ import {
   readEditorPageId,
   resolveEditorPage,
 } from "@/src/editor-page-selection";
+import { listPageActions } from "@/src/page-lifecycle-view";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 const workspaceDestinations = {
@@ -97,8 +98,16 @@ export async function DashboardWorkspacePage({
         />
       ) : showPagesList ? (
         <PagesList
-          pages={listEditorPages(contentRevision.definition, publishedDefinition)}
+          pages={listPageActions(
+            contentRevision.definition,
+            dashboardWorkspace.activeWorkspaceUrl,
+            publishedDefinition,
+          )}
           workspaceUrl={dashboardWorkspace.activeWorkspaceUrl}
+          workspaceId={contentRevision.workspaceId}
+          schemaVersion={contentRevision.definition.schemaVersion}
+          baseRevision={contentRevision.revision}
+          csrfToken={mutationToken}
           lastSaved={formatDashboardMoment(contentRevision.createdAt)}
           askedForMissingPage={selection.wasNotFound}
         />
