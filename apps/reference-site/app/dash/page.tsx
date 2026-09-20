@@ -6,7 +6,7 @@ import {
   unnamedConnectedApp,
 } from "@/src/mcp-preview-review-runtime";
 import { loadBlogPostOperationalSummaries } from "@/src/blog-post-operations-runtime";
-import { blogScheduleRequestAgentName } from "@/src/blog-schedule-request-runtime";
+import { blogScheduleRequestAgentNames } from "@/src/blog-schedule-request-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -48,32 +48,42 @@ async function loadPendingBlogScheduleRequests(
       siteId,
       posts.map((post) => post.id),
     );
-    const requests = await Promise.all(
-      posts.map(async (post) => {
-        const proposal = summaries.get(post.id)?.pendingScheduleProposal;
-        if (proposal === undefined || proposal === null) return null;
-        // Overview only ever shows a request an app made — see issue #219 —
-        // so a proposal a person made directly (agentName === null) is left
-        // out here, not relabelled as an app's.
-        const agentName = await blogScheduleRequestAgentName(
-          environment,
-          proposal.createdBy,
-        );
-        if (agentName === null) return null;
-        return {
-          postId: post.id,
+    const pendingProposalsByPostId = new Map(
+      [...summaries.entries()]
+        .filter(([, summary]) => summary.pendingScheduleProposal !== null)
+        .map(([postId, summary]) => [
+          postId,
+          summary.pendingScheduleProposal!,
+        ]),
+    );
+    // Overview only ever shows a request an app made — see issue #219 — so
+    // `blogScheduleRequestAgentNames` already leaves out a proposal a
+    // person made directly, rather than relabelling it as an app's.
+    const agentNames = await blogScheduleRequestAgentNames(
+      environment,
+      pendingProposalsByPostId,
+    );
+    const postsById = new Map(posts.map((post) => [post.id, post]));
+    return [...pendingProposalsByPostId.entries()]
+      .flatMap(([postId, proposal]) => {
+        const agentName = agentNames.get(postId);
+        const post = postsById.get(postId);
+        if (agentName === undefined || post === undefined) return [];
+        return [{
+          postId,
           postTitle: post.title,
           agentName,
           requestedTime: formatLocalScheduleTime(
             proposal.localDateTime,
             proposal.ianaTimeZone,
           ),
-        };
-      }),
-    );
-    return requests.filter(
-      (request): request is PendingBlogScheduleRequest => request !== null,
-    );
+        }];
+      })
+      .sort((left, right) =>
+        pendingProposalsByPostId.get(right.postId)!.createdAt.localeCompare(
+          pendingProposalsByPostId.get(left.postId)!.createdAt,
+        )
+      );
   } catch {
     return [];
   }
@@ -172,7 +182,7 @@ export default async function DashboardOverviewPage({
         pendingScheduleRequests.length === 0 ? (
           <p className="empty-state">
             Nothing is waiting for you. New messages, anything held as spam,
-            and drafts or schedule requests an app made you appear here.
+            and drafts or schedule requests an app made for you appear here.
           </p>
         ) : (
           <ul className="attention-list">

@@ -65,7 +65,23 @@ blog command, though nothing in this product calls it that way) is left out
 of both lists entirely — issue #219 is about an app's request, not a
 person's own.
 
-### 4. The Blog list links straight to the post
+### 4. The requested time is shown in the zone the request carries, not a separate "site" zone
+
+The issue asks for "the requested time in the site's time zone." This
+installation has no single stored, canonical "site time zone" a request's
+time could be converted into — `foundry.blog.schedule_request` takes
+`reportingTimeZone` as a caller-supplied field, and the existing schedule
+controls already show a schedule's time in whichever zone resolved it
+(`activeSchedule.ianaTimeZone`, formatted by `formatLocalScheduleTime`, the
+same helper this ticket reuses), not a converted "site" zone. Overview and
+the Blog banner follow that same, already-shipped convention: they show
+`proposal.ianaTimeZone`, the zone the request itself carries, labelled
+plainly next to the time. Reading the issue's "site's time zone" as "a real
+calendar zone, not a bare UTC timestamp" keeps one time-display rule for
+every schedule-related screen instead of introducing a second, inconsistent
+one for exactly this ticket.
+
+### 5. The Blog list links straight to the post
 
 Each post's `<li>` in the Blog list now carries `id="blog-post-<id>"`.
 Overview's item links to `/dash/blog?workspace=<id>#blog-post-<id>`, so
@@ -107,3 +123,11 @@ matching the issue's "The item links to the post's schedule controls" line.
 - The MCP surface, its scopes and its tool count are unchanged. Declining is
   reachable only from `/api/foundry-cms/blog-operations`, the same
   human-mutation route every other blog dashboard command already uses.
+- The Blog list's `<li>` grid only ever accounted for exactly two direct
+  children (the post's summary, and its action buttons). Any extra status
+  line — an active schedule note, an execution failure, and now a pending
+  request — landed in the grid's own next cell instead of stacking under the
+  title, squeezing the title into a few narrow lines at 1440px. This ticket
+  fixes that by grouping the title and every status line into one grid cell
+  (`.post-list-info`), so the layout holds regardless of how many status
+  lines a post carries.

@@ -542,24 +542,28 @@ export function createD1BlogPostOperationsStore(
           .first<ExecutionRow>(),
         database
           .prepare(
+            // Only ever the post's single newest proposal, exactly like the
+            // in-memory store. This must NOT filter declined rows out of
+            // the candidate set: doing so would let an older, undeclined
+            // proposal resurface as "pending" after the newest one was
+            // declined, which the in-memory store never does.
             `SELECT proposal.id, proposal.site_id, proposal.post_id,
                     proposal.workspace_id, proposal.content_revision,
                     proposal.post_revision_id, proposal.authority_version,
                     proposal.local_date_time, proposal.iana_time_zone,
                     proposal.utc_offset_choice, proposal.execute_at_utc,
                     proposal.time_zone_database_version, proposal.created_by,
-                    proposal.proposal_audit_id, proposal.created_at
+                    proposal.proposal_audit_id, proposal.created_at,
+                    decline.proposal_id AS declined_proposal_id
              FROM blog_post_schedule_proposals AS proposal
+             LEFT JOIN blog_post_schedule_proposal_declines AS decline
+               ON decline.proposal_id = proposal.id
              WHERE proposal.site_id = ?1 AND proposal.post_id = ?2
-               AND NOT EXISTS (
-                 SELECT 1 FROM blog_post_schedule_proposal_declines AS decline
-                 WHERE decline.proposal_id = proposal.id
-               )
              ORDER BY proposal.created_at DESC
              LIMIT 1`,
           )
           .bind(siteId, postId)
-          .first<ScheduleProposalRow>(),
+          .first<ScheduleProposalRow & { declined_proposal_id: string | null }>(),
       ]);
       return {
         ...post,
@@ -569,7 +573,9 @@ export function createD1BlogPostOperationsStore(
         latestExecution:
           executionRow === null ? null : executionFromRow(executionRow),
         pendingScheduleProposal:
-          scheduleRow !== null || proposalRow === null
+          scheduleRow !== null ||
+          proposalRow === null ||
+          proposalRow.declined_proposal_id !== null
             ? null
             : scheduleProposalFromRow(proposalRow),
       };

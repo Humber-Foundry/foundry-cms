@@ -1164,7 +1164,7 @@ export function BlogPostControls({
                   </p>
                 )}
                 {pendingRequest === null ? null : (
-                  <p className="composer-hint" role="alert">
+                  <p className="composer-hint">
                     {pendingRequestAgentName} asked to publish this at{" "}
                     {formatLocalScheduleTime(
                       pendingRequest.localDateTime,
