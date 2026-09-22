@@ -239,7 +239,7 @@ export function CampaignSendFlow({
 
   return (
     <section className="send-flow" aria-label="Sending steps">
-      <h3>Sending steps</h3>
+      <h2>Sending steps</h2>
       <ol className="send-flow-steps">
         <SendStep
           number={1}

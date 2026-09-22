@@ -205,10 +205,10 @@
 
 /* An empty destination that also offers the first step, such as Newsletter's
  * "New email" (#237). The sentence keeps the same reading width the rest of
- * the dashboard uses, and the button sits under it with a full gap. Most
- * empty states are a single `<p class="empty-state">`, which this never
- * touches. */
-.empty-state > p {
+ * the dashboard uses, and the button sits under it with a full gap. The extra
+ * class is what asks for this, so an empty state that only holds words is
+ * untouched. */
+.empty-state-action > p {
   max-width: 60ch;
   margin: 0 0 var(--dash-gap);
 }
@@ -4188,7 +4188,10 @@ h3.media-places-heading {
   background: var(--dash-surface);
 }
 
-.send-flow > h3 {
+/* The two cards on one email's screen carry the same heading, at the same
+ * size, because neither is under the other (#237). */
+.send-flow > h2,
+.email-preview > h2 {
   margin: 0 0 0.75rem;
   font-size: var(--dash-h2);
 }

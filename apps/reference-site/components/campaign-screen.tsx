@@ -13,15 +13,15 @@ import { parseSerializedRichTextDocument } from "@humber-foundry/site-definition
 import {
   campaignPreviewSrc,
   previewEmailContent,
-  readCampaignReadiness,
   readCampaignSendReport,
+  refusalCodeIn,
   refusalCodeOf,
   refusalMessage,
   sendCampaignCommand,
   type CampaignSendReport,
-  type DeliveryReadiness,
   type SendFlowCommand,
 } from "./campaign-operations";
+import { useCampaignReadiness } from "./use-campaign-readiness";
 import { CampaignSendFlow } from "./campaign-send-flow";
 import type { EditorMediaContext } from "./change-photo-field";
 import { ConnectionStatus } from "./connection-status";
@@ -58,10 +58,8 @@ export function CampaignScreen({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<CampaignSendReport | null>(null);
-  const [delivery, setDelivery] = useState<DeliveryReadiness | null>(null);
-  const [senderDetails, setSenderDetails] = useState<DeliveryReadiness | null>(
-    null,
-  );
+  const { delivery, senderDetails, senderDetailsMissing } =
+    useCampaignReadiness();
   const campaignId = revision.campaignId;
 
   const loadReport = useCallback(async () => {
@@ -69,26 +67,8 @@ export function CampaignScreen({
   }, [campaignId]);
 
   useEffect(() => {
-    let current = true;
-    void readCampaignReadiness().then((readiness) => {
-      if (current && readiness !== null) {
-        setDelivery(readiness.delivery);
-        setSenderDetails(readiness.senderDetails);
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
-
-  useEffect(() => {
     void loadReport();
   }, [loadReport]);
-
-  // Every email carries a compliance footer built from the installation's own
-  // name and postal address. While they are absent the server refuses to store
-  // a revision, so the screen offers no way to change the email.
-  const senderDetailsMissing = senderDetails?.state === "not_configured";
 
   /** Store a change to this email, then read the campaign's state back. */
   async function saveEmail(command: unknown) {
@@ -133,8 +113,7 @@ export function CampaignScreen({
         unknown
       > | null;
       if (!response.ok) {
-        const code = typeof body?.error === "string" ? body.error : "";
-        setMessage(refusalMessage(code));
+        setMessage(refusalMessage(refusalCodeIn(body)));
       } else if (
         command.action === "request_test" &&
         body?.state !== "accepted"
@@ -184,7 +163,7 @@ export function CampaignScreen({
       ) : (
         <>
           <section className="email-preview" aria-label="Email preview">
-            <h3>How the email looks</h3>
+            <h2>How the email looks</h2>
             <div className="email-preview-message rendered-rich-text">
               {revision.headerImage == null ? null : (
                 <figure className="campaign-header-image">

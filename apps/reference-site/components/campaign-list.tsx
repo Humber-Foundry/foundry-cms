@@ -16,18 +16,16 @@ import {
 } from "./campaign-links";
 import {
   campaignPreviewSrc,
-  campaignStateLabels,
+  campaignRowSummary,
   refusalCodeOf,
   refusalMessage,
   readCampaignList,
-  readCampaignReadiness,
   sendCampaignCommand,
-  type DeliveryReadiness,
   type PendingScheduleRequest,
 } from "./campaign-operations";
 import { ConnectionStatus } from "./connection-status";
 import { formatLocalScheduleTime } from "./schedule-time-format";
-import { formatDashboardMoment } from "../src/dashboard-time";
+import { useCampaignReadiness } from "./use-campaign-readiness";
 
 type CampaignListEntry = Readonly<{
   campaign: Campaign;
@@ -75,19 +73,10 @@ export function CampaignList({
     useState<ReadonlyArray<CampaignListEntry>>(initialCampaigns);
   const [scheduleRequests, setScheduleRequests] =
     useState<ReadonlyArray<PendingScheduleRequest>>(initialScheduleRequests);
-  // Whether the name and postal address for the bottom of every email are
-  // set. Reported separately from the delivery secrets, because without them
-  // an email cannot even be written.
-  const [senderDetails, setSenderDetails] = useState<DeliveryReadiness | null>(
-    null,
-  );
+  const { senderDetails, senderDetailsMissing } = useCampaignReadiness();
 
   useEffect(() => {
     let current = true;
-    void readCampaignReadiness().then((readiness) => {
-      if (current && readiness !== null)
-        setSenderDetails(readiness.senderDetails);
-    });
     // An app can write a send-time request at any moment, and this list is the
     // only place a person can answer one. Reading the list when the screen
     // opens keeps what the owner sees equal to what the server holds, however
@@ -102,12 +91,6 @@ export function CampaignList({
       current = false;
     };
   }, []);
-
-  // Every email carries a compliance footer built from the installation's own
-  // name and postal address. Foundry never invents one, so while they are
-  // absent the server refuses to write an email and the screen says so
-  // instead of offering a step that always fails.
-  const senderDetailsMissing = senderDetails?.state === "not_configured";
 
   async function reloadCampaigns() {
     const list = await readCampaignList();
@@ -187,7 +170,7 @@ export function CampaignList({
         {campaigns.length === 0 ? null : newEmailButton}
       </div>
       {campaigns.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state empty-state-action">
           <p>
             You have not written any emails yet. Write one, send yourself a
             test, then send it to your subscribers.
@@ -202,6 +185,7 @@ export function CampaignList({
             // shows a picture when the campaign has one.
             const thumbnail =
               revision.shareImage ?? revision.headerImage ?? null;
+            const summary = campaignRowSummary(campaign);
             const pendingRequest =
               scheduleRequests.find(
                 (request) => request.campaignId === campaign.id,
@@ -219,8 +203,7 @@ export function CampaignList({
                     )}
                     <strong>{revision.subject}</strong>
                     <span>
-                      {campaignStateLabels[campaign.lifecycleState]} · last
-                      changed {formatDashboardMoment(campaign.updatedAt)}
+                      {summary.label} · {summary.date}
                     </span>
                   </div>
                   {pendingRequest === null ? null : (

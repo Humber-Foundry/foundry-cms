@@ -12,6 +12,7 @@ import {
 import { campaignListHref } from "@/components/campaign-links";
 import { CampaignScreen } from "@/components/campaign-screen";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
+import { campaignEditorSiteImages } from "@/src/campaign-editor-media";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -19,7 +20,6 @@ import {
   readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
-import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -48,10 +48,19 @@ export default async function DashboardCampaignPage({
   const mutationToken = await loadMutationToken();
   const campaignContext = await loadCampaignRequestContext(await headers());
 
+  // An id that is not a campaign id is a dead link, not a fault. It is checked
+  // on its own so that a real fault inside the reads below stays visible
+  // instead of being answered as a missing page.
+  let campaignId: ReturnType<typeof createCampaignId>;
+  try {
+    campaignId = createCampaignId(requestedCampaignId);
+  } catch {
+    notFound();
+  }
+
   let campaign: Campaign;
   let revision: CampaignRevision;
   try {
-    const campaignId = createCampaignId(requestedCampaignId);
     campaign = await campaignContext.application.queries.getCampaign({
       actor: access.identity,
       campaignId,
@@ -62,12 +71,11 @@ export default async function DashboardCampaignPage({
       revisionNumber: campaign.version,
     });
   } catch (error) {
-    // A bad id in the address is a dead link, and an email this person may not
-    // read must not be named. Both are the same answer: there is no such page.
+    // An email that is gone, and one this person may not read, are the same
+    // answer: there is no such page. Naming it would say it exists.
     if (
       error instanceof CampaignNotFoundError ||
-      error instanceof AccessDeniedError ||
-      error instanceof TypeError
+      error instanceof AccessDeniedError
     ) {
       notFound();
     }
@@ -100,15 +108,10 @@ export default async function DashboardCampaignPage({
         media={{
           csrfToken: mutationToken,
           workspaceId: dashboardWorkspace.workspaceId,
-          // Only site photos an email can load are offered here. A relative
-          // built-in address such as "/logo.svg" cannot be sent in an email
-          // (ADR-0014 needs an absolute address), so the picker lists uploads
-          // and absolute site photos, never a bare path the owner could not
-          // send.
-          siteImages: siteStaticImageTiles(
+          siteImages: campaignEditorSiteImages(
             definition,
             dashboardWorkspace.contentRevision.definition,
-          ).filter((image) => image.src.startsWith("https://")),
+          ),
         }}
       />
     </main>

@@ -273,6 +273,7 @@ const destinations = [
   ["Design", "/dash/design"],
   ["Messages", "/dash/forms"],
   ["Newsletter", "/dash/campaigns"],
+  ["New email", "/dash/campaigns/new"],
   ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],

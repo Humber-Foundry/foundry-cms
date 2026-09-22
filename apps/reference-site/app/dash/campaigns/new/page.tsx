@@ -1,5 +1,6 @@
 import { campaignListHref } from "@/components/campaign-links";
 import { NewCampaignScreen } from "@/components/new-campaign-screen";
+import { campaignEditorSiteImages } from "@/src/campaign-editor-media";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -7,7 +8,6 @@ import {
   readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
-import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -53,15 +53,10 @@ export default async function NewCampaignPage({
         media={{
           csrfToken: mutationToken,
           workspaceId: dashboardWorkspace.workspaceId,
-          // Only site photos an email can load are offered here. A relative
-          // built-in address such as "/logo.svg" cannot be sent in an email
-          // (ADR-0014 needs an absolute address), so the picker lists uploads
-          // and absolute site photos, never a bare path the owner could not
-          // send.
-          siteImages: siteStaticImageTiles(
+          siteImages: campaignEditorSiteImages(
             definition,
             dashboardWorkspace.contentRevision.definition,
-          ).filter((image) => image.src.startsWith("https://")),
+          ),
         }}
       />
     </main>

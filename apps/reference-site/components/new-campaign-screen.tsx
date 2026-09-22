@@ -1,21 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { parseSerializedRichTextDocument } from "@humber-foundry/site-definition";
 
 import { campaignListHref } from "./campaign-links";
 import {
-  readCampaignReadiness,
   refusalCodeOf,
   refusalMessage,
   sendCampaignCommand,
-  type DeliveryReadiness,
 } from "./campaign-operations";
 import type { EditorMediaContext } from "./change-photo-field";
 import { ConnectionStatus } from "./connection-status";
 import { EmailComposer } from "./email-composer";
+import { useCampaignReadiness } from "./use-campaign-readiness";
 
 /**
  * The writing box for one new email, on its own screen (#237).
@@ -36,25 +35,9 @@ export function NewCampaignScreen({
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [senderDetails, setSenderDetails] = useState<DeliveryReadiness | null>(
-    null,
-  );
-
-  useEffect(() => {
-    let current = true;
-    void readCampaignReadiness().then((readiness) => {
-      if (current && readiness !== null)
-        setSenderDetails(readiness.senderDetails);
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
-
-  // Without the name and postal address every email would have no compliance
-  // footer, so the server refuses to store one. Say that instead of offering a
-  // writing box whose save always fails.
-  const senderDetailsMissing = senderDetails?.state === "not_configured";
+  // Without the sender details the server refuses to store a revision, so the
+  // screen says that instead of offering a writing box whose save must fail.
+  const { senderDetails, senderDetailsMissing } = useCampaignReadiness();
 
   async function save(command: unknown) {
     setBusy(true);

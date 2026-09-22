@@ -139,9 +139,13 @@ Overview's "Needs attention" list gains an item —
 `<app> asked to send "<subject>" at <time>` — linking to that campaign on the
 Newsletter screen, exactly as ADR-0038 gave a blog request an item there. The
 Newsletter screen shows the request on the campaign itself, with a Decline
-button next to it and a sentence pointing at "Sending steps" for the other
+button next to it and a sentence pointing at the sending steps for the other
 answer. Approving is not a new control: it is the existing send and schedule
 flow, which still needs the confirmed test and the Owner's approval.
+
+Since #237 the Newsletter screen is the campaign list, and the sending steps
+are on the campaign's own screen. The request and its Decline stay on the
+campaign's row; the sentence beside them now says to open the email.
 
 Both surfaces name the app, never the connection, reading the registered
 client's own address the way draft review does. Both show the time in the zone

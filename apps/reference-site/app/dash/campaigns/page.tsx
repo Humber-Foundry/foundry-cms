@@ -61,8 +61,9 @@ export default async function DashboardCampaignsPage({
         <div>
           <h1>Newsletter</h1>
           <p>
-            Write a campaign, send yourself a test, then schedule it. Only you
-            can authorise a send to the whole list.
+            Every email you have written. Open one to check it, send yourself a
+            test, then send it. Only you can authorise a send to your whole
+            list.
           </p>
         </div>
       </div>

@@ -4,8 +4,9 @@
  * The campaign list, the writing box and the sending steps are separate
  * screens now (#237). They all talk to the same route,
  * `/api/foundry-cms/campaigns`, and they all have to say the same words about
- * the same server answers. Those requests, those words and the addresses of
- * the three screens live here, so one screen can never drift from another.
+ * the same server answers. Those requests and those words live here, so one
+ * screen can never drift from another. The three addresses live in
+ * `campaign-links.ts`, which a server page reads too.
  *
  * This module is browser-safe. It holds no binding, no secret and no adapter.
  */
@@ -28,17 +29,37 @@ import {
 
 import { senderDetailsNotSetSentence } from "./connection-status";
 import type { SendTime } from "./schedule-send-time";
+import { formatDashboardMoment } from "../src/dashboard-time";
 
 /**
- * Plain words for a campaign's lifecycle state. Typed by the union rather
- * than by string, so adding a state to CampaignLifecycleState fails the build
- * here until it has a label, instead of falling through to a generated one.
+ * What one campaign row says about a campaign: the state in plain words, and
+ * the date that matters while it is in that state.
+ *
+ * Typed by the lifecycle union rather than by string, so adding a state to
+ * CampaignLifecycleState fails the build here until somebody has written its
+ * label and decided which of its dates a person needs to read.
  */
-export const campaignStateLabels: Readonly<
-  Record<CampaignLifecycleState, string>
+const campaignStateRows: Readonly<
+  Record<
+    CampaignLifecycleState,
+    Readonly<{ label: string; date: (campaign: Campaign) => string }>
+  >
 > = {
-  draft: "Draft",
+  // Nothing has been sent, so the date that matters is when the draft was
+  // last changed.
+  draft: {
+    label: "Draft",
+    date: (campaign) => `last changed ${formatDashboardMoment(campaign.updatedAt)}`,
+  },
 };
+
+/** The state and the date one campaign row shows. */
+export function campaignRowSummary(
+  campaign: Campaign,
+): Readonly<{ label: string; date: string }> {
+  const row = campaignStateRows[campaign.lifecycleState];
+  return { label: row.label, date: row.date(campaign) };
+}
 
 /** What per-campaign test readiness reports, as the server returns it. */
 type CampaignTestReadiness = Awaited<
@@ -173,22 +194,16 @@ const refusalSentences: Readonly<Record<string, string>> = {
     "Someone else changed this email. Reload the page and look again.",
 };
 
-/** The sentence for one refusal code. */
-export function refusalSentence(code: string): string {
-  return (
-    refusalSentences[code] ??
-    "That step did not go through. Nothing was sent."
-  );
-}
-
 /**
  * One refusal, written the way the screens report it: the plain sentence, then
- * the server's own code so whoever has to fix it has the exact reason.
+ * the server's own code so whoever has to fix it has the exact reason. An
+ * answer that named no code gets the sentence alone.
  */
 export function refusalMessage(code: string): string {
-  return code === ""
-    ? refusalSentence(code)
-    : `${refusalSentence(code)} Reason: ${code}.`;
+  const sentence =
+    refusalSentences[code] ??
+    "That step did not go through. Nothing was sent.";
+  return code === "" ? sentence : `${sentence} Reason: ${code}.`;
 }
 
 /**
@@ -319,11 +334,19 @@ export async function sendCampaignCommand(
   });
 }
 
+/** The refusal code an answered body carries, or the empty string. */
+export function refusalCodeIn(
+  body: Record<string, unknown> | null,
+): string {
+  return typeof body?.error === "string" ? body.error : "";
+}
+
 /** The refusal code a failed answer carries, or the empty string. */
 export async function refusalCodeOf(response: Response): Promise<string> {
-  const body = (await response.json().catch(() => null)) as Record<
-    string,
-    unknown
-  > | null;
-  return typeof body?.error === "string" ? body.error : "";
+  return refusalCodeIn(
+    (await response.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null,
+  );
 }
