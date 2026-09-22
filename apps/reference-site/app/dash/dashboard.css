@@ -203,6 +203,16 @@
   color: var(--dash-ink-soft);
 }
 
+/* An empty destination that also offers the first step, such as Newsletter's
+ * "New email" (#237). The sentence keeps the same reading width the rest of
+ * the dashboard uses, and the button sits under it with a full gap. Most
+ * empty states are a single `<p class="empty-state">`, which this never
+ * touches. */
+.empty-state > p {
+  max-width: 60ch;
+  margin: 0 0 var(--dash-gap);
+}
+
 /* Message inbox ----------------------------------------------------------
  *
  * One row is one message. Two sizes only: body size for the sender and what
