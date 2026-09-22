@@ -192,7 +192,14 @@ async function main() {
           JSON.parse(request.postData() ?? "{}").action ===
             "decline_schedule_request",
       );
-      await page.getByRole("button", { name: "Decline" }).first().click();
+      // A row's actions sit behind its "..." menu since #226.
+      await page
+        .getByRole("button", { name: /^Actions for / })
+        .first()
+        .click();
+      await page
+        .getByRole("menuitem", { name: "Decline the app's send request" })
+        .click();
       const command = JSON.parse((await declined).postData() ?? "{}");
       if (command.proposalId !== scheduleRequest.proposalId) {
         throw new Error("decline_named_the_wrong_request");

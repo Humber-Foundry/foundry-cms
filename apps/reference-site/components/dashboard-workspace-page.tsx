@@ -1,4 +1,5 @@
 import { ContentDraftRecovery } from "./content-draft-recovery";
+import { DashboardPageHeader } from "./dashboard-page-header";
 import { PagesList } from "./pages-list";
 import { WorkspaceEditorSurface } from "./workspace-editor-surface";
 import {
@@ -81,12 +82,10 @@ export async function DashboardWorkspacePage({
   return (
     <main className="dashboard-main" id="main">
       {!config.headingOnlyWhenStarting || showStarter || showPagesList ? (
-        <div className="page-heading">
-          <div>
-            <h1>{config.title}</h1>
-            <p>{config.description}</p>
-          </div>
-        </div>
+        <DashboardPageHeader
+          title={config.title}
+          description={config.description}
+        />
       ) : null}
       {showStarter ? (
         <ContentDraftRecovery

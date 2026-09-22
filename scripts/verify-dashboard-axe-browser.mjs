@@ -144,7 +144,7 @@ async function checkDestination(page, origin, name, href) {
 async function checkCampaignScreen(page, origin) {
   await page.goto(`${origin}/dash/campaigns`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
-  if ((await page.locator(".post-list li").count()) === 0) {
+  if ((await page.locator(".dash-row").count()) === 0) {
     await page.getByRole("button", { name: "New email" }).click({ timeout: 8000 });
     await page.waitForURL(/\/dash\/campaigns\/new/u, { timeout: 20_000 });
     const composer = page.locator("form.composer");
@@ -163,11 +163,9 @@ async function checkCampaignScreen(page, origin) {
     await page.getByRole("button", { name: "Save email" }).click({ timeout: 8000 });
     await page.waitForURL(/\/dash\/campaigns(\?|$)/u, { timeout: 30_000 });
   }
-  await page.locator(".post-list li").first().waitFor({ timeout: 20_000 });
-  const href = await page
-    .getByRole("link", { name: /^Open / })
-    .first()
-    .getAttribute("href");
+  const row = page.locator(".dash-row").first();
+  await row.waitFor({ timeout: 20_000 });
+  const href = await row.locator("a.dash-row-link").getAttribute("href");
   await checkDestination(page, origin, "One email", href);
 }
 

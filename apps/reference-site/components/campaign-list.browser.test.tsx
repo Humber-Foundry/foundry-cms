@@ -190,7 +190,8 @@ describe("the campaign list, browser acceptance", () => {
     // to land straight in it, so the owner never saw the list at all.
     expect(host.querySelector("form.composer")).toBeNull();
     expect(host.querySelector(".empty-state")).not.toBeNull();
-    expect(host.textContent).toContain("You have not written any emails yet.");
+    expect(host.textContent).toContain("No emails yet");
+    expect(host.textContent).toContain("Write your first email");
 
     await vi.waitFor(() =>
       expect(buttonNamed(host, "New email")!.disabled).toBe(false),
@@ -205,17 +206,17 @@ describe("the campaign list, browser acceptance", () => {
     fakeNewsletterServer();
     const host = mount([{ campaign, revision }]);
 
-    const row = host.querySelector(`#campaign-${campaign.id}`);
+    const row = host.querySelector(".dash-row");
     expect(row).not.toBeNull();
     expect(row!.textContent).toContain("September news");
     expect(row!.textContent).toContain("Draft");
     // The date the row shows is when the draft was last changed.
     expect(row!.textContent).toContain("2 Sept 2026");
-    const open = row!.querySelector<HTMLAnchorElement>("a.copy-button");
+    // The whole row opens that email's own screen.
+    const open = row!.querySelector<HTMLAnchorElement>("a.dash-row-link");
     expect(open!.getAttribute("href")).toBe(
       `/dash/campaigns/${campaign.id}?workspace=workspace_000000000000000000000001`,
     );
-    expect(open!.getAttribute("aria-label")).toBe("Open September news");
   });
 
   it("shows an app's send-time request and lets a person decline it", async () => {
@@ -233,8 +234,12 @@ describe("the campaign list, browser acceptance", () => {
     expect(host.textContent).toContain("client.example asked to send this at");
     // Declining is a person's step, and it is the only answer offered here;
     // sending stays behind the sending steps on the email's own screen.
-    expect(buttonNamed(host, "Decline")).toBeDefined();
-    await userEvent.click(buttonNamed(host, "Decline")!);
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for September news" }),
+    );
+    const decline = buttonNamed(host, "Decline the app's send request");
+    expect(decline).toBeDefined();
+    await userEvent.click(decline!);
 
     await vi.waitFor(() =>
       expect(

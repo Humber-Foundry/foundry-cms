@@ -305,17 +305,18 @@ async function main() {
     }
 
     // The save returns to the campaign list, and the new email is one row on
-    // it. The row draws the share image as a thumbnail, falling back to the
-    // header image, so the thumbnail renders on a preview surface too.
+    // it. A row carries the subject, its state and its date; the shared row
+    // standard (#226) draws no thumbnail, so the share image is checked by
+    // the saved campaign above and by the media route below.
     await page.waitForURL(/\/dash\/campaigns\?workspace=workspace_/u);
     await page
-      .locator(`img.campaign-thumbnail[src="${shareRef}"]`)
+      .getByRole("link", { name: "Harbour dispatch" })
       .first()
       .waitFor({ state: "visible" });
 
     // Open the email's own screen and confirm the preview draws the header and
     // inline photos.
-    await page.getByRole("link", { name: /^Open / }).first().click();
+    await page.getByRole("link", { name: "Harbour dispatch" }).first().click();
     await page.waitForURL(/\/dash\/campaigns\/[0-9a-f-]{36}\?workspace=/u);
     const preview = page.locator("section.email-preview");
     await preview.waitFor({ state: "visible" });

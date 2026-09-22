@@ -9,7 +9,9 @@ import {
   type CampaignRevision,
 } from "@humber-foundry/application";
 
-import { CampaignBackLink } from "@/components/campaign-back-link";
+import { campaignListHref } from "@/components/campaign-links";
+import { DashboardBackLink } from "@/components/dashboard-back-link";
+import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { CampaignScreen } from "@/components/campaign-screen";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
 import { campaignEditorMedia } from "@/src/campaign-editor-media";
@@ -84,16 +86,14 @@ export default async function DashboardCampaignPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <CampaignBackLink workspace={dashboardWorkspace.workspaceId} />
-      <div className="page-heading">
-        <div>
-          <h1>{revision.subject}</h1>
-          <p>
-            Read it through, send yourself a test, then send it to your
-            subscribers.
-          </p>
-        </div>
-      </div>
+      <DashboardBackLink
+        href={campaignListHref(dashboardWorkspace.workspaceId)}
+        label="Back to Newsletter"
+      />
+      <DashboardPageHeader
+        title={revision.subject}
+        description="Read it through, send yourself a test, then send it to your subscribers."
+      />
       <CampaignScreen
         csrfToken={mutationToken}
         // The steps say whose step each one is. The server still decides every

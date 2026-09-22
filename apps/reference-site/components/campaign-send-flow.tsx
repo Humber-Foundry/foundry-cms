@@ -249,7 +249,7 @@ export function CampaignSendFlow({
         >
           <button
             type="button"
-            className="copy-button"
+            className="dash-button dash-button-plain"
             disabled={busy || editBlocked}
             onClick={onEdit}
           >
@@ -270,7 +270,7 @@ export function CampaignSendFlow({
           {tested ? null : (
             <button
               type="button"
-              className="copy-button"
+              className="dash-button dash-button-plain"
               disabled={busy || notConnected || testRecipientIds.length === 0}
               onClick={() =>
                 onCommand({
@@ -311,7 +311,7 @@ export function CampaignSendFlow({
               </label>
               <button
                 type="button"
-                className="copy-button"
+                className="dash-button dash-button-plain"
                 disabled={busy || !reviewed}
                 onClick={() =>
                   onCommand({
@@ -359,7 +359,7 @@ export function CampaignSendFlow({
               {stage === "failed" && isOwner ? (
                 <button
                   type="button"
-                  className="copy-button"
+                  className="dash-button dash-button-plain"
                   // Retrying reaches the provider, so it needs a connected
                   // installation. Calling a send off does not, which is why
                   // the schedule below stays cancellable either way.
@@ -391,7 +391,7 @@ export function CampaignSendFlow({
               {isOwner ? (
                 <button
                   type="button"
-                  className="copy-button"
+                  className="dash-button dash-button-plain"
                   onClick={() =>
                     onCommand({
                       action: "cancel_bulk_schedule",
@@ -412,7 +412,7 @@ export function CampaignSendFlow({
             testEvidence === null ? null : (
               <button
                 type="button"
-                className="button button-primary"
+                className="dash-button dash-button-primary"
                 disabled={busy || notConnected}
                 onClick={() =>
                   onCommand({
@@ -429,7 +429,7 @@ export function CampaignSendFlow({
             <div className="send-step-outcome">
               <button
                 type="button"
-                className="button button-primary"
+                className="dash-button dash-button-primary"
                 disabled={busy || notConnected}
                 onClick={() =>
                   onCommand({
@@ -454,7 +454,7 @@ export function CampaignSendFlow({
                 </label>
                 <button
                   type="button"
-                  className="copy-button"
+                  className="dash-button dash-button-plain"
                   disabled={busy || sendAt === ""}
                   onClick={scheduleThisEmail}
                 >

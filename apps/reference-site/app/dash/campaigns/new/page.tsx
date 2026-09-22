@@ -1,4 +1,6 @@
-import { CampaignBackLink } from "@/components/campaign-back-link";
+import { campaignListHref } from "@/components/campaign-links";
+import { DashboardBackLink } from "@/components/dashboard-back-link";
+import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { NewCampaignScreen } from "@/components/new-campaign-screen";
 import { campaignEditorMedia } from "@/src/campaign-editor-media";
 import {
@@ -33,16 +35,14 @@ export default async function NewCampaignPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <CampaignBackLink workspace={dashboardWorkspace.workspaceId} />
-      <div className="page-heading">
-        <div>
-          <h1>New email</h1>
-          <p>
-            Write it here. It stays a private draft until you send a test and
-            approve it.
-          </p>
-        </div>
-      </div>
+      <DashboardBackLink
+        href={campaignListHref(dashboardWorkspace.workspaceId)}
+        label="Back to Newsletter"
+      />
+      <DashboardPageHeader
+        title="New email"
+        description="Write it here. It stays a private draft until you send a test and approve it."
+      />
       <NewCampaignScreen
         csrfToken={mutationToken}
         workspace={dashboardWorkspace.workspaceId}

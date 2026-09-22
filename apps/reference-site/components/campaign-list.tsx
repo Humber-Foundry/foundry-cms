@@ -15,7 +15,6 @@ import {
   newCampaignHref,
 } from "./campaign-links";
 import {
-  campaignPreviewSrc,
   campaignRowSummary,
   refusalCodeOf,
   refusalMessage,
@@ -24,6 +23,11 @@ import {
   type PendingScheduleRequest,
 } from "./campaign-operations";
 import { ConnectionStatus } from "./connection-status";
+import { DashboardActionMenu } from "./dashboard-action-menu";
+import { DashboardEmptyState } from "./dashboard-empty-state";
+import { DashboardList, DashboardListRow } from "./dashboard-list";
+import { DashboardPageHeader } from "./dashboard-page-header";
+import { DashboardStateLabel } from "./dashboard-state-label";
 import { formatLocalScheduleTime } from "./schedule-time-format";
 import { useCampaignReadiness } from "./use-campaign-readiness";
 
@@ -147,7 +151,7 @@ export function CampaignList({
   const newEmailButton = (
     <button
       type="button"
-      className="button button-primary"
+      className="dash-button dash-button-primary"
       disabled={busy || senderDetailsMissing}
       // A link cannot be turned off, and this control has to be off while the
       // sender details are missing, so it is a button that navigates.
@@ -158,94 +162,78 @@ export function CampaignList({
   );
 
   return (
-    <section aria-labelledby="campaigns-heading">
-      <div className="dashboard-section-heading">
-        <div>
-          <h2 id="campaigns-heading">Emails</h2>
-          <p>
-            Write an email to your subscribers. It stays a private draft here;
-            subscriber identities are never shown.
-          </p>
-          <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
-        </div>
-        {campaigns.length === 0 ? null : newEmailButton}
-      </div>
-      {campaigns.length === 0 ? (
-        <div className="empty-state empty-state-action">
-          <p>
-            You have not written any emails yet. Write one, send yourself a
-            test, then send it to your subscribers.
-          </p>
-          {newEmailButton}
-        </div>
-      ) : (
-        <ul className="post-list">
-          {campaigns.map(({ campaign, revision }) => {
-            // The thumbnail shown beside a campaign is its share image,
-            // falling back to the header image, so a preview surface always
-            // shows a picture when the campaign has one.
-            const thumbnail =
-              revision.shareImage ?? revision.headerImage ?? null;
-            const summary = campaignRowSummary(campaign);
-            const pendingRequest =
-              scheduleRequests.find(
-                (request) => request.campaignId === campaign.id,
-              ) ?? null;
-            return (
-              <li key={campaign.id} id={`campaign-${campaign.id}`}>
-                <div className="post-list-info">
-                  <div className="post-list-summary">
-                    {thumbnail === null ? null : (
-                      <img
-                        className="campaign-thumbnail"
-                        src={campaignPreviewSrc(thumbnail.url)}
-                        alt={thumbnail.alt}
+    <>
+      <DashboardPageHeader
+        title="Newsletter"
+        description="Every email you have written. Open one to check it, send yourself a test, then send it. Only you can authorise a send to your whole list."
+        // The empty state below offers the same control, so the screen never
+        // shows two "New email" buttons.
+        action={campaigns.length === 0 ? undefined : newEmailButton}
+      />
+      <section aria-label="Emails">
+        <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
+        {campaigns.length === 0 ? (
+          <DashboardEmptyState title="No emails yet" action={newEmailButton}>
+            Write your first email, send yourself a test, then send it to your
+            subscribers.
+          </DashboardEmptyState>
+        ) : (
+          <DashboardList label="Your emails">
+            {campaigns.map(({ campaign, revision }) => {
+              const summary = campaignRowSummary(campaign);
+              const pendingRequest =
+                scheduleRequests.find(
+                  (request) => request.campaignId === campaign.id,
+                ) ?? null;
+              return (
+                <DashboardListRow
+                  key={campaign.id}
+                  href={campaignHref(campaign.id, workspace)}
+                  title={revision.subject}
+                  note={
+                    pendingRequest === null
+                      ? summary.date
+                      : `${summary.date} · ${pendingRequest.agentName} asked to send this at ${formatLocalScheduleTime(
+                          pendingRequest.localDateTime,
+                          pendingRequest.ianaTimeZone,
+                        )}`
+                  }
+                  state={
+                    summary.label === "" ? undefined : (
+                      <DashboardStateLabel tone="draft">
+                        {summary.label}
+                      </DashboardStateLabel>
+                    )
+                  }
+                  // Only a row an app has asked to send carries an action, so
+                  // this list does not hold the same shape on every row the
+                  // way the shared standard asks for. Declining is the one
+                  // answer this screen offers, and there is nothing to offer
+                  // on a row nobody has asked about: the row itself opens the
+                  // email, where every other step lives. See ADR-0039.
+                  actions={
+                    pendingRequest === null ? undefined : (
+                      <DashboardActionMenu
+                        label={`Actions for ${revision.subject}`}
+                        actions={[
+                          {
+                            id: "decline",
+                            label: "Decline the app's send request",
+                            onSelect: () => {
+                              void declineScheduleRequest(
+                                pendingRequest.proposalId,
+                              );
+                            },
+                          },
+                        ]}
                       />
-                    )}
-                    <strong>{revision.subject}</strong>
-                    <span>
-                      {summary.label === ""
-                        ? summary.date
-                        : `${summary.label} · ${summary.date}`}
-                    </span>
-                  </div>
-                  {pendingRequest === null ? null : (
-                    <p className="composer-hint">
-                      {pendingRequest.agentName} asked to send this at{" "}
-                      {formatLocalScheduleTime(
-                        pendingRequest.localDateTime,
-                        pendingRequest.ianaTimeZone,
-                      )}
-                      . Open the email to send it then, or decline the request.
-                    </p>
-                  )}
-                </div>
-                <div className="post-list-actions">
-                  {pendingRequest === null ? null : (
-                    <button
-                      type="button"
-                      className="copy-button"
-                      disabled={busy}
-                      onClick={() => {
-                        void declineScheduleRequest(pendingRequest.proposalId);
-                      }}
-                    >
-                      Decline
-                    </button>
-                  )}
-                  <a
-                    className="copy-button"
-                    href={campaignHref(campaign.id, workspace)}
-                    aria-label={`Open ${revision.subject}`}
-                  >
-                    Open
-                  </a>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                    )
+                  }
+                />
+              );
+            })}
+          </DashboardList>
+        )}
       {postSources.length === 0 ? null : (
         <form
           className="campaign-from-post"
@@ -277,14 +265,15 @@ export function CampaignList({
           </label>
           <button
             type="submit"
-            className="copy-button"
+            className="dash-button dash-button-plain"
             disabled={busy || senderDetailsMissing}
           >
             Create email from post
           </button>
         </form>
       )}
-      {message === "" ? null : <p role="status">{message}</p>}
-    </section>
+        {message === "" ? null : <p role="status">{message}</p>}
+      </section>
+    </>
   );
 }

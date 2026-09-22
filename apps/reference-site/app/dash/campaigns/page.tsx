@@ -57,16 +57,6 @@ export default async function DashboardCampaignsPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>Newsletter</h1>
-          <p>
-            Every email you have written. Open one to check it, send yourself a
-            test, then send it. Only you can authorise a send to your whole
-            list.
-          </p>
-        </div>
-      </div>
       <CampaignList
         csrfToken={mutationToken}
         workspace={dashboardWorkspace.workspaceId}
