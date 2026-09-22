@@ -508,6 +508,12 @@ item's unpublished revision. The internal `workspaceId` and revision number
 never appear as ordinary page copy; the dashboard says "unpublished changes"
 or "your draft" instead.
 
+**Email** — The dashboard's word for what this glossary calls a **campaign**.
+Newsletter says "Emails", "New email" and "Open" on the screens a site owner
+reads, because an owner writes and sends an email, not a campaign. Code
+identifiers (`Campaign`, `campaignId`, `campaign-list.tsx`) keep "campaign";
+only the words a person reads changed.
+
 **User** — The dashboard's word for what this glossary's Actors section and
 the code call a **member** (a human's membership in the site — its `role`
 and `status`). "Member" reads as jargon and does not say what the person can

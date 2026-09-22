@@ -1,6 +1,6 @@
-import { campaignListHref } from "@/components/campaign-links";
+import { CampaignBackLink } from "@/components/campaign-back-link";
 import { NewCampaignScreen } from "@/components/new-campaign-screen";
-import { campaignEditorSiteImages } from "@/src/campaign-editor-media";
+import { campaignEditorMedia } from "@/src/campaign-editor-media";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -33,14 +33,7 @@ export default async function NewCampaignPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <p>
-        <a
-          className="dashboard-back-link"
-          href={campaignListHref(dashboardWorkspace.workspaceId)}
-        >
-          ← Back to Newsletter
-        </a>
-      </p>
+      <CampaignBackLink workspace={dashboardWorkspace.workspaceId} />
       <div className="page-heading">
         <div>
           <h1>New email</h1>
@@ -53,14 +46,12 @@ export default async function NewCampaignPage({
       <NewCampaignScreen
         csrfToken={mutationToken}
         workspace={dashboardWorkspace.workspaceId}
-        media={{
-          csrfToken: mutationToken,
+        media={campaignEditorMedia({
+          mutationToken,
           workspaceId: dashboardWorkspace.workspaceId,
-          siteImages: campaignEditorSiteImages(
-            definition,
-            dashboardWorkspace.contentRevision.definition,
-          ),
-        }}
+          publishedDefinition: definition,
+          draftDefinition: dashboardWorkspace.contentRevision.definition,
+        })}
       />
     </main>
   );

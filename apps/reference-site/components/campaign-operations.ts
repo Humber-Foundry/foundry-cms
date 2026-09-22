@@ -53,12 +53,24 @@ const campaignStateRows: Readonly<
   },
 };
 
-/** The state and the date one campaign row shows. */
+/**
+ * The state and the date one campaign row shows.
+ *
+ * A server that answers with a state this screen has not been taught yet gets
+ * no label rather than a guess, and the row still shows when the email was
+ * last changed. The list must keep drawing either way.
+ */
 export function campaignRowSummary(
   campaign: Campaign,
 ): Readonly<{ label: string; date: string }> {
-  const row = campaignStateRows[campaign.lifecycleState];
-  return { label: row.label, date: row.date(campaign) };
+  const row: (typeof campaignStateRows)[CampaignLifecycleState] | undefined =
+    campaignStateRows[campaign.lifecycleState];
+  return row === undefined
+    ? {
+        label: "",
+        date: `last changed ${formatDashboardMoment(campaign.updatedAt)}`,
+      }
+    : { label: row.label, date: row.date(campaign) };
 }
 
 /** What per-campaign test readiness reports, as the server returns it. */

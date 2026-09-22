@@ -9,10 +9,10 @@ import {
   type CampaignRevision,
 } from "@humber-foundry/application";
 
-import { campaignListHref } from "@/components/campaign-links";
+import { CampaignBackLink } from "@/components/campaign-back-link";
 import { CampaignScreen } from "@/components/campaign-screen";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
-import { campaignEditorSiteImages } from "@/src/campaign-editor-media";
+import { campaignEditorMedia } from "@/src/campaign-editor-media";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -84,14 +84,7 @@ export default async function DashboardCampaignPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <p>
-        <a
-          className="dashboard-back-link"
-          href={campaignListHref(dashboardWorkspace.workspaceId)}
-        >
-          ← Back to Newsletter
-        </a>
-      </p>
+      <CampaignBackLink workspace={dashboardWorkspace.workspaceId} />
       <div className="page-heading">
         <div>
           <h1>{revision.subject}</h1>
@@ -108,14 +101,12 @@ export default async function DashboardCampaignPage({
         // Editor instead of refusing it after the fact.
         role={access.membership.role}
         initialRevision={revision}
-        media={{
-          csrfToken: mutationToken,
+        media={campaignEditorMedia({
+          mutationToken,
           workspaceId: dashboardWorkspace.workspaceId,
-          siteImages: campaignEditorSiteImages(
-            definition,
-            dashboardWorkspace.contentRevision.definition,
-          ),
-        }}
+          publishedDefinition: definition,
+          draftDefinition: dashboardWorkspace.contentRevision.definition,
+        })}
       />
     </main>
   );

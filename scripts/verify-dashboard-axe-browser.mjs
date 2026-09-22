@@ -133,6 +133,44 @@ async function checkDestination(page, origin, name, href) {
   }
 }
 
+/**
+ * Opens one saved email's screen and runs the same axe check there.
+ *
+ * The preview card and the four sending steps used to render on
+ * /dash/campaigns, which this sweep visits. Since #237 they are on one email's
+ * own screen, which needs an email to open, so this writes one through the
+ * writing box the first time and opens it from the list after that.
+ */
+async function checkCampaignScreen(page, origin) {
+  await page.goto(`${origin}/dash/campaigns`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  if ((await page.locator(".post-list li").count()) === 0) {
+    await page.getByRole("button", { name: "New email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns\/new/u, { timeout: 20_000 });
+    const composer = page.locator("form.composer");
+    await composer.waitFor({ state: "visible", timeout: 20_000 });
+    await composer.locator('input[name="subject"]').fill("News from the harbour");
+    await composer
+      .locator('textarea[name="previewText"]')
+      .fill("What changed at the harbour this month.");
+    await composer.locator('input[name="callToActionLabel"]').fill("Read more");
+    await composer
+      .locator('input[name="callToActionHref"]')
+      .fill("https://example.com/read");
+    await composer
+      .locator(".rich-text-editor [contenteditable]")
+      .fill("The new pontoon is finished and the winter berths are open.");
+    await page.getByRole("button", { name: "Save email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns(\?|$)/u, { timeout: 30_000 });
+  }
+  await page.locator(".post-list li").first().waitFor({ timeout: 20_000 });
+  const href = await page
+    .getByRole("link", { name: /^Open / })
+    .first()
+    .getAttribute("href");
+  await checkDestination(page, origin, "One email", href);
+}
+
 async function main() {
   const port = await availablePort();
   if (port === 3000) throw new Error("dashboard_axe_origin_not_distinct");
@@ -198,6 +236,7 @@ async function main() {
     for (const [name, href] of destinations) {
       await checkDestination(page, origin, name, href);
     }
+    await checkCampaignScreen(page, origin);
     await context.close();
 
     process.stdout.write(

@@ -82,21 +82,22 @@ export function CampaignList({
     // opens keeps what the owner sees equal to what the server holds, however
     // long the browser held the copy it was sent.
     void readCampaignList().then((list) => {
-      if (current && list !== null) {
-        setCampaigns(list.campaigns);
-        setScheduleRequests(list.scheduleRequests);
-      }
+      if (current) showList(list);
     });
     return () => {
       current = false;
     };
   }, []);
 
-  async function reloadCampaigns() {
-    const list = await readCampaignList();
+  /** Draw the server's answer. A list that could not be read changes nothing. */
+  function showList(list: Awaited<ReturnType<typeof readCampaignList>>) {
     if (list === null) return;
     setCampaigns(list.campaigns);
     setScheduleRequests(list.scheduleRequests);
+  }
+
+  async function reloadCampaigns() {
+    showList(await readCampaignList());
   }
 
   /**
@@ -203,7 +204,9 @@ export function CampaignList({
                     )}
                     <strong>{revision.subject}</strong>
                     <span>
-                      {summary.label} · {summary.date}
+                      {summary.label === ""
+                        ? summary.date
+                        : `${summary.label} · ${summary.date}`}
                     </span>
                   </div>
                   {pendingRequest === null ? null : (
