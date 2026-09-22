@@ -2123,12 +2123,12 @@
   background: var(--dash-surface);
 }
 
-/* The editor topbar's own use of the shared back link (#227): a compact bar
- * item, not the roomy full-width link every other screen draws. This overrides
- * `.dash-back-link`'s own spacing and colour for this one context; the base
- * rule above stays the one every other screen uses unchanged. */
+/* The editor topbar's own use of the shared back link (#227). In the bar it
+ * sits in a row with the title and the controls, so it drops the margin
+ * under it and takes the bar's muted ink. It keeps the shared 44px control
+ * height, which fits inside the bar's 3.25rem. The base rule above stays the
+ * one every other screen uses unchanged. */
 .editor-topbar .dash-back-link {
-  min-height: auto;
   margin-bottom: 0;
   gap: 0.35rem;
   color: var(--dash-ink-soft);

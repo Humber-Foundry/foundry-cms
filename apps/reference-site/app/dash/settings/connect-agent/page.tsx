@@ -4,6 +4,7 @@ import { mcpSupportedScopes } from "@humber-foundry/application";
 
 import { CopyAddressButton } from "@/components/copy-address-button";
 import { DashboardBackLink } from "@/components/dashboard-back-link";
+import { DashboardDoneLink } from "@/components/dashboard-done-link";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { loadMutationToken } from "@/src/dashboard-page-context";
 import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
@@ -175,13 +176,8 @@ export default async function ConnectAgentPage() {
 
       {/* The owner opens this screen to finish one task, so it has an end:
           Done returns to the Connected agents tab, where the new connection
-          is listed (#227). A link, not a button, so it can open in a new
-          tab like every other way back. */}
-      <p className="panel-actions">
-        <a className="dash-button dash-button-primary" href="/dash/settings/agents">
-          Done
-        </a>
-      </p>
+          is listed (#227). */}
+      <DashboardDoneLink href="/dash/settings/agents" />
     </main>
   );
 }

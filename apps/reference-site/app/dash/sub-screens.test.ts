@@ -31,7 +31,12 @@ import { settingsTabs } from "@/components/settings-tabs";
  *
  * A route that only redirects (no `<main>` of its own) draws no screen, so
  * it has nothing to put a back link on. The test checks that such a route
- * really does redirect rather than quietly skipping it.
+ * really does redirect; it does not skip the route without a check.
+ *
+ * This test reads each page's source text, in the way a lint rule would,
+ * instead of rendering every route with its own set of mocks. It proves the
+ * back link is written first inside `<main>`; the render-level tests beside
+ * each page prove what the screen shows.
  */
 const dashDirectory = fileURLToPath(new URL(".", import.meta.url));
 

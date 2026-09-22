@@ -86,6 +86,14 @@ async function checkBackLink(page, { screen, expectedText, expectedPath }) {
       `dashboard_back_links_wrong_words:${screen}:got "${text}", wanted it to include "${expectedText}"`,
     );
   }
+  // Every control is at least 44px high on a phone, the shared back link
+  // included, wherever a screen restyles it.
+  const box = await link.boundingBox();
+  if (box === null || box.height < 44) {
+    throw new Error(
+      `dashboard_back_links_too_short:${screen}:${box?.height ?? "none"}`,
+    );
+  }
   await link.click();
   await page.waitForURL(
     (url) => url.pathname === expectedPath,
