@@ -85,7 +85,10 @@ export default async function DashboardCampaignPage({
   return (
     <main className="dashboard-main" id="main">
       <p>
-        <a href={campaignListHref(dashboardWorkspace.workspaceId)}>
+        <a
+          className="dashboard-back-link"
+          href={campaignListHref(dashboardWorkspace.workspaceId)}
+        >
           ← Back to Newsletter
         </a>
       </p>

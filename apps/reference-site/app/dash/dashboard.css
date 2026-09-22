@@ -203,6 +203,15 @@
   color: var(--dash-ink-soft);
 }
 
+/* The link back out of a screen that opens from a list, such as one email's
+ * screen back to Newsletter (#237). It is a control a thumb has to hit, so it
+ * takes the shared control height rather than the height of its own words. */
+.dashboard-back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+}
+
 /* An empty destination that also offers the first step, such as Newsletter's
  * "New email" (#237). The sentence keeps the same reading width the rest of
  * the dashboard uses, and the button sits under it with a full gap. The extra
