@@ -1,7 +1,5 @@
-import { homePage } from "@humber-foundry/site-definition";
-
+import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { MediaManager } from "@/components/media-manager";
-import { mergeMediaOccurrenceState } from "@/components/media-manager-state";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -10,14 +8,16 @@ import {
 } from "@/src/dashboard-page-context";
 import {
   siteStaticImageTiles,
+  sitePhotoUsage,
   siteUsedAssetIds,
 } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Photos is the media library: upload a picture, replace the one used in a
- * particular place, and crop without changing the original file.
+ * Photos is the photo library: upload a picture, look at it, see where it is
+ * used, and delete one that is used nowhere. Putting a photo on a page happens
+ * in the page editor, at the photo itself. See ADR-0043.
  */
 export default async function DashboardMediaPage({
   searchParams,
@@ -35,33 +35,28 @@ export default async function DashboardMediaPage({
   const publishedDefinition = await loadPublishedDefinition();
   const draftDefinition = dashboardWorkspace.contentRevision.definition;
 
-  const occurrences = mergeMediaOccurrenceState(
-    [],
-    homePage(draftDefinition).media ?? [],
-  );
   // Every photo the site actually shows — built-in images and the photos placed
   // through the published site or the current draft — so the gallery is "all
   // your photos", not only the uploaded ones.
   const siteImages = siteStaticImageTiles(publishedDefinition, draftDefinition);
   const usedAssetIds = siteUsedAssetIds(publishedDefinition, draftDefinition);
+  // Every page counts, not only the home page, so a photo placed on any page
+  // names that page here.
+  const usage = sitePhotoUsage(publishedDefinition, draftDefinition);
 
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>Photos</h1>
-          <p>Every photo your site uses, in one place. Upload, review and tidy up.</p>
-        </div>
-      </div>
+      <DashboardPageHeader
+        title="Photos"
+        description="Every photo your site uses, in one place. Upload, review and tidy up."
+      />
       <MediaManager
         csrfToken={mutationToken}
         workspaceId={dashboardWorkspace.workspaceId}
         initialAssets={[]}
-        initialOccurrences={occurrences}
         siteImages={siteImages}
+        usage={usage}
         usedAssetIds={usedAssetIds}
-        contentRevision={dashboardWorkspace.contentRevision}
-        contentStale={dashboardWorkspace.contentStale}
       />
     </main>
   );

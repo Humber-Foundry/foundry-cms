@@ -31,10 +31,9 @@ export function createMediaOccurrenceId(value: string): MediaOccurrenceId {
 }
 
 /**
- * The two occurrence ids the reference media manager screen offers today,
- * before any page but the home page has its own media editor. This list
- * names only what that one screen shows; it is not the full set of ids the
- * write path accepts. See `requirePageMediaOccurrenceId` and ADR-0026.
+ * The home page's two occurrence ids. The media route checks an occurrence it
+ * renders against this list. It is not the full set of ids the write path
+ * accepts: see `requirePageMediaOccurrenceId`, ADR-0026 and ADR-0043.
  */
 export const renderedMediaOccurrenceIds = [
   "occurrence_home_hero",

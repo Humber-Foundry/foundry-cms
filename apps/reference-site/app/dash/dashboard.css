@@ -1729,17 +1729,6 @@
   background: var(--white);
 }
 
-.media-manager-preview {
-  max-width: 100%;
-  margin-inline: 0;
-}
-
-.media-manager-preview img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-
 /* Draft toolbar -----------------------------------------------------------
  *
  * The whole draft workflow lives in one bar that stays put while the page
@@ -3942,127 +3931,85 @@ div.media-gallery-tile-site {
   overflow-wrap: anywhere;
 }
 
+/* A photo used nowhere is stated plainly, without the accent colour a real
+ * use carries. */
+.media-gallery-badge-unused {
+  background: transparent;
+  padding-inline: 0;
+  color: var(--dash-ink-soft);
+  font-weight: 400;
+}
+
 .media-asset-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  margin-top: 1.25rem;
+  margin-top: 0.75rem;
 }
 
-.media-asset-hint {
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-}
-
-/* `.dashboard h3` sets `margin: 0` at the same specificity as a bare class
- * selector, and it is declared earlier in this file, so a plain
- * `.media-places-heading` rule loses that tie and never runs. Matching the
- * element type here wins the tie instead, so the heading keeps its own
- * space above the actions row. */
-h3.media-places-heading {
-  margin: 2rem 0 0.25rem;
-}
-
-.media-places-intro {
-  margin: 0 0 1rem;
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-}
-
-/* Exactly two places exist, so two cards always make one complete row. */
-.media-places {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.media-place {
+/* The selected photo, shown full width under the grid: a larger copy, the
+ * file facts, where the photo is used, and the delete action. */
+.media-photo-detail {
   display: flex;
-  flex-direction: column;
-  align-items: start;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1.25rem;
   border: 1px solid var(--dash-line);
   border-radius: var(--dash-radius);
   padding: 1rem;
   background: var(--dash-surface);
 }
 
-.media-place h4 {
+/* Square corners are for photos, so the frame keeps none. */
+.media-photo-detail-frame {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 13rem;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  /* The same neutral the gallery frames use. */
+  background: #e6ebe7;
+}
+
+.media-photo-detail-body {
+  flex: 1 1 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.media-photo-detail h3 {
   margin: 0;
   font-size: var(--dash-text);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.media-place p {
+.media-photo-detail-meta {
   margin: 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }
 
-.media-place .media-manager-preview {
-  align-self: stretch;
+p.media-photo-uses {
   margin: 0;
 }
 
-.media-place .button {
-  cursor: pointer;
+ul.media-photo-uses {
+  margin: 0;
+  padding: 0 0 0 1rem;
+  list-style: disc;
 }
 
-.media-place .button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.media-place-empty {
-  align-self: stretch;
-  border: 1px dashed var(--dash-line);
-  border-radius: var(--dash-field-radius);
-  padding: 1.5rem 1rem;
-  text-align: center;
-}
-
-.media-crop-editor {
-  align-self: stretch;
-  border-top: 1px solid var(--dash-line);
-  padding-top: 0.5rem;
-}
-
-.media-crop-editor summary {
-  display: flex;
-  align-items: center;
-  min-height: 2.4rem;
-  color: var(--dash-accent);
+.media-photo-uses,
+.media-photo-uses li {
+  color: var(--dash-ink);
   font-size: var(--dash-text-small);
-  font-weight: 600;
-  cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
-.media-crop-fields {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin: 0.5rem 0 0.75rem;
-}
-
-.media-crop-fields label {
-  display: grid;
-  gap: 0.3rem;
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-  font-weight: 700;
-}
-
-.media-crop-fields input {
-  box-sizing: border-box;
-  width: 100%;
-  border: 1px solid var(--dash-field-line);
-  border-radius: var(--dash-field-radius);
-  padding: 0.45rem 0.5rem;
-  font: inherit;
-  font-size: var(--dash-text-small);
-  font-weight: 400;
-}
 
 .media-empty {
   margin: 1.25rem 0 0;
@@ -4126,10 +4073,6 @@ h3.media-places-heading {
   align-items: center;
   gap: 0.75rem;
   margin-top: 1rem;
-}
-
-.media-place-picker {
-  margin-top: 0.5rem;
 }
 
 /* Change-photo field ------------------------------------------------------
@@ -4393,12 +4336,9 @@ h3.media-places-heading {
 /* Phone layout for the blocks above. This sits after them on purpose: the
  * base rules and these overrides share specificity, so file order decides. */
 @media (max-width: 760px) {
-  .media-places {
-    grid-template-columns: 1fr;
-  }
-
-  .media-crop-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* On a phone the selected photo sits above its facts, not beside them. */
+  .media-photo-detail-frame {
+    width: 100%;
   }
 
   /* The wrapped toolbar can put Publish at either edge; anchor its panel to
