@@ -6,8 +6,8 @@
  * they came from once the job is done. It is the same address the screen's
  * `DashboardBackLink` names.
  *
- * It is a link, not a button: a middle click opens the parent screen in a
- * new tab, the same as every other way back.
+ * It is a link, so a middle click opens the parent screen in a new tab,
+ * the same as every other way back.
  */
 export function DashboardDoneLink({
   href,

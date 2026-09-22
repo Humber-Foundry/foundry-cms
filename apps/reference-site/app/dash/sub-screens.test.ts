@@ -15,7 +15,7 @@ import { settingsTabs } from "@/components/settings-tabs";
  * #227: every dashboard sub-screen starts with the shared back link.
  *
  * A sub-screen is a route under `/dash` the owner reaches from another
- * screen, not from the sidebar. This test lists every route under
+ * screen. The sidebar does not open it. This test lists every route under
  * `app/dash/` from the file system, takes away the screens the sidebar opens
  * directly, and checks that each screen left renders `DashboardBackLink` as
  * the first thing inside `<main>`. A new route with no back link fails here.
