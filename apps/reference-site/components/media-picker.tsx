@@ -198,6 +198,12 @@ export function MediaPicker({
   const selectedAssetItem = assets.find(
     (candidate) => candidate.assetId === selectedAsset,
   );
+  // The picker holds the draft's photo places without the page each one is
+  // on, so a tile here says only that the site uses the photo. Photos names
+  // the page and the place.
+  const usedAssetIds = new Set(
+    occurrences.map((occurrence) => occurrence.assetId),
+  );
   const selectionReady =
     selectedSiteImage !== undefined ||
     (selectedAssetItem !== undefined && libraryToken !== undefined);
@@ -243,7 +249,7 @@ export function MediaPicker({
       {assets.length > 0 || siteImages.length > 0 ? (
         <MediaGallery
           assets={assets}
-          occurrences={occurrences}
+          usedAssetIds={usedAssetIds}
           siteImages={siteImages}
           selectableSiteImages
           libraryToken={libraryToken}

@@ -53,7 +53,6 @@ describe("photo gallery tiles", () => {
       root!.render(
         createElement(MediaGallery, {
           assets: [harbour],
-          occurrences: [],
           libraryToken,
           selectedAssetId: "",
           onSelect: () => undefined,

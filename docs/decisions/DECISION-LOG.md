@@ -30,7 +30,7 @@
 | [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
 | [ADR-0024](ADR-0024-editor-page-selection.md) | The address names the page being edited, and one module answers which page it is | Accepted | 2026-09-18 |
 | [ADR-0025](ADR-0025-preview-review-decision-record.md) | A person's decision about a preview is its own record | Accepted | 2026-09-18 |
-| [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted | 2026-09-19 |
+| [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted, amended 2026-09-21 | 2026-09-19 |
 | [ADR-0027](ADR-0027-settings-users-first-and-role-change.md) | Settings reads Users first, and a role change is a D1-only application command | Accepted | 2026-09-19 |
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |
 | [ADR-0029](ADR-0029-page-scoped-revision-preview.md) | The revision preview gets one route per page, and the preview's own page-href builder keeps a link inside it | Accepted | 2026-09-20 |
@@ -45,3 +45,4 @@
 | [ADR-0038](ADR-0038-blog-schedule-request-visibility-and-decline.md) | The dashboard shows an app's schedule request, and a person's decline is its own immutable record | Accepted | 2026-09-20 |
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
 | [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md) | A page component paints only from design tokens, and two tests fail when one does not | Accepted | 2026-09-21 |
+| [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md) | Photos is a library, and a photo is placed where it is seen | Accepted | 2026-09-21 |

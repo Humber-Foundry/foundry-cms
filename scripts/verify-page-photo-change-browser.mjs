@@ -292,26 +292,47 @@ async function main() {
     );
     await previewImage.first().waitFor({ state: "visible" });
 
-    // The gallery is "all your photos": a photo placed on the page shows there
-    // as "on the page", even when it was placed through an image field rather
-    // than a named occurrence place.
+    // Photos names where each photo is used, page and place together, even
+    // when it was placed through an image field rather than a named
+    // occurrence place. See issue #232.
     await page.goto(`${origin}/dash/media?workspace=${workspace}`);
     await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
-    await page
-      .locator("section.media-library .media-gallery-tile", {
-        hasText: "meadow.png",
-      })
-      .locator(".media-gallery-badge", { hasText: "On the page" })
+    const usedTile = page.locator(
+      "section.media-library .media-gallery-tile",
+      { hasText: "meadow.png" },
+    );
+    const usedOn = "Used on: Foundry Reference — Full-width image";
+    await usedTile
+      .locator(".media-gallery-badge", { hasText: usedOn })
       .first()
       .waitFor();
+
+    // A photo the site uses cannot be deleted, and the refusal names the
+    // place that uses it.
+    await usedTile.click();
+    await page
+      .getByRole("button", { name: "Delete selected photo" })
+      .click();
+    await page
+      .getByText("Foundry Reference — Full-width image")
+      .first()
+      .waitFor();
+    const refusal = await page.locator("[role='status']").textContent();
+    if (!refusal.includes("This photo cannot be deleted.")) {
+      throw new Error(`page_photo_delete_not_refused:${refusal}`);
+    }
+    if (!refusal.includes("Foundry Reference — Full-width image")) {
+      throw new Error(`page_photo_refusal_missing_place:${refusal}`);
+    }
+    await usedTile.waitFor({ state: "visible" });
 
     process.stdout.write(
       `Page photo change browser acceptance passed at ${origin}: ` +
         `added a full-width image section, changed its photo on the canvas ` +
         `through the shared picker, stored /api/media/${asset.assetId} in the ` +
         `draft, served that photo in the exact preview through the ` +
-        `authenticated media route, and showed it "on the page" in the ` +
-        `gallery.\n`,
+        `authenticated media route, named its use in Photos, and refused ` +
+        `to delete it.\n`,
     );
   } finally {
     await browser?.close();
