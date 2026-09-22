@@ -10,7 +10,7 @@
   min-height: 6rem;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--design-line);
 }
 
 .site-header nav {
@@ -20,7 +20,7 @@
 }
 
 .site-header nav a {
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 0.875rem;
   font-weight: 600;
   text-decoration: none;
@@ -51,7 +51,7 @@
     linear-gradient(
       135deg,
       transparent 62%,
-      color-mix(in srgb, var(--panel) 78%, transparent) 62%
+      color-mix(in srgb, var(--design-panel) 78%, transparent) 62%
     );
 }
 
@@ -68,7 +68,7 @@
 .hero-summary {
   max-width: 36rem;
   margin: 2rem 0 0;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: clamp(1.125rem, 2vw, 1.35rem);
   line-height: 1.5;
 }
@@ -92,7 +92,7 @@
 }
 
 .text-link {
-  color: var(--ink);
+  color: var(--design-ink);
   font-size: 0.9rem;
   font-weight: 700;
   text-underline-offset: 0.35rem;
@@ -100,7 +100,7 @@
 
 .services {
   padding-block: var(--design-section-padding);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--design-line);
 }
 
 .section-heading {
@@ -129,14 +129,14 @@
 .section-heading > p:last-child {
   max-width: 35rem;
   margin: 0;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 1.1rem;
 }
 
 .service-list {
   margin: clamp(4rem, 8vw, 7rem) 0 0;
   padding: 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--design-line);
   list-style: none;
 }
 
@@ -145,13 +145,13 @@
   grid-template-columns: 4rem 1fr;
   gap: 1rem;
   padding-block: 2rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--design-line);
 }
 
 .service-number {
   padding-top: 0.35rem;
   color: var(--design-accent);
-  font-family: var(--font-mono);
+  font-family: var(--design-mono-font);
   font-size: 0.75rem;
 }
 
@@ -166,7 +166,7 @@
 .service-list p {
   max-width: 45rem;
   margin: 0;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
 }
 
 .proof {
@@ -174,7 +174,7 @@
   grid-template-columns: 1.45fr 0.8fr;
   gap: clamp(3rem, 8vw, 8rem);
   padding-block: var(--design-section-padding);
-  background: var(--panel);
+  background: var(--design-panel);
 }
 
 .proof figure {
@@ -192,7 +192,7 @@
 
 .proof figcaption {
   margin-top: 1.5rem;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 0.875rem;
 }
 
@@ -209,12 +209,12 @@
   justify-content: space-between;
   gap: 1.5rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--design-line);
 }
 
 .metrics dt {
   order: 2;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 0.8rem;
 }
 
@@ -227,7 +227,7 @@
 .contact {
   padding-block: var(--design-section-padding);
   background: var(--design-accent-deep);
-  color: #ffffff;
+  color: var(--design-accent-ink);
 }
 
 .hero[data-component-variant="focused"] h1 {
@@ -249,7 +249,7 @@
 .services[data-component-variant="cards"] .service-list li {
   grid-template-columns: 1fr;
   padding: 1.5rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--design-line);
 }
 
 .proof[data-component-variant="plain"] {
@@ -257,17 +257,17 @@
 }
 
 .contact[data-component-variant="ink"] {
-  background: var(--ink);
+  background: var(--design-ink);
 }
 
 .contact .eyebrow {
-  color: color-mix(in srgb, var(--design-accent) 30%, #ffffff);
+  color: color-mix(in srgb, var(--design-accent) 30%, var(--design-accent-ink));
 }
 
 .contact .rich-text {
   max-width: 36rem;
   margin: 2rem 0;
-  color: color-mix(in srgb, var(--design-accent) 12%, #ffffff);
+  color: color-mix(in srgb, var(--design-accent) 12%, var(--design-accent-ink));
   font-size: 1.1rem;
 }
 
@@ -303,18 +303,18 @@
 
 .contact .rich-text blockquote {
   margin-inline: 0;
-  border-left: 0.2rem solid color-mix(in srgb, var(--design-accent) 30%, #ffffff);
+  border-left: 0.2rem solid color-mix(in srgb, var(--design-accent) 30%, var(--design-accent-ink));
   padding-left: 1rem;
   font-style: italic;
 }
 
 .button-light {
-  background: #ffffff;
+  background: var(--design-accent-ink);
   color: var(--design-accent-deep);
 }
 
 .button-light:hover {
-  background: color-mix(in srgb, var(--design-accent) 15%, #ffffff);
+  background: color-mix(in srgb, var(--design-accent) 15%, var(--design-accent-ink));
 }
 
 .story-section,
@@ -330,7 +330,7 @@
   grid-template-columns: minmax(0, 1.08fr) minmax(18rem, 0.92fr);
   gap: clamp(2.5rem, 7vw, 7rem);
   align-items: center;
-  background: #fffaf0;
+  background: var(--design-card);
 }
 
 .story-section[data-image-position="end"] figure {
@@ -340,8 +340,8 @@
 .story-section figure {
   margin: 0;
   transform: rotate(-1.2deg);
-  border: 0.7rem solid #fff;
-  box-shadow: 0 1.25rem 3rem rgba(33, 37, 48, 0.14);
+  border: 0.7rem solid var(--design-card);
+  box-shadow: 0 1.25rem 3rem var(--design-shadow);
 }
 
 .story-section img,
@@ -356,7 +356,6 @@
 .invitation-section h2 {
   max-width: 16ch;
   margin: 0.5rem 0 1.25rem;
-  color: #212530;
   font-family: var(--design-heading-font);
   font-size: clamp(2.25rem, 5vw, 4.5rem);
   font-weight: 500;
@@ -368,16 +367,33 @@
 .connector-heading > p:last-child,
 .invitation-section > p:last-of-type {
   max-width: 36rem;
-  color: #343947;
   font-size: clamp(1rem, 1.5vw, 1.18rem);
   line-height: 1.5;
+}
+
+/* The story and the connector heading sit on the page, so they take the page
+   ink. The invitation sits on the strong band, so every word in it takes the
+   ink that reads on the accent colour. Each selector sets its colour once. */
+.story-copy h2,
+.connector-heading h2 {
+  color: var(--design-ink);
+}
+
+.story-copy > p:last-child,
+.connector-heading > p:last-child {
+  color: var(--design-ink-soft);
+}
+
+.invitation-section h2,
+.invitation-section > p:last-of-type {
+  color: var(--design-accent-ink);
 }
 
 .handwritten-label {
   display: inline-block;
   margin: 0;
-  color: #14795e;
-  font-family: var(--font-serif);
+  color: var(--design-accent);
+  font-family: var(--design-heading-font);
   font-size: 1rem;
   font-style: italic;
   font-weight: 600;
@@ -390,7 +406,7 @@
   width: 100%;
   margin: 0;
   overflow: hidden;
-  background: #8298cd;
+  background: var(--design-band);
 }
 
 .photo-band img {
@@ -405,14 +421,14 @@
   bottom: 1.5rem;
   max-width: 28rem;
   padding: 0.8rem 1rem;
-  background: rgba(33, 37, 48, 0.9);
-  color: #fffaf0;
+  background: var(--design-overlay);
+  color: var(--design-accent-ink);
   font-size: 0.95rem;
   line-height: 1.45;
 }
 
 .connector-section {
-  background: #8298cd;
+  background: var(--design-band);
 }
 
 .connector-heading {
@@ -424,7 +440,7 @@
 
 .connector-heading .handwritten-label {
   grid-column: 1 / -1;
-  color: #212530;
+  color: var(--design-ink);
 }
 
 .connector-grid {
@@ -439,20 +455,20 @@
 .connector-grid li {
   min-height: 15rem;
   padding: 1.5rem;
-  background: #fffaf0;
-  border: 2px solid #212530;
-  box-shadow: 0.35rem 0.35rem 0 #17a578;
+  background: var(--design-card);
+  border: 2px solid var(--design-frame);
+  box-shadow: 0.35rem 0.35rem 0 var(--design-accent);
 }
 
 .connector-grid span {
-  color: #14795e;
+  color: var(--design-accent);
   font-size: 0.875rem;
   font-weight: 700;
 }
 
 .connector-grid h3 {
   margin: 2rem 0 0.65rem;
-  color: #212530;
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: 1.5rem;
   line-height: 1.25;
@@ -460,12 +476,12 @@
 
 .connector-grid p {
   margin: 0;
-  color: #343947;
+  color: var(--design-ink-soft);
   line-height: 1.5;
 }
 
 .invitation-section {
-  background: #17a578;
+  background: var(--design-band-strong);
   text-align: center;
 }
 
@@ -474,7 +490,7 @@
 }
 
 .invitation-section .handwritten-label {
-  color: #212530;
+  color: var(--design-accent-ink);
 }
 
 .invitation-action {
@@ -484,26 +500,178 @@
   justify-content: center;
   margin-top: 1.5rem;
   padding: 0.75rem 1.35rem;
-  border: 2px solid #212530;
-  background: #fffaf0;
-  color: #212530;
+  border: 2px solid var(--design-frame);
+  background: var(--design-card);
+  color: var(--design-ink);
   font-weight: 700;
   text-decoration: none;
-  box-shadow: 0.3rem 0.3rem 0 #8298cd;
+  box-shadow: 0.3rem 0.3rem 0 var(--design-band);
 }
 
 .invitation-action:hover,
 .invitation-action:focus-visible {
   transform: translate(-0.1rem, -0.1rem);
-  box-shadow: 0.4rem 0.4rem 0 #8298cd;
+  box-shadow: 0.4rem 0.4rem 0 var(--design-band);
 }
 
 .invitation-section small {
   display: block;
   margin-top: 1.25rem;
-  color: #212530;
+  color: var(--design-accent-ink);
   font-size: 0.875rem;
   line-height: 1.45;
+}
+
+/* The attention story.
+   A story beside a photograph, with sticky notes a visitor can move. Every
+   colour and font below comes from a design token, so the section follows the
+   look the owner chose. The notes keep their corner radius, and each one is
+   tall enough to grab on a phone. */
+
+.lh-section {
+  padding-block: var(--design-section-padding);
+  background: var(--design-card);
+}
+
+.lh-contained {
+  width: min(100%, var(--design-content-width));
+  margin-inline: auto;
+  padding-inline: var(--page-gutter);
+}
+
+.lh-story-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(16rem, 0.95fr);
+  gap: clamp(2.5rem, 7vw, 6rem);
+  align-items: start;
+}
+
+.lh-section h2 {
+  max-width: 16ch;
+  margin: 0 0 1.25rem;
+  color: var(--design-ink);
+  font-family: var(--design-heading-font);
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.lh-section p {
+  max-width: 36rem;
+  color: var(--design-ink-soft);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.lh-big-line {
+  color: var(--design-ink);
+}
+
+.marker-highlight {
+  padding: 0 0.25rem;
+  background: var(--design-band);
+  color: var(--design-ink);
+  font-weight: 700;
+}
+
+.lh-bare-photo {
+  margin: 0;
+}
+
+.lh-bare-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.lh-attention {
+  margin-top: clamp(3rem, 6vw, 5rem);
+}
+
+.lh-attention h3 {
+  margin: 0 0 0.5rem;
+  color: var(--design-ink);
+  font-family: var(--design-heading-font);
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.lh-attention-guidance p {
+  margin: 0;
+  color: var(--design-ink-soft);
+  font-size: 1.05rem;
+}
+
+.lh-attention-heading button {
+  min-height: 2.75rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--design-line);
+  border-radius: 0.5rem;
+  background: var(--design-card);
+  color: var(--design-ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.lh-attention-heading button:hover {
+  border-color: var(--design-accent);
+  color: var(--design-accent);
+}
+
+.lh-attention ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1.25rem;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lh-attention li {
+  min-height: 9rem;
+  padding: 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 0.5rem 1.5rem var(--design-shadow);
+  color: var(--design-ink);
+  cursor: grab;
+  line-height: 1.45;
+  touch-action: none;
+  transform: translate(var(--lh-note-x, 0), var(--lh-note-y, 0));
+}
+
+.lh-attention li[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.lh-attention li[data-tone="green"] {
+  background: color-mix(in srgb, var(--design-accent) 22%, var(--design-card));
+}
+
+.lh-attention li[data-tone="periwinkle"] {
+  background: var(--design-band);
+}
+
+.lh-attention li[data-tone="yellow"] {
+  background: var(--design-panel);
+}
+
+.lh-section blockquote {
+  max-width: 34ch;
+  margin: clamp(3rem, 6vw, 5rem) 0 0;
+  color: var(--design-ink);
+  font-family: var(--design-heading-font);
+  font-size: clamp(1.6rem, 3vw, 2.5rem);
+  letter-spacing: -0.025em;
+  line-height: 1.16;
+}
+
+@media (max-width: 760px) {
+  .lh-story-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .site-footer {
@@ -511,7 +679,7 @@
   justify-content: space-between;
   gap: 2rem;
   padding-block: 2.25rem;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 0.8rem;
 }
 
@@ -558,7 +726,7 @@
 .blog-post-excerpt {
   max-width: 42rem;
   margin-block: 2rem 4rem;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 1.2rem;
 }
 
@@ -659,7 +827,7 @@
 .newsletter-signup-title {
   max-width: 16ch;
   margin: 0 0 1.25rem;
-  color: var(--ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: clamp(2.25rem, 5vw, 4.5rem);
   font-weight: 500;
@@ -672,7 +840,7 @@
 .newsletter-signup-body {
   max-width: 36rem;
   margin: 0 0 2rem;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 1rem;
   line-height: 1.5;
 }
@@ -684,7 +852,7 @@
 .newsletter-signup-label {
   display: block;
   margin-bottom: 0.5rem;
-  color: var(--ink);
+  color: var(--design-ink);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -699,10 +867,10 @@
   flex: 1 1 18rem;
   min-height: 3rem;
   padding: 0.75rem 1rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--design-line);
   border-radius: 0.5rem;
-  background: #ffffff;
-  color: var(--ink);
+  background: var(--design-card);
+  color: var(--design-ink);
   font: inherit;
   font-size: 1rem;
 }
@@ -718,7 +886,7 @@
   border: 1px solid transparent;
   border-radius: 0.5rem;
   background: var(--design-accent-deep);
-  color: #ffffff;
+  color: var(--design-accent-ink);
   cursor: pointer;
   font: inherit;
   font-size: 1rem;
@@ -742,7 +910,7 @@
 .newsletter-signup-note {
   max-width: 36rem;
   margin: 1rem 0 0;
-  color: var(--ink-soft);
+  color: var(--design-ink-soft);
   font-size: 1rem;
   line-height: 1.5;
 }

@@ -1438,15 +1438,6 @@
   border-radius: var(--dash-radius);
 }
 
-.campaign-thumbnail {
-  width: 3rem;
-  height: 3rem;
-  object-fit: cover;
-  border-radius: 0.4rem;
-  margin-right: 0.6rem;
-  vertical-align: middle;
-}
-
 .copy-button {
   box-sizing: border-box;
   min-height: var(--dash-control-height);
@@ -4565,7 +4556,10 @@ ul.media-photo-uses {
   background: var(--dash-surface);
 }
 
-.send-flow > h3 {
+/* The two cards on one email's screen carry the same heading, at the same
+ * size, because neither is under the other (#237). */
+.send-flow > h2,
+.email-preview > h2 {
   margin: 0 0 0.75rem;
   font-size: var(--dash-h2);
 }
@@ -4614,8 +4608,7 @@ ul.media-photo-uses {
   font-size: var(--dash-text-small);
 }
 
-.send-step .copy-button,
-.send-step .button {
+.send-step .dash-button {
   min-height: var(--dash-control-height);
   margin-top: 0.5rem;
 }
@@ -4678,7 +4671,7 @@ ul.media-photo-uses {
   .send-step-time,
   .send-step-time label,
   .send-step-time input,
-  .send-step-time .copy-button {
+  .send-step-time .dash-button {
     width: 100%;
   }
 }

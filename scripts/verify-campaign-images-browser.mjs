@@ -1,10 +1,13 @@
 /**
- * Live acceptance for campaign images (issue #112).
+ * Live acceptance for campaign images (issue #112) and for Newsletter opening
+ * on the campaign list (issue #237).
  *
  * It runs the real dashboard, uploads three real photos through the real media
- * route, writes an email campaign, and sets a header image, a share image and
- * an inline body image — each through the shared media picker (#109). It then
- * checks that the saved campaign carries each photo's `/api/media/<assetId>`
+ * route, opens Newsletter on a site with no campaigns, goes into the writing
+ * box through "New email", writes an email campaign, and sets a header image, a
+ * share image and an inline body image — each through the shared media picker
+ * (#109). It then checks that the save returns to the list with the new email
+ * on it, that the saved campaign carries each photo's `/api/media/<assetId>`
  * reference, and that the email preview draws the header and inline photos and
  * that the public media route actually serves them, because a campaign image is
  * meant to be seen by every recipient (ADR-0014).
@@ -231,10 +234,16 @@ async function main() {
       });
     });
 
-    // Go to the campaign composer. It opens by itself when there are no
-    // campaigns yet.
+    // Newsletter opens on the campaign list, even with no campaigns yet
+    // (#237). The empty state is what offers the way into the writing box.
     await page.goto(`${origin}/dash/campaigns?workspace=${workspace}`);
     await page.getByRole("heading", { name: "Newsletter" }).waitFor();
+    await page.locator(".empty-state").waitFor({ state: "visible" });
+    if (await page.locator("form.composer").count()) {
+      throw new Error("campaign_list_opened_in_the_writing_box");
+    }
+    await page.getByRole("button", { name: "New email" }).click();
+    await page.waitForURL(/\/dash\/campaigns\/new\?workspace=workspace_/u);
     const composer = page.locator("form.composer");
     await composer.waitFor({ state: "visible" });
 
@@ -295,18 +304,20 @@ async function main() {
       await new Promise((settle) => setTimeout(settle, 200));
     }
 
-    // The save re-renders into the campaign list. The list draws the share
-    // image as a thumbnail, falling back to the header image, so the thumbnail
-    // renders on a preview surface too.
+    // The save returns to the campaign list, and the new email is one row on
+    // it. A row carries the subject, its state and its date; the shared row
+    // standard (#226) draws no thumbnail, so the share image is checked by
+    // the saved campaign above and by the media route below.
+    await page.waitForURL(/\/dash\/campaigns\?workspace=workspace_/u);
     await page
-      .locator(`img.campaign-thumbnail[src="${shareRef}"]`)
+      .getByRole("link", { name: "Harbour dispatch" })
       .first()
       .waitFor({ state: "visible" });
 
-    // Open the preview and confirm the header and inline photos are drawn.
-    const previewButton = page.getByRole("button", { name: "Preview" });
-    await previewButton.first().waitFor({ state: "visible" });
-    await previewButton.first().click();
+    // Open the email's own screen and confirm the preview draws the header and
+    // inline photos.
+    await page.getByRole("link", { name: "Harbour dispatch" }).first().click();
+    await page.waitForURL(/\/dash\/campaigns\/[0-9a-f-]{36}\?workspace=/u);
     const preview = page.locator("section.email-preview");
     await preview.waitFor({ state: "visible" });
     await preview
@@ -335,12 +346,14 @@ async function main() {
     }
 
     process.stdout.write(
-      `Campaign images browser acceptance passed at ${origin}: set a header ` +
-        `image (${headerRef}), a share image (${shareRef}) and an inline image ` +
-        `(${inlineRef}) through the shared picker, stored all three in the ` +
-        `saved campaign, drew the header and inline photos in the preview and ` +
-        `the share thumbnail in the list, and served all three through the ` +
-        `public media route.\n`,
+      `Campaign images browser acceptance passed at ${origin}: opened ` +
+        `Newsletter on the campaign list with no campaigns, went to the ` +
+        `writing box through "New email", set a header image (${headerRef}), ` +
+        `a share image (${shareRef}) and an inline image (${inlineRef}) ` +
+        `through the shared picker, stored all three in the saved campaign, ` +
+        `returned to the list with the new email on it, drew the header and ` +
+        `inline photos in the preview on the email's own screen, and served ` +
+        `all three through the public media route.\n`,
     );
   } finally {
     await browser?.close();

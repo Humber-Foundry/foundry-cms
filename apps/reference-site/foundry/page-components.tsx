@@ -159,14 +159,18 @@ export const attentionStoryComponent = createRegisteredPageComponent({
       maxItems: 8,
       fields: {
         body: textarea("Note", "the space between people"),
+        // The three papers follow the site's own colours, so they are named by
+        // position rather than by a colour word that would go out of date the
+        // moment the owner chooses another look. The stored values are left
+        // alone, because they are already in published sites.
         tone: {
           control: "select",
-          label: "Paper colour",
+          label: "Note paper",
           defaultValue: "green",
           options: [
-            { label: "Green", value: "green" },
-            { label: "Periwinkle", value: "periwinkle" },
-            { label: "Yellow", value: "yellow" },
+            { label: "First paper", value: "green" },
+            { label: "Second paper", value: "periwinkle" },
+            { label: "Third paper", value: "yellow" },
           ],
         },
       },

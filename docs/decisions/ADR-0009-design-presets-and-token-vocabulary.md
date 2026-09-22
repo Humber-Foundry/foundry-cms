@@ -1,7 +1,8 @@
 # ADR-0009: Preset looks are derived, and the token contract owns the palette
 
-- **Status:** Accepted
+- **Status:** Accepted, amended
 - **Date:** 2026-08-15
+- **Amended by:** [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md)
 
 ## Context
 
@@ -60,9 +61,9 @@ owner should see.
 ### The token contract owns the palette; the stylesheet owns the CSS; a test binds them
 
 Each registered option carries a `preview`: the exact font stack for a font
-option, the exact accent and its deep shade for an accent option, the five
-exact page tones for a page-tone option, or a relative size for a spacing or
-width option. The Design module draws its samples from these values, so a
+option, the exact accent with its deep shade and the ink that reads on it for
+an accent option, the exact page tones for a page-tone option, or a relative
+size for a spacing or width option. The Design module draws its samples from these values, so a
 swatch is painted with the same colour the page will use.
 
 The stylesheet keeps its own declarations, because that is what the browser
@@ -146,7 +147,14 @@ so a later reader does not mistake them for oversights.
   single colour, font or size to sample. Its card carries the plain label and
   description instead, and the live preview shows the arrangement the moment
   it is chosen, which is before anything is published.
-- **Four registered page components keep a fixed palette.** The image-and-copy
+- **Four registered page components keep a fixed palette.** *(Reversed by
+  [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md). The
+  owner reviewed the dashboard on 2026-09-21, chose another look, and the
+  preview panel did not move, because those fixed colours could not follow his
+  choice. A page component now paints only from the design tokens, and two
+  tests fail when one does not. The paragraph below is kept as the record of
+  what was decided first.)*
+  The image-and-copy
   story, photo band, connector cards and invitation bands in
   `apps/reference-site/app/public.css` paint themselves with fixed colours and
   hard offset shadows. That palette is their design, not a missed token: it is
