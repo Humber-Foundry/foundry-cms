@@ -1,3 +1,4 @@
+import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { MediaManager } from "@/components/media-manager";
 import {
   loadDashboardWorkspace,
@@ -45,12 +46,10 @@ export default async function DashboardMediaPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>Photos</h1>
-          <p>Every photo your site uses, in one place. Upload, review and tidy up.</p>
-        </div>
-      </div>
+      <DashboardPageHeader
+        title="Photos"
+        description="Every photo your site uses, in one place. Upload, review and tidy up."
+      />
       <MediaManager
         csrfToken={mutationToken}
         workspaceId={dashboardWorkspace.workspaceId}

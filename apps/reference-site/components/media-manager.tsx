@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { MediaAsset } from "@humber-foundry/application";
 
+import { DashboardEmptyState } from "./dashboard-empty-state";
 import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
 import { createMediaCatalogFence } from "./media-catalog-fence";
@@ -386,9 +387,9 @@ export function MediaManager({
           )}
         </>
       ) : (
-        <p className="media-empty">
-          No photos yet. Upload one above and it appears here.
-        </p>
+        <DashboardEmptyState title="No photos yet">
+          Upload a photo above and it appears here.
+        </DashboardEmptyState>
       )}
       <p role="status" aria-live="polite">{message}</p>
     </section>
