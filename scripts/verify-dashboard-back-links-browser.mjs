@@ -248,12 +248,15 @@ async function main() {
     ]) {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
-      // The dashboard creates the draft workspace on the server, so Pages
-      // renders its real editing surface as soon as Overview is open.
+      // The dashboard creates the draft workspace on the server, so Overview's
+      // "Edit site" link opens the page editor on the home page straight away
+      // (#228). Follow it once so the draft exists before the checks below.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
-      await page
-        .getByRole("link", { name: /^(Start|Continue) editing$/u })
-        .waitFor({ state: "visible" });
+      await page.getByRole("link", { name: "Edit site" }).click();
+      await page.waitForURL(
+        /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+      );
+      await page.getByRole("heading", { name: "Pages" }).waitFor();
 
       try {
         await checkPagesEditor(page, origin, viewportLabel);
