@@ -76,7 +76,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
     setupLinkLabel: "How to connect email",
     localDevelopmentSentence:
       "Email is off in local development, because this site holds no email " +
-      "provider credentials.",
+      "provider connection.",
     connectedSentence: "Email is connected.",
     notConnectedSentence: "Email is not connected yet.",
     connectedMeaning:
@@ -140,23 +140,24 @@ export function ConnectionStatus({
   const namesBehindDisclosure =
     readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
 
-  // Local development holds none of the settings a connected site holds, so
-  // the list names them all. Which kind puts them on the line and which puts
-  // them behind the disclosure is the same rule as for a setting that is
-  // absent on a live site, so one screen cannot read two ways.
+  // Local development names no setting on screen. Nothing is absent that
+  // anybody here has to install, so a list of configuration names would be
+  // words a site owner cannot use. The setup document behind the link holds
+  // them for whoever connects a real site.
   if (readiness.state === "local_development") {
     return (
       <p className="connection-status">
         {copy.localDevelopmentSentence}
-        {namesInline ? (
-          <> A connected site holds these settings: {missingNames}.</>
-        ) : null}
-        {namesBehindDisclosure ? (
+        {copy.settingNamesShownInline ? (
           <>
             {" "}
-            <HelpTip label={settingNamesLabel}>
-              {`A connected site holds them as ${missingNames}.`}
-            </HelpTip>
+            <a
+              href={`${documentationBaseAddress}${readiness.setupGuide}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {copy.setupLinkLabel}
+            </a>
           </>
         ) : null}
       </p>

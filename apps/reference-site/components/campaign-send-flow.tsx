@@ -14,10 +14,14 @@ import {
   type SendFlowCommand,
 } from "./campaign-operations";
 import { CampaignSendReview, sendNowLabel } from "./campaign-send-review";
+import { settingsTab } from "./settings-tabs";
 import {
   browserTimeZone,
   resolveSendTime,
 } from "./schedule-send-time";
+
+/** Where an owner sets the email connection on a live site (#240). */
+const settingsEmailHref = settingsTab.email.href;
 
 /** One step in the list, with what it still needs and what to do about it. */
 function SendStep({
@@ -350,6 +354,12 @@ export function CampaignSendFlow({
             </button>
           )}
           {setupGuideNote}
+          {localDevelopment ? (
+            <p className="send-step-need">
+              On a live site the email connection is set in{" "}
+              <a href={settingsEmailHref}>Settings → Email</a>.
+            </p>
+          ) : null}
           {notConnected || testRecipientIds.length > 0 ? null : (
             <p className="send-step-need">
               There is no verified test address on file, so a test cannot go

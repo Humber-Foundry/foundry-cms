@@ -107,8 +107,11 @@ export function CampaignEmailPreview({
     <section className="email-preview" aria-label="Email preview">
       <div className="email-preview-head">
         <h2>How the email looks</h2>
+        {/* The dashboard's one toggle shape, the same the page editor's
+          * Browse and Edit switch uses, so a chosen side reads the same way
+          * everywhere: the accent on its own light tint. */}
         <div
-          className="email-preview-widths"
+          className="mode-toggle email-preview-widths"
           role="group"
           aria-label="Read it at this width"
         >
@@ -116,7 +119,6 @@ export function CampaignEmailPreview({
             <button
               key={name}
               type="button"
-              className="dash-button dash-button-plain email-preview-width"
               aria-pressed={width === name}
               onClick={() => setWidth(name)}
             >

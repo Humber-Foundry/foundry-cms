@@ -61,7 +61,6 @@ import {
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import { environmentWithStoredSenderDetails } from "./stored-sender-details";
 import {
-  campaignDeliverySettingNames,
   campaignDeliverySetupGuide,
   listMissingCampaignDeliverySettings,
   type CampaignDeliveryReadiness,
@@ -481,11 +480,7 @@ export async function loadCampaignRequestContext(
   let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
   let delivery: CampaignDeliveryReadiness = Object.freeze({
     state: "local_development" as const,
-    // Local development holds none of the delivery settings and uses stub
-    // adapters, so every one of them is absent. Naming them all lets the
-    // Newsletter steps say exactly why no test can go out here, instead of
-    // reporting a bare failure that reads like a fault.
-    missingSettings: campaignDeliverySettingNames,
+    missingSettings: Object.freeze([]),
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,
   });

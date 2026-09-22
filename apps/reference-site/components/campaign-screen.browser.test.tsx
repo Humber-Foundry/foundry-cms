@@ -58,7 +58,6 @@ describe("one campaign's screen, browser acceptance", () => {
   function fakeNewsletterServer(
     options: {
       deliveryState?: string;
-      deliveryMissingSettings?: ReadonlyArray<string>;
       senderDetailsState?: string;
     } = {},
   ) {
@@ -229,7 +228,7 @@ describe("one campaign's screen, browser acceptance", () => {
           return Response.json({
             delivery: {
               state: options.deliveryState ?? "connected",
-              missingSettings: options.deliveryMissingSettings ?? [],
+              missingSettings: [],
               providerHealth: null,
               setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
             },
@@ -344,13 +343,7 @@ describe("one campaign's screen, browser acceptance", () => {
   });
 
   it("says why a test cannot go out in local development, and does not look broken", async () => {
-    const server = fakeNewsletterServer({
-      deliveryState: "local_development",
-      deliveryMissingSettings: [
-        "FOUNDRY_BREVO_API_KEY",
-        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
-      ],
-    });
+    const server = fakeNewsletterServer({ deliveryState: "local_development" });
     const host = mount(server.revision, "owner");
 
     // The button stays on the step, and the step says exactly why it cannot
@@ -367,14 +360,23 @@ describe("one campaign's screen, browser acceptance", () => {
     );
     expect(host.textContent).toContain(
       "Email is off in local development, because this site holds no email " +
-        "provider credentials.",
+        "provider connection.",
     );
-    // The same rule as a live site with a setting absent: the email
-    // connection puts the names on the line (ADR-0021).
+    // No configuration name reaches the screen. The setup document behind the
+    // link holds them for whoever connects a real site, and the owner is sent
+    // to the Settings section that carries the connection.
+    expect(host.textContent).not.toContain("FOUNDRY_");
     expect(host.textContent).toContain(
-      "A connected site holds these settings: FOUNDRY_BREVO_API_KEY, " +
-        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON.",
+      "On a live site the email connection is set in Settings → Email.",
     );
+    const settingsLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>("a"),
+    ).find((link) => link.textContent === "Settings → Email");
+    expect(settingsLink?.getAttribute("href")).toBe("/dash/settings/email");
+    const guideLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>("a"),
+    ).find((link) => link.textContent === "How to connect email");
+    expect(guideLink).toBeDefined();
     // Nothing was sent, and nothing reads as a fault.
     expect(server.commands).toHaveLength(0);
   });

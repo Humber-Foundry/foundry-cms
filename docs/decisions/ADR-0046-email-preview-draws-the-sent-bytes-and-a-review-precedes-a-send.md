@@ -60,16 +60,27 @@ character.
 
 The frame is set to the exact width the person chooses — 600 pixels for a
 computer, 390 for a phone — and never scaled, so the lines break where they
-will break in a real inbox.
+will break in a real inbox. The width switch is the dashboard's shared toggle,
+the same one the page editor's Browse and Edit switch uses, so the chosen side
+reads the same way here as everywhere else.
 
-**2. A refusal says which settings are absent.**
+**2. A refusal says why, in the owner's words, and names no setting on screen.**
 
-Delivery readiness in local development now names every delivery setting in
-`missingSettings`, because local development holds none of them. That is a
-fact about the installation, not a fault, and the test step says so in plain
-words with the names after it. The alternative — a bare `provider_unavailable`
-— reads as a bug in the dashboard when the answer is that the site is not
-connected.
+The test step in local development says that no test can go out, that nothing
+is broken, and that a test goes out once the site is connected. Under it, the
+connection line says email is off because this site holds no email provider
+connection, and links to the setup document; a second line says the email
+connection is set in Settings → Email on a live site.
+
+No configuration name appears on the screen. A list of `FOUNDRY_*` names is
+words a site owner cannot use, and the owner's rule is that no internal
+identifier belongs on a dashboard screen. The setup document behind the link
+names every one of them for whoever connects a real site. Delivery readiness
+in local development therefore reports no missing setting, because none is
+absent that anybody here has to install.
+
+The alternative this replaces — a bare `provider_unavailable` — read as a bug
+in the dashboard when the answer is that the site is not connected.
 
 **3. The review before a send is read from the sent revision, and the person
 confirms it.**
@@ -109,9 +120,8 @@ refusal code and its wording are unchanged. An agent still never sends
   how many. A gallery photo always draws.
 - The preview shows raw email HTML, so it carries none of the dashboard's
   typography. That is the point: an inbox carries none of it either.
-- Adding a setting to `campaignDeliverySettingNames` changes what the local
-  development step names. That is wanted: the list is the answer to "what does
-  a connected site hold".
+- Adding a delivery setting changes nothing on screen. The setup document is
+  the one place that names them, so it is the one place to keep current.
 - One more revision read per campaign report. It is the same revision the
   render already loaded.
 

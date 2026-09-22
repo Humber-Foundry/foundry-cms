@@ -1472,15 +1472,14 @@
   font-size: var(--dash-h2);
 }
 
-.email-preview-widths {
-  display: flex;
-  gap: var(--dash-space-2);
-}
-
-.email-preview-width[aria-pressed="true"] {
-  border-color: var(--dash-accent);
-  background: var(--dash-accent);
-  color: var(--dash-surface);
+/* The width switch is the shared toggle. It sits on an ordinary screen rather
+ * than in the page editor's top bar, so each side takes the full control
+ * height a phone needs. Both class names are named here so this outranks
+ * `.mode-toggle button`, which sets the shorter top-bar height further down
+ * this file. */
+.email-preview-widths.mode-toggle button {
+  min-height: var(--dash-control-height);
+  padding: 0 var(--dash-space-4);
 }
 
 /* The frame is drawn at the exact width of a real inbox, never scaled, so the
