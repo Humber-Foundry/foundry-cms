@@ -48,7 +48,6 @@ export function NewCampaignScreen({
         setMessage(refusalMessage(await refusalCodeOf(response)));
         return;
       }
-      setMessage("Email draft saved. Nothing is sent from here.");
       // The list is a server-rendered screen, and the browser still holds the
       // copy it read before this email existed. Drop that copy first, then go
       // back to the list, or the owner returns to a list without the email

@@ -234,44 +234,44 @@ export function CampaignList({
             })}
           </DashboardList>
         )}
-      {postSources.length === 0 ? null : (
-        <form
-          className="campaign-from-post"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const sourcePostRevisionId = String(
-              new FormData(event.currentTarget).get("sourcePostRevisionId") ??
-                "",
-            );
-            void createFromPost(sourcePostRevisionId);
-          }}
-        >
-          <label>
-            <span>Start from a blog post</span>
-            <select
-              name="sourcePostRevisionId"
-              required
+        {postSources.length === 0 ? null : (
+          <form
+            className="campaign-from-post"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const sourcePostRevisionId = String(
+                new FormData(event.currentTarget).get("sourcePostRevisionId") ??
+                  "",
+              );
+              void createFromPost(sourcePostRevisionId);
+            }}
+          >
+            <label>
+              <span>Start from a blog post</span>
+              <select
+                name="sourcePostRevisionId"
+                required
+                disabled={busy || senderDetailsMissing}
+              >
+                {postSources.map(({ post, artifact }) => (
+                  <option
+                    key={artifact.postRevisionId}
+                    value={artifact.postRevisionId}
+                  >
+                    {post.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="dash-button dash-button-plain"
               disabled={busy || senderDetailsMissing}
             >
-              {postSources.map(({ post, artifact }) => (
-                <option
-                  key={artifact.postRevisionId}
-                  value={artifact.postRevisionId}
-                >
-                  {post.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="dash-button dash-button-plain"
-            disabled={busy || senderDetailsMissing}
-          >
-            Create email from post
-          </button>
-        </form>
-      )}
+              Create email from post
+            </button>
+          </form>
+        )}
         {message === "" ? null : <p role="status">{message}</p>}
       </section>
     </>

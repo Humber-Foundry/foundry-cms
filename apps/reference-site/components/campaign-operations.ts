@@ -304,8 +304,8 @@ export async function readCampaignList(): Promise<Readonly<{
 }> | null> {
   const response = await fetch("/api/foundry-cms/campaigns", {
     cache: "no-store",
-  });
-  if (!response.ok) return null;
+  }).catch(() => null);
+  if (response === null || !response.ok) return null;
   const body = (await response.json()) as {
     campaigns: ReadonlyArray<
       Readonly<{ campaign: Campaign; revision: CampaignRevision }>

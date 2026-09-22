@@ -1438,15 +1438,6 @@
   border-radius: var(--dash-radius);
 }
 
-.campaign-thumbnail {
-  width: 3rem;
-  height: 3rem;
-  object-fit: cover;
-  border-radius: 0.4rem;
-  margin-right: 0.6rem;
-  vertical-align: middle;
-}
-
 .copy-button {
   box-sizing: border-box;
   min-height: var(--dash-control-height);
@@ -4677,8 +4668,7 @@ h3.media-places-heading {
   font-size: var(--dash-text-small);
 }
 
-.send-step .copy-button,
-.send-step .button {
+.send-step .dash-button {
   min-height: var(--dash-control-height);
   margin-top: 0.5rem;
 }
@@ -4741,7 +4731,7 @@ h3.media-places-heading {
   .send-step-time,
   .send-step-time label,
   .send-step-time input,
-  .send-step-time .copy-button {
+  .send-step-time .dash-button {
     width: 100%;
   }
 }
