@@ -103,14 +103,18 @@ try {
   const page = await context.newPage();
   await page.goto(`${origin}/dash`);
 
-  // The dashboard creates the draft workspace on the server, so Overview
-  // links straight into the page editor.
-  await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
-  await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
+  // The dashboard creates the draft workspace on the server, so Overview's
+  // site card opens the page editor on the home page straight away (#228).
+  await page.getByRole("link", { name: "Edit site" }).click();
+  await page.waitForURL(
+    /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+  );
   await page.getByRole("heading", { name: "Pages" }).waitFor();
 
-  // Pages opens on the list of every page, at this width as well. The owner
-  // taps a row to open that page in the editor.
+  // Pages also opens on the list of every page, at this width as well, when
+  // the address names no page. The owner taps a row to open that page.
+  const workspaceId = new URL(page.url()).searchParams.get("workspace");
+  await page.goto(`${origin}/dash/pages?workspace=${workspaceId}`);
   await page.locator(".pages-list-row").first().click();
   await page.waitForURL(
     /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,

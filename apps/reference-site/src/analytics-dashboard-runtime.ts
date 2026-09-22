@@ -199,6 +199,72 @@ function localDevelopmentSampleAllowed(): boolean {
   return process.env.NODE_ENV === "development";
 }
 
+/** The headline part of the Visitors read model, on its own. */
+export type AnalyticsOverviewSummary = Readonly<{
+  periodDays: ReportingPeriodDays;
+  /** True only for the made-up figures a developer sees on their own machine. */
+  sample: boolean;
+  overview: AnalyticsOverviewView;
+}>;
+
+/**
+ * The headline readings only, for Overview's key numbers.
+ *
+ * Overview shows one figure, so it reads one view. `loadAnalyticsDashboard`
+ * below runs seven queries because the Visitors screen draws all seven; doing
+ * that work for a single number would slow every Overview load.
+ *
+ * `null` means the read model could not answer. The caller then says so and
+ * shows no figure, the same rule the Visitors screen follows.
+ */
+export async function loadAnalyticsOverview(
+  humanContext: HumanAccessRequestContext,
+  {
+    now = () => new Date().toISOString(),
+    createContext = createAnalyticsDashboardContext,
+    periodDays = reportingPeriodDays[0],
+  }: {
+    now?: () => string;
+    createContext?: typeof createAnalyticsDashboardContext;
+    periodDays?: ReportingPeriodDays;
+  } = {},
+): Promise<AnalyticsOverviewSummary | null> {
+  if (humanContext.state !== "authorized") return null;
+  const actor = humanContext.identity;
+  const observedNow = now();
+  const range = defaultReportingRange(
+    observedNow,
+    defaultReportingTimeZone,
+    periodDays,
+  );
+  try {
+    const application = await createContext(humanContext, now);
+    const overview = await application.queries.overview({
+      actor,
+      range,
+      comparison: "previous_period",
+    });
+    return { periodDays, sample: false, overview };
+  } catch (error) {
+    if (isContractFailure(error)) throw error;
+    if (localDevelopmentSampleAllowed()) {
+      const sample = sampleAnalyticsDashboard({
+        now: observedNow,
+        periodDays,
+        timeZone: defaultReportingTimeZone,
+        siteId: installedSiteDefinition.site.id,
+        contentTitles: contentTitlesFor(installedSiteDefinition),
+        contentPaths: contentPathsFor(installedSiteDefinition),
+      });
+      return { periodDays, sample: true, overview: sample.overview };
+    }
+    console.error("analytics_overview_unavailable", {
+      failure: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+}
+
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
   {

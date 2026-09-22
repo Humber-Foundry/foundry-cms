@@ -344,9 +344,10 @@ async function main() {
       throw new Error("private_dashboard_blog_asked_for_a_workspace");
     }
 
-    // Overview reports that same draft, and it has changed nothing yet.
+    // Overview reports that same draft, and it has changed nothing yet. Its
+    // site card says so and offers the one way in (#228).
     await page.goto(`${origin}/dash`);
-    await page.getByRole("heading", { name: "Your draft" }).waitFor();
+    await page.getByText("Your draft matches your live site").waitFor();
     if (
       (await page
         .getByRole("button", { name: "Start a fresh draft" })
@@ -354,12 +355,16 @@ async function main() {
     ) {
       throw new Error("private_dashboard_overview_asked_for_a_workspace");
     }
-    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
-    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
+    await page.getByRole("link", { name: "Edit site" }).click();
+    await page.waitForURL(
+      /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+    );
     await page.getByRole("heading", { name: "Pages" }).waitFor();
 
-    // Pages opens on the list of every page. The owner opens one from the
-    // list, and the address then names the page it opened.
+    // Pages also opens on the list of every page when the address names no
+    // page. The owner opens one from the list, and the address then names it.
+    const workspaceId = new URL(page.url()).searchParams.get("workspace");
+    await page.goto(`${origin}/dash/pages?workspace=${workspaceId}`);
     await page.locator(".pages-list-row").first().click();
     await page.waitForURL(
       /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,

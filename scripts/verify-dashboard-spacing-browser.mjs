@@ -544,7 +544,7 @@ async function main() {
       // the same content the owner's own audit measured.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
       await page
-        .getByRole("link", { name: /^(Start|Continue) editing$/u })
+        .getByRole("link", { name: "Edit site" })
         .waitFor({ state: "visible" });
 
       for (const [name, href] of destinations) {

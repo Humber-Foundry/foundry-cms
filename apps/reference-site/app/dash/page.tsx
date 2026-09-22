@@ -2,6 +2,13 @@ import { campaignHref } from "@/components/campaign-links";
 import { formatLocalScheduleTime } from "@/components/schedule-time-format";
 import { AttentionList } from "@/components/attention-list";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
+import { SiteRenderer } from "@/components/site-renderer";
+import { SitePreviewFrame } from "@/components/site-preview-frame";
+import {
+  OverviewActivity,
+  OverviewNumbers,
+  SiteCard,
+} from "@/components/site-overview";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadPreviewsWaitingForReview,
@@ -9,6 +16,9 @@ import {
 } from "@/src/mcp-preview-review-runtime";
 import { loadBlogPostOperationalSummaries } from "@/src/blog-post-operations-runtime";
 import { blogScheduleRequestAgentNames } from "@/src/blog-schedule-request-runtime";
+import { loadAnalyticsOverview } from "@/src/analytics-dashboard-runtime";
+import { loadContentPublicationQueries } from "@/src/content-publication-runtime";
+import { formatDashboardMoment } from "@/src/dashboard-time";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -20,9 +30,32 @@ import {
 } from "@/src/dashboard-page-context";
 import { loadOverviewCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
 import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
-import type { BlogPostId } from "@humber-foundry/site-definition";
+import {
+  messagesOverviewNumber,
+  pagesOverviewNumber,
+  recentSiteActivity,
+  subscribersOverviewNumber,
+  visitsOverviewNumber,
+} from "@/src/overview-summary";
+import { loadSubscriberStateCounts } from "@/src/subscriber-ledger-runtime";
+import { homePage, type BlogPostId } from "@humber-foundry/site-definition";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * How far back the key numbers look. Visitors offers 7 days and 30 days;
+ * Overview reports the longer one, so a quiet week still shows a figure, and
+ * its link opens Visitors on the same period.
+ */
+const overviewPeriodDays = 30;
+
+/**
+ * The width the picture of the home page is laid out at before it is shrunk
+ * to fit the card. A desktop width, so the picture shows the site the way a
+ * reader on a computer sees it. `/dash/design` lays its own preview out the
+ * same way.
+ */
+const sitePreviewLayoutWidth = 1560;
 
 type PendingBlogScheduleRequest = Readonly<{
   postId: BlogPostId;
@@ -93,9 +126,26 @@ async function loadPendingBlogScheduleRequests(
 }
 
 /**
- * Overview answers one question: what should I do next? It shows the state of
- * the draft, anything waiting for attention, and a way into each job. The
- * editing surfaces themselves live on their own destinations.
+ * The address a reader types, taken from the site's own canonical origin.
+ * A blank or malformed origin gives no address, and the card then leaves
+ * the link out rather than printing a broken one.
+ */
+function publicAddressOf(canonicalOrigin: string): string | null {
+  try {
+    return new URL(canonicalOrigin).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Overview is the home of the dashboard. It answers three questions in one
+ * screen: what does my site look like and how do I change it, how is it
+ * doing, and what is waiting for me.
+ *
+ * Every number here comes from the screen that owns it, and links back to
+ * that screen. A source that cannot answer produces a sentence saying so,
+ * never a zero and never a figure worked out from something else.
  */
 export default async function DashboardOverviewPage({
   searchParams,
@@ -112,7 +162,10 @@ export default async function DashboardOverviewPage({
     staleRecovery,
   );
   const mutationToken = await loadMutationToken();
-  const messages = await loadMessagesAttention(access);
+  // A store that cannot answer must not take the whole screen down with it.
+  // Each of these reads its own source; a failure means the number beside it
+  // says which source is missing.
+  const messages = await loadMessagesAttention(access).catch(() => null);
   const previewsToReview = await loadPreviewsWaitingForReview({
     siteId: access.membership.siteId,
   });
@@ -134,14 +187,48 @@ export default async function DashboardOverviewPage({
   const pendingCampaignRequests =
     await loadOverviewCampaignScheduleRequests();
 
+  const analyticsOverview = await loadAnalyticsOverview(access, {
+    periodDays: overviewPeriodDays,
+  });
+  const subscriberCounts = await loadSubscriberStateCounts(access).catch(
+    () => null,
+  );
+  const publications = await loadContentPublicationQueries()
+    .then((queries) => queries.listHistory())
+    .catch(() => []);
+
+  const workspaceQuery = `workspace=${encodeURIComponent(
+    dashboardWorkspace.workspaceId,
+  )}`;
+  // "Edit site" opens the page editor on the home page, in this person's own
+  // draft. `resolveEditorPage` reads the page from `?page=`.
+  const editHref = `/dash/pages?${workspaceQuery}&page=${encodeURIComponent(
+    homePage(contentRevision.definition).id,
+  )}`;
+  const publicAddress = publicAddressOf(definition.site.canonicalOrigin);
+  const unreadMessages = messages?.unreadCount ?? 0;
+  const heldMessages = messages?.heldForReview ?? 0;
+
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>{definition.site.name}</h1>
-          <p>{definition.site.description}</p>
-        </div>
-      </div>
+      <SiteCard
+        siteName={definition.site.name}
+        // The dashboard and the live site are served by the same app, so the
+        // site's own root is the address that always opens.
+        publicHref="/"
+        publicAddress={publicAddress ?? definition.site.name}
+        editHref={editHref}
+        hasDraftChanges={contentRevision.revision > 0}
+        preview={
+          <SitePreviewFrame layoutWidth={sitePreviewLayoutWidth}>
+            <SiteRenderer
+              definition={definition}
+              page={homePage(definition)}
+              editingSurface
+            />
+          </SitePreviewFrame>
+        }
+      />
 
       {needsFreshWorkspace ? (
         <ContentDraftRecovery
@@ -151,40 +238,25 @@ export default async function DashboardOverviewPage({
           durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
           reason={recoveryReasonOf(dashboardWorkspace)}
         />
-      ) : (
-        <section className="panel" aria-labelledby="draft-state">
-          <h2 id="draft-state">Your draft</h2>
-          {contentRevision.revision === 0 ? (
-            <p>
-              Your draft is ready and matches your live site. Open Pages to
-              start changing it. Nothing you change reaches the live site until
-              you publish.
-            </p>
-          ) : (
-            <p>
-              You have unpublished changes. Open Pages to keep editing, or
-              publish when you are happy with the preview.
-            </p>
-          )}
-          <p className="panel-actions">
-            <a
-              className="button button-primary"
-              href={`/dash/pages?workspace=${encodeURIComponent(
-                dashboardWorkspace.workspaceId,
-              )}`}
-            >
-              {contentRevision.revision === 0
-                ? "Start editing"
-                : "Continue editing"}
-            </a>
-          </p>
-        </section>
-      )}
+      ) : null}
+
+      <OverviewNumbers
+        sample={analyticsOverview?.sample ?? false}
+        numbers={[
+          visitsOverviewNumber(
+            analyticsOverview?.overview ?? null,
+            overviewPeriodDays,
+          ),
+          messagesOverviewNumber(messages === null ? null : unreadMessages),
+          subscribersOverviewNumber(subscriberCounts?.confirmed ?? null),
+          pagesOverviewNumber(definition.pages.length),
+        ]}
+      />
 
       <section aria-labelledby="attention">
         <h2 id="attention">Needs attention</h2>
-        {messages.unreadCount === 0 &&
-        messages.heldForReview === 0 &&
+        {unreadMessages === 0 &&
+        heldMessages === 0 &&
         previewsToReview.length === 0 &&
         pendingScheduleRequests.length === 0 &&
         pendingCampaignRequests.length === 0 ? (
@@ -205,9 +277,9 @@ export default async function DashboardOverviewPage({
               })),
               ...pendingScheduleRequests.map((request) => ({
                 key: `schedule-${request.postId}`,
-                href: `/dash/blog?workspace=${encodeURIComponent(
-                  dashboardWorkspace.workspaceId,
-                )}#blog-post-${encodeURIComponent(request.postId)}`,
+                href: `/dash/blog?${workspaceQuery}#blog-post-${encodeURIComponent(
+                  request.postId,
+                )}`,
                 label: `${request.agentName} asked to publish "${request.postTitle}" at ${request.requestedTime}`,
               })),
               ...pendingCampaignRequests.map((request) => ({
@@ -223,24 +295,24 @@ export default async function DashboardOverviewPage({
                   request.ianaTimeZone,
                 )}`,
               })),
-              ...(messages.unreadCount > 0
+              ...(unreadMessages > 0
                 ? [
                     {
                       key: "messages-unread",
                       href: "/dash/forms",
-                      label: `${messages.unreadCount} message${
-                        messages.unreadCount === 1 ? "" : "s"
+                      label: `${unreadMessages} message${
+                        unreadMessages === 1 ? "" : "s"
                       } you have not read`,
                     },
                   ]
                 : []),
-              ...(messages.heldForReview > 0
+              ...(heldMessages > 0
                 ? [
                     {
                       key: "messages-held",
                       href: "/dash/forms",
-                      label: `${messages.heldForReview} message${
-                        messages.heldForReview === 1 ? "" : "s"
+                      label: `${heldMessages} message${
+                        heldMessages === 1 ? "" : "s"
                       } held as spam`,
                     },
                   ]
@@ -249,6 +321,16 @@ export default async function DashboardOverviewPage({
           />
         )}
       </section>
+
+      <OverviewActivity
+        items={recentSiteActivity({
+          publications,
+          draftSavedAt: contentRevision.createdAt,
+          draftRevision: contentRevision.revision,
+          editorHref: editHref,
+          formatMoment: formatDashboardMoment,
+        })}
+      />
     </main>
   );
 }
