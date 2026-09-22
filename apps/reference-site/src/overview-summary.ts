@@ -209,6 +209,10 @@ function publishLabel(status: ContentPublicationStatus): string {
   if (status === "failed" || status === "blocked") {
     return "A publish stopped before anything went live";
   }
+  // The CMS lost sight of this publish; it is not known to be running.
+  if (status === "unknown") {
+    return "What happened to a publish is still being checked";
+  }
   return "A publish is still running";
 }
 

@@ -40,9 +40,13 @@ export function SitePreviewFrame({
     if (element === null) return;
     const measure = () => {
       const width = element.getBoundingClientRect().width;
-      if (width > 0) setScale(width / layoutWidth);
+      // Never larger than life: a frame wider than the layout would blow
+      // the page up rather than show it at its own size.
+      if (width > 0) setScale(Math.min(1, width / layoutWidth));
     };
     measure();
+    // A browser without ResizeObserver still gets the first measurement.
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();

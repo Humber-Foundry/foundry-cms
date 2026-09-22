@@ -239,4 +239,18 @@ describe("recentSiteActivity", () => {
       "A publish stopped before anything went live",
     );
   });
+
+  it("does not call a publish with an unknown outcome running", () => {
+    const items = recentSiteActivity({
+      publications: [publication("p1", "unknown", "2026-09-02T00:00:00.000Z")],
+      draftSavedAt: "2026-09-01T00:00:00.000Z",
+      draftRevision: 0,
+      editorHref,
+      formatMoment,
+    });
+
+    expect(items[0].label).toBe(
+      "What happened to a publish is still being checked",
+    );
+  });
 });

@@ -2,6 +2,7 @@ import { campaignHref } from "@/components/campaign-links";
 import { formatLocalScheduleTime } from "@/components/schedule-time-format";
 import { AttentionList } from "@/components/attention-list";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
+import { dashboardRoutes } from "@/components/dashboard-destinations";
 import { SiteRenderer } from "@/components/site-renderer";
 import { SitePreviewFrame } from "@/components/site-preview-frame";
 import {
@@ -17,6 +18,7 @@ import {
 import { loadBlogPostOperationalSummaries } from "@/src/blog-post-operations-runtime";
 import { blogScheduleRequestAgentNames } from "@/src/blog-schedule-request-runtime";
 import { loadAnalyticsOverview } from "@/src/analytics-dashboard-runtime";
+import type { ReportingPeriodDays } from "@/src/analytics-reporting-period";
 import { loadContentPublicationQueries } from "@/src/content-publication-runtime";
 import { formatDashboardMoment } from "@/src/dashboard-time";
 import {
@@ -48,7 +50,7 @@ export const dynamic = "force-dynamic";
  * which is also one of the two periods the Visitors screen offers, so the
  * number's link opens Visitors on the same period.
  */
-const overviewPeriodDays = 30;
+const overviewPeriodDays: ReportingPeriodDays = 30;
 
 /**
  * The width the picture of the home page is laid out at before it is shrunk
@@ -166,7 +168,7 @@ export default async function DashboardOverviewPage({
     await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
-    "/dash",
+    dashboardRoutes.overview,
     staleRecovery,
   );
   const mutationToken = await loadMutationToken();
@@ -223,7 +225,7 @@ export default async function DashboardOverviewPage({
   const publishedHomePage = homePage(definition);
   const draftHomePage = homePage(contentRevision.definition);
   // `resolveEditorPage` reads the page the editor opens from `?page=`.
-  const editHref = `/dash/pages?${workspaceQuery}&page=${encodeURIComponent(
+  const editHref = `${dashboardRoutes.pages}?${workspaceQuery}&page=${encodeURIComponent(
     draftHomePage.id,
   )}`;
   const publicAddress = publicSiteAddress(definition.site.canonicalOrigin);
@@ -317,7 +319,7 @@ export default async function DashboardOverviewPage({
               })),
               ...pendingScheduleRequests.map((request) => ({
                 key: `schedule-${request.postId}`,
-                href: `/dash/blog?${workspaceQuery}#blog-post-${encodeURIComponent(
+                href: `${dashboardRoutes.blog}?${workspaceQuery}#blog-post-${encodeURIComponent(
                   request.postId,
                 )}`,
                 label: `${request.agentName} asked to publish "${request.postTitle}" at ${request.requestedTime}`,
@@ -339,7 +341,7 @@ export default async function DashboardOverviewPage({
                 ? [
                     {
                       key: "messages-unread",
-                      href: "/dash/forms",
+                      href: dashboardRoutes.messages,
                       label: `${unreadMessages} message${
                         unreadMessages === 1 ? "" : "s"
                       } you have not read`,
@@ -350,7 +352,7 @@ export default async function DashboardOverviewPage({
                 ? [
                     {
                       key: "messages-held",
-                      href: "/dash/forms",
+                      href: dashboardRoutes.messages,
                       label: `${heldMessages} message${
                         heldMessages === 1 ? "" : "s"
                       } held as spam`,
