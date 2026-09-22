@@ -13,6 +13,7 @@ import {
   type DashboardAction,
 } from "./dashboard-action-menu";
 import { DashboardList, DashboardListRow } from "./dashboard-list";
+import { DashboardStateLabel } from "./dashboard-state-label";
 
 async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   const deadline = Date.now() + 5_000;
@@ -220,7 +221,7 @@ describe("DashboardListRow, the whole row is one link", () => {
     followed = [];
   });
 
-  function renderRow() {
+  function renderRow(state?: React.ReactNode) {
     host = document.createElement("div");
     // Every dashboard screen renders inside `.dashboard`, which is where the
     // spacing, type and colour tokens are declared. Without it the rules
@@ -235,6 +236,7 @@ describe("DashboardListRow, the whole row is one link", () => {
             href="#about"
             title="About us"
             note="/about"
+            state={state}
             actions={
               <DashboardActionMenu
                 label="Actions for About us"
@@ -274,6 +276,40 @@ describe("DashboardListRow, the whole row is one link", () => {
     );
 
     expect(followed).toEqual(["#about"]);
+  });
+
+  it("gives the link cover the card's corners on the first and last row", async () => {
+    await page.viewport(1024, 768);
+    renderRow();
+    const link = host!.querySelector(".dash-row-link") as HTMLElement;
+    const cover = getComputedStyle(link, "::after");
+
+    // The row is both the first and the last row here, so the cover is
+    // rounded on all four corners. A square cover would cut the corner off
+    // the rounded card when the row takes focus.
+    expect(Number.parseFloat(cover.borderTopLeftRadius)).toBeGreaterThan(0);
+    expect(Number.parseFloat(cover.borderBottomRightRadius)).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("keeps the action menu beside the title on a phone, with the state under it", async () => {
+    await page.viewport(390, 800);
+    renderRow(
+      <DashboardStateLabel tone="live">On your site</DashboardStateLabel>,
+    );
+    const box = (selector: string) =>
+      host!.querySelector(selector)!.getBoundingClientRect();
+    const title = box(".dash-row-title");
+    const state = box(".dash-row-state");
+    const actions = box(".dash-row-actions");
+
+    // The state drops under the title.
+    expect(state.top).toBeGreaterThanOrEqual(title.bottom);
+    // The menu stays on the title's line, at the right of the row.
+    expect(actions.top).toBeLessThan(state.top);
+    expect(actions.left).toBeGreaterThan(title.right);
+    await page.viewport(1024, 768);
   });
 
   it("does not follow the link when the action menu is pressed", async () => {

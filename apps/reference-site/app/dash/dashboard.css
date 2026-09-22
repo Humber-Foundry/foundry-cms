@@ -31,6 +31,8 @@
   --dash-ink: #17201d;
   --dash-ink-soft: #4a5651;
   --dash-accent: #14563d;
+  /* The accent darkened, for the hover and focus state of a primary
+   * button. It is the dashboard's own green, not the public site's. */
   --dash-accent-deep: #0e3f2c;
   --dash-accent-tint: #e7f0ea;
   /* The ink for a state that is written but not on the site yet. The same
@@ -241,8 +243,14 @@
 /* Shared dashboard components (issue #226) --------------------------------
  *
  * One visual standard for every dashboard screen. The components in
- * `components/dashboard-*.tsx` draw these classes, and no screen writes its
- * own header, row, menu or empty box any more.
+ * `components/dashboard-*.tsx` draw these classes. New dashboard work uses
+ * them and writes no header, row, menu or empty box of its own.
+ *
+ * The older one-off rules are still here, because the screens that use them
+ * are rebuilt in their own tickets: `.pages-list-rows` and
+ * `.pages-list-row` for Pages, `.button` for buttons, `.state-label` and
+ * `.state-dirty` for states, `.empty-state` for an empty box. Each screen
+ * ticket moves its screen across and takes its old rules out with it.
  *
  * Every gap, margin and padding here comes from the spacing scale at the
  * top of this file, and every text size comes from the type scale. A few
@@ -385,7 +393,11 @@
  * words start on the same line down the whole list and the eye can read the
  * column at a glance. 10rem holds the longest state the dashboard writes;
  * a longer one widens its own row rather than wrapping. A list with no
- * states never reserves the space. */
+ * states never reserves the space.
+ *
+ * Every row is its own grid, so the column only lines up when the rows
+ * match each other. Give every row in one list the same shape: a state on
+ * all of them or none, and an action menu on all of them or none. */
 .dash-row:has(.dash-row-state) {
   grid-template-columns: minmax(0, 1fr) minmax(max-content, 10rem) auto;
 }

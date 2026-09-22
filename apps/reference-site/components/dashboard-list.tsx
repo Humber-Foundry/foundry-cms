@@ -40,6 +40,10 @@ export function DashboardList({
  * `DashboardActionMenu`. Do not put a row of plain buttons in `actions`; a
  * long row of buttons is what this component replaces.
  *
+ * Give every row in one list the same shape: a state on all of them or on
+ * none, and a menu on all of them or on none. Each row is laid out on its
+ * own, so a list of mixed shapes does not line its columns up.
+ *
  * This component and `DashboardList` run on the server as well as in the
  * browser. `DashboardActionMenu` runs in the browser only, so a row with a
  * menu has to be built by a Client Component.
