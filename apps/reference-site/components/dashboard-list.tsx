@@ -39,6 +39,10 @@ export function DashboardList({
  * Use `state` for a `DashboardStateLabel` and `actions` for a
  * `DashboardActionMenu`. Do not put a row of plain buttons in `actions`; a
  * long row of buttons is what this component replaces.
+ *
+ * This component and `DashboardList` run on the server as well as in the
+ * browser. `DashboardActionMenu` runs in the browser only, so a row with a
+ * menu has to be built by a Client Component.
  */
 export function DashboardListRow({
   href,

@@ -159,6 +159,26 @@ describe("DashboardActionMenu, mouse and keyboard", () => {
     expect(trigger.element().getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("closes on Tab and carries on from the button, not from the top of the page", async () => {
+    renderMenu();
+    const after = document.createElement("button");
+    after.type = "button";
+    after.textContent = "After";
+    document.body.append(after);
+
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for About us" }),
+    );
+    await waitFor(menu);
+    await userEvent.tab();
+
+    await waitFor(closed);
+    // The menu closes and focus lands on the next control after the button.
+    // Without the handler's own focus call it would fall to the body, and
+    // the next Tab would start again at the top of the page.
+    expect(document.activeElement).toBe(after);
+  });
+
   it("closes when the button is pressed again, and when a press lands outside it", async () => {
     renderMenu();
     const trigger = page.getByRole("button", { name: "Actions for About us" });

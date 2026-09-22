@@ -23,7 +23,7 @@ export function DashboardEmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="dash-empty">
+    <div className="empty-state dash-empty">
       <h3 className="dash-empty-title">{title}</h3>
       <p className="dash-empty-text">{children}</p>
       {action === undefined ? null : (

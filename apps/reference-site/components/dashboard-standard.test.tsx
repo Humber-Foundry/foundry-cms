@@ -60,7 +60,9 @@ describe("DashboardList and DashboardListRow", () => {
         href="/dash/pages?page=about"
         title="About us"
         note="/about"
-        state={<DashboardStateLabel tone="live">Published</DashboardStateLabel>}
+        state={
+          <DashboardStateLabel tone="live">On your site</DashboardStateLabel>
+        }
         actions={
           <DashboardActionMenu
             label="Actions for About us"
@@ -98,17 +100,19 @@ describe("DashboardList and DashboardListRow", () => {
 describe("DashboardStateLabel", () => {
   it("draws the owner's own word, with the colour set by the tone", () => {
     const markup = renderToStaticMarkup(
-      <DashboardStateLabel tone="draft">Draft changes</DashboardStateLabel>,
+      <DashboardStateLabel tone="draft">
+        Changed since you published
+      </DashboardStateLabel>,
     );
 
     expect(markup).toContain('class="dash-state dash-state-draft"');
-    expect(markup).toContain("Draft changes");
+    expect(markup).toContain("Changed since you published");
   });
 
   it("has one class per tone, so colour alone tells the states apart", () => {
     for (const tone of ["live", "draft", "plain", "problem"] as const) {
       const markup = renderToStaticMarkup(
-        <DashboardStateLabel tone={tone}>Published</DashboardStateLabel>,
+        <DashboardStateLabel tone={tone}>On your site</DashboardStateLabel>,
       );
       expect(markup).toContain(`dash-state-${tone}`);
     }
@@ -163,7 +167,9 @@ describe("DashboardEmptyState", () => {
       </DashboardEmptyState>,
     );
 
-    expect(markup).toContain('class="dash-empty"');
+    // The dashed box comes from the older `.empty-state`; `.dash-empty`
+    // only adds the layout for the heading and the action.
+    expect(markup).toContain('class="empty-state dash-empty"');
     expect(markup).toContain("No posts yet");
     expect(markup).toContain("Write a post to start your blog.");
     expect(markup).toContain('class="dash-empty-action"');

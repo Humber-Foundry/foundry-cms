@@ -226,6 +226,10 @@ const collectTightText = (minimumTextGap) => {
  * A dashboard screen must fit the width it is given. A sideways scrollbar
  * hides part of every row and makes the screen feel broken. One pixel of
  * slack is allowed for a fractional layout width the browser rounds up.
+ *
+ * This runs inside the browser through `page.evaluate`, so it can call
+ * nothing outside itself. That is why it writes out its own element
+ * description rather than sharing `path` from `collectTightText`.
  */
 const collectHorizontalOverflow = () => {
   const root = document.documentElement;

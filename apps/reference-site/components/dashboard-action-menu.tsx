@@ -35,6 +35,12 @@ export type DashboardAction = Readonly<{
  * - Enter or Space runs the action under the cursor and closes the menu.
  * - Escape closes the menu and puts focus back on the button.
  * - Tab closes the menu, and a press outside it closes it too.
+ *
+ * Every action carries an `onSelect` function, and a function cannot cross
+ * from a Server Component into a Client Component as a prop. So the piece
+ * that builds the action list must itself be a Client Component. A server
+ * page loads the data and hands it to one client component, which then
+ * draws the rows and their menus.
  */
 export function DashboardActionMenu({
   label,
@@ -108,7 +114,12 @@ export function DashboardActionMenu({
       return;
     }
     if (event.key === "Tab") {
-      setOpen(false);
+      // The menu closes, so React would take the focused action out of the
+      // page before the browser moves focus, and focus would fall to the
+      // body — the next Tab would then start again at the top of the page.
+      // Putting focus on the button first means Tab carries on from the
+      // button, which is where the owner was.
+      closeAndReturnFocus();
       return;
     }
     if (event.key === "ArrowDown") {
