@@ -4,16 +4,20 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
-import type {
-  Campaign,
-  CampaignRevision,
-} from "@humber-foundry/application";
+import type { Campaign, CampaignRevision } from "@humber-foundry/application";
 import {
   createSiteId,
   type RichTextDocument,
 } from "@humber-foundry/site-definition";
 
-import { CampaignControls } from "./campaign-controls";
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: () => undefined,
+    refresh: () => undefined,
+  }),
+}));
+
+import { CampaignScreen } from "./campaign-screen";
 
 const richEmailContent: RichTextDocument = Object.freeze({
   version: "1.0.0",
@@ -33,109 +37,22 @@ const richEmailContent: RichTextDocument = Object.freeze({
   ]),
 });
 
-describe("campaign controls browser acceptance", () => {
+describe("one campaign's screen, browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
   afterEach(() => {
     vi.unstubAllGlobals();
     if (root !== undefined) flushSync(() => root!.unmount());
+    root = undefined;
     document.body.replaceChildren();
   });
 
-  it("preserves rich email content when editing another campaign field", async () => {
-    const campaign = {
-      id: "20000000-0000-4000-8000-000000000001",
-      siteId: createSiteId("site_reference"),
-      lifecycleState: "draft",
-      currentRevisionId: "30000000-0000-4000-8000-000000000001",
-      version: 1,
-      createdAt: "2026-07-29T00:00:00.000Z",
-      updatedAt: "2026-07-29T00:00:00.000Z",
-    } as Campaign;
-    const revision = {
-      id: campaign.currentRevisionId,
-      siteId: campaign.siteId,
-      campaignId: campaign.id,
-      revisionNumber: 1,
-      provenance: { kind: "standalone" },
-      subject: "Original subject",
-      previewText: "Preview",
-      callToAction: { label: "Read", href: "https://example.org" },
-      emailContent: richEmailContent,
-      senderIdentityId: "sender-primary",
-      complianceFooter: {
-        version: "v1",
-        content: "Compliance",
-        unsubscribePlaceholder:
-          "https://example.test/unsubscribe?token={{foundry.unsubscribe.token}}",
-      },
-      audienceDefinition: {
-        id: "canonical-consent-and-suppression",
-        version: 1,
-      },
-      schemaVersion: "1.7.0",
-      rendererVersion: "1".repeat(40),
-      createdAt: campaign.createdAt,
-      createdByActorId: "membership-editor",
-    } as CampaignRevision;
-    let submitted: unknown;
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        submitted = JSON.parse(String(init.body));
-        return Response.json({
-          campaign: { ...campaign, version: 2 },
-          revision: { ...revision, revisionNumber: 2 },
-        });
-      }
-      return Response.json({
-        campaigns: [{ campaign: { ...campaign, version: 2 }, revision }],
-      });
-    });
-    const host = document.createElement("div");
-    document.body.append(host);
-    root = createRoot(host);
-    flushSync(() => {
-      root!.render(
-        createElement(CampaignControls, {
-          csrfToken: "csrf",
-          workspaceId: "workspace_000000000000000000000001",
-          siteImages: [],
-          postSources: [],
-          role: "owner",
-          initialCampaigns: [{ campaign, revision }],
-          initialScheduleRequests: [],
-        }),
-      );
-    });
-
-    await userEvent.click(page.getByRole("button", { name: "Edit" }));
-    const editSubject = Array.from(
-      host.querySelectorAll<HTMLInputElement>('input[name="subject"]'),
-    ).find(({ value }) => value === "Original subject");
-    expect(editSubject).toBeDefined();
-    await userEvent.fill(
-      editSubject!,
-      "Updated subject",
-    );
-    await userEvent.click(
-      page.getByRole("button", { name: "Save changes" }),
-    );
-
-    expect(submitted).toMatchObject({
-      action: "edit",
-      input: {
-        subject: "Updated subject",
-        emailContent: richEmailContent,
-      },
-    });
-  });
-
   /**
-   * One fake server for the sending steps.
+   * One fake server for this campaign's screen.
    *
-   * It answers the two reads the steps make and records every command. The
+   * It answers the two reads the screen makes and records every command. A
    * test moves the campaign forward by changing what the read returns, exactly
-   * as a real server would, so nothing in the steps can look finished unless
+   * as a real server would, so nothing on the screen can look finished unless
    * the server says it is.
    */
   function fakeNewsletterServer(
@@ -185,7 +102,6 @@ describe("campaign controls browser acceptance", () => {
       authorizationId: null as string | null,
       schedule: null as Record<string, unknown> | null,
       sendOperation: null as Record<string, unknown> | null,
-      scheduleRequests: [] as ReadonlyArray<Record<string, unknown>>,
     };
 
     function report() {
@@ -273,26 +189,24 @@ describe("campaign controls browser acceptance", () => {
           }
           if (command.action === "authorize_bulk") {
             state.authorizationId = "50000000-0000-4000-8000-000000000001";
-            return Response.json({ authorization: { id: state.authorizationId } });
-          }
-          if (command.action === "decline_schedule_request") {
-            state.scheduleRequests = [];
-            return Response.json({ id: command.proposalId });
+            return Response.json({
+              authorization: { id: state.authorizationId },
+            });
           }
           if (command.action === "edit") {
             // A new revision renders to a new fingerprint, so the delivered
             // test no longer covers what the email says.
             state.campaignFingerprint = "fingerprint-two";
+            const input = (command.input ?? {}) as Record<string, unknown>;
             return Response.json({
               campaign: { ...campaign, version: 2 },
-              revision: { ...revision, revisionNumber: 2 },
+              revision: { ...revision, ...input, revisionNumber: 2 },
             });
           }
           return Response.json({});
         }
         if (url.includes("readiness=delivery")) {
-          const senderDetailsState =
-            options.senderDetailsState ?? "connected";
+          const senderDetailsState = options.senderDetailsState ?? "connected";
           return Response.json({
             delivery: {
               state: options.deliveryState ?? "connected",
@@ -313,41 +227,27 @@ describe("campaign controls browser acceptance", () => {
             },
           });
         }
-        if (url.includes("campaignId=")) return Response.json(report());
-        return Response.json({
-          campaigns: [{ campaign, revision }],
-          scheduleRequests: state.scheduleRequests,
-        });
+        return Response.json(report());
       },
     );
     return { campaign, revision, commands, state };
   }
 
-  function mount(
-    campaign: Campaign,
-    revision: CampaignRevision,
-    role: "owner" | "editor",
-    scheduleRequests: ReadonlyArray<{
-      proposalId: string;
-      campaignId: string;
-      agentName: string;
-      localDateTime: string;
-      ianaTimeZone: string;
-    }> = [],
-  ) {
+  function mount(revision: CampaignRevision, role: "owner" | "editor") {
     const host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
     flushSync(() => {
       root!.render(
-        createElement(CampaignControls, {
+        createElement(CampaignScreen, {
           csrfToken: "csrf",
-          workspaceId: "workspace_000000000000000000000001",
-          siteImages: [],
-          postSources: [],
           role,
-          initialCampaigns: [{ campaign, revision }],
-          initialScheduleRequests: scheduleRequests,
+          media: {
+            csrfToken: "csrf",
+            workspaceId: "workspace_000000000000000000000001",
+            siteImages: [],
+          },
+          initialRevision: revision,
         }),
       );
     });
@@ -359,11 +259,52 @@ describe("campaign controls browser acceptance", () => {
       (button) => button.textContent?.trim() === name,
     );
 
+  it("preserves rich email content when editing another campaign field", async () => {
+    const server = fakeNewsletterServer();
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Change the email")).toBeDefined(),
+    );
+    await userEvent.click(buttonNamed(host, "Change the email")!);
+    const editSubject = Array.from(
+      host.querySelectorAll<HTMLInputElement>('input[name="subject"]'),
+    ).find(({ value }) => value === "September news");
+    expect(editSubject).toBeDefined();
+    await userEvent.fill(editSubject!, "Updated subject");
+    await userEvent.click(page.getByRole("button", { name: "Save changes" }));
+
+    await vi.waitFor(() =>
+      expect(
+        server.commands.some(({ action }) => action === "edit"),
+      ).toBe(true),
+    );
+    expect(server.commands.at(-1)).toMatchObject({
+      action: "edit",
+      input: {
+        subject: "Updated subject",
+        emailContent: richEmailContent,
+      },
+    });
+  });
+
+  it("shows the saved email without anyone asking for a preview", async () => {
+    const server = fakeNewsletterServer();
+    const host = mount(server.revision, "owner");
+
+    const preview = host.querySelector("section.email-preview");
+    expect(preview).not.toBeNull();
+    expect(preview!.textContent).toContain("Preview");
+    // The rendered text and the content fingerprint arrive with the report.
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain("html-one"),
+    );
+  });
+
   it("opens sending only after a delivered test is confirmed, and closes it again on an edit", async () => {
     const server = fakeNewsletterServer();
-    const host = mount(server.campaign, server.revision, "owner");
+    const host = mount(server.revision, "owner");
 
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Send a test email")).toBeDefined(),
     );
@@ -411,15 +352,15 @@ describe("campaign controls browser acceptance", () => {
     await userEvent.fill(subject!, "October news");
     await userEvent.click(page.getByRole("button", { name: "Save changes" }));
 
+    // The save closes the writing box and the steps come back, now asking for
+    // a new test.
     await vi.waitFor(() =>
-      expect(
-        buttonNamed(host, "Approve this email for sending"),
-      ).toBeUndefined(),
+      expect(buttonNamed(host, "Send a test email")).toBeDefined(),
     );
+    expect(buttonNamed(host, "Approve this email for sending")).toBeUndefined();
     expect(host.textContent).toContain(
       "You changed the email after the last test, so that test no longer counts.",
     );
-    expect(buttonNamed(host, "Send a test email")).toBeDefined();
   });
 
   it("keeps a scheduled send cancellable and a failed send retryable after an edit", async () => {
@@ -450,23 +391,23 @@ describe("campaign controls browser acceptance", () => {
     server.state.campaignFingerprint = "fingerprint-two";
     server.state.readiness = "ready";
     server.state.schedule = scheduled;
-    const host = mount(server.campaign, server.revision, "owner");
+    const host = mount(server.revision, "owner");
 
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Call this send off")).toBeDefined(),
     );
     expect(host.textContent).toContain("2026-09-25 at 09:00:00");
+
+    // The same rule holds for a send that failed. The screen reads the whole
+    // report back after every step, so calling the schedule off is what brings
+    // the server's next answer onto the screen.
+    server.state.schedule = null;
+    server.state.sendOperation = failed;
     await userEvent.click(buttonNamed(host, "Call this send off")!);
     expect(server.commands).toContainEqual({
       action: "cancel_bulk_schedule",
       scheduleId: scheduled.id,
     });
-
-    // The same rule holds for a send that failed.
-    server.state.schedule = null;
-    server.state.sendOperation = failed;
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Try the send again")).toBeDefined(),
     );
@@ -481,9 +422,8 @@ describe("campaign controls browser acceptance", () => {
 
   it("tells an Editor which steps belong to the site owner", async () => {
     const server = fakeNewsletterServer();
-    const host = mount(server.campaign, server.revision, "editor");
+    const host = mount(server.revision, "editor");
 
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Send a test email")).toBeDefined(),
     );
@@ -508,9 +448,8 @@ describe("campaign controls browser acceptance", () => {
       utcOffsetChoice: "-07:00",
       executeAtUtc: "2026-09-25T16:00:00.000Z",
     };
-    const host = mount(server.campaign, server.revision, "editor");
+    const host = mount(server.revision, "editor");
 
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(host.textContent).toContain("2026-09-25 at 09:00:00"),
     );
@@ -524,9 +463,8 @@ describe("campaign controls browser acceptance", () => {
 
   it("keeps the test and send steps shut while email is not connected", async () => {
     const server = fakeNewsletterServer({ deliveryState: "not_configured" });
-    const host = mount(server.campaign, server.revision, "owner");
+    const host = mount(server.revision, "owner");
 
-    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Send a test email")).toBeDefined(),
     );
@@ -551,122 +489,25 @@ describe("campaign controls browser acceptance", () => {
     expect(server.commands).toHaveLength(0);
   });
 
-  describe("Newsletter without the sender details", () => {
-    it("says what is missing in plain words and offers no way to write an email", async () => {
-      const server = fakeNewsletterServer({
-        senderDetailsState: "not_configured",
-      });
-      const host = mount(server.campaign, server.revision, "owner");
-
-      await vi.waitFor(() =>
-        expect(host.textContent).toContain(
-          "Foundry does not yet have the name and postal address that must " +
-            "appear at the bottom of every email, so no campaign can be " +
-            "written or sent.",
-        ),
-      );
-
-      // Nothing that would store a revision is offered.
-      await vi.waitFor(() =>
-        expect(buttonNamed(host, "New email")!.disabled).toBe(true),
-      );
-      expect(buttonNamed(host, "Edit")!.disabled).toBe(true);
-
-      // The owner reads plain words. The setting names are there for whoever
-      // installs them, behind the disclosure, not on the line.
-      const line = host.querySelector(".connection-status-missing")!;
-      expect(line.textContent).not.toContain("FOUNDRY_CAMPAIGN_LEGAL_NAME");
-
-      const setupLink = Array.from(
-        host.querySelectorAll<HTMLAnchorElement>("a"),
-      ).find((link) => link.textContent === "How to set the sender details");
-      expect(setupLink).toBeDefined();
-      expect(setupLink!.getAttribute("href")).toBe(
-        "https://github.com/Humber-Foundry/foundry-cms/blob/main/" +
-          "docs/operations/brevo-test-delivery-readiness.md",
-      );
-      expect(setupLink!.target).toBe("_blank");
-      expect(server.commands).toHaveLength(0);
+  it("offers no way to change the email while the sender details are missing", async () => {
+    const server = fakeNewsletterServer({
+      senderDetailsState: "not_configured",
     });
+    const host = mount(server.revision, "owner");
 
-    it("shows the setting names to whoever opens the disclosure", async () => {
-      const server = fakeNewsletterServer({
-        senderDetailsState: "not_configured",
-      });
-      const host = mount(server.campaign, server.revision, "owner");
-
-      // The disclosure's button shows only "?", so it is found by its
-      // accessible name rather than by its text.
-      await vi.waitFor(() =>
-        expect(host.querySelector(".connection-status-missing")).not.toBeNull(),
-      );
-      await userEvent.click(
-        page.getByRole("button", { name: "Which settings are these?" }),
-      );
-      await vi.waitFor(() =>
-        expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_LEGAL_NAME"),
-      );
-      expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_POSTAL_ADDRESS");
-    });
-
-    it("shows an app's send-time request and lets a person decline it", async () => {
-      const server = fakeNewsletterServer();
-      server.state.scheduleRequests = [
-        {
-          proposalId: "schedule_request_1",
-          campaignId: server.campaign.id,
-          agentName: "client.example",
-          localDateTime: "2026-09-20T10:00:00",
-          ianaTimeZone: "America/Vancouver",
-        },
-      ];
-      const host = mount(server.campaign, server.revision, "owner", [
-        {
-          proposalId: "schedule_request_1",
-          campaignId: server.campaign.id,
-          agentName: "client.example",
-          localDateTime: "2026-09-20T10:00:00",
-          ianaTimeZone: "America/Vancouver",
-        },
-      ]);
-
-      // The owner reads who asked and when, in plain words.
+    await vi.waitFor(() =>
       expect(host.textContent).toContain(
-        "client.example asked to send this at",
-      );
-      // Declining is a person's step, and it is the only answer offered here;
-      // sending stays behind the sending steps.
-      expect(buttonNamed(host, "Decline")).toBeDefined();
-      await userEvent.click(buttonNamed(host, "Decline")!);
+        "Foundry does not yet have the name and postal address that must " +
+          "appear at the bottom of every email, so no campaign can be " +
+          "written or sent.",
+      ),
+    );
 
-      await vi.waitFor(() =>
-        expect(
-          server.commands.some(
-            ({ action }) => action === "decline_schedule_request",
-          ),
-        ).toBe(true),
-      );
-      expect(server.commands).toContainEqual({
-        action: "decline_schedule_request",
-        proposalId: "schedule_request_1",
-      });
-      await vi.waitFor(() =>
-        expect(host.textContent).not.toContain(
-          "client.example asked to send this at",
-        ),
-      );
-    });
-
-    it("leaves everything working once the settings are set", async () => {
-      const server = fakeNewsletterServer();
-      const host = mount(server.campaign, server.revision, "owner");
-
-      await vi.waitFor(() =>
-        expect(buttonNamed(host, "New email")!.disabled).toBe(false),
-      );
-      expect(host.textContent).not.toContain(
-        "Foundry does not yet have the name and postal address",
-      );
-    });
+    // Nothing that would store a revision is offered.
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Change the email")!.disabled).toBe(true),
+    );
+    expect(host.querySelector("form.composer")).toBeNull();
+    expect(server.commands).toHaveLength(0);
   });
 });
