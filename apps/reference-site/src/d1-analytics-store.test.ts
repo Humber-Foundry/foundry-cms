@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  analyticsMetricSources,
   analyticsMetrics,
   createAnalyticsProjection,
   createAnalyticsQueryApplication,
@@ -18,6 +19,7 @@ import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 const siteId = createSiteId("site_reference");
 const { database } = useMigratedTestDatabase([
   "0025_analytics_projection.sql",
+  "0038_analytics_web_traffic.sql",
 ]);
 
 type MetricDefinitionRow = {
@@ -116,6 +118,110 @@ describe("the seeded metric contract", () => {
           left.metricKey.localeCompare(right.metricKey),
         ),
     );
+  });
+});
+
+describe("the sources a metric may be measured by", () => {
+  it("declares exactly the pairs the registry allows", async () => {
+    const { results } = await database
+      .prepare(
+        `SELECT metric_key, source FROM analytics_metric_sources
+         ORDER BY metric_key, source`,
+      )
+      .all<{ metric_key: string; source: string }>();
+
+    const expected = analyticsMetrics
+      .flatMap((entry) =>
+        analyticsMetricSources(entry).map((source) => ({
+          metricKey: entry.metricKey,
+          source,
+        })),
+      )
+      .sort(
+        (left, right) =>
+          left.metricKey.localeCompare(right.metricKey) ||
+          left.source.localeCompare(right.source),
+      );
+
+    expect(
+      (results as ReadonlyArray<{ metric_key: string; source: string }>).map(
+        (row) => ({ metricKey: row.metric_key, source: row.source }),
+      ),
+    ).toEqual(expected);
+  });
+});
+
+describe("web traffic counted by the site's own Worker", () => {
+  /** What one projector run writes from the Worker's page view points. */
+  async function projectWorkerTraffic(
+    facts: ReadonlyArray<AnalyticsFactMeasurement>,
+  ) {
+    await projection().project({
+      source: "analytics_engine",
+      sourceName: "cloudflare",
+      sourceMetric: "worker_points",
+      definitionVersion: 1,
+      revision: 1,
+      observedAt: "2026-08-02T01:00:00.000Z",
+      completeThrough: "2026-08-02T00:00:00.000Z",
+      facts,
+    });
+  }
+
+  it("stores page views, arrivals, per-page views and referrers", async () => {
+    await projectWorkerTraffic([
+      measurement({ value: 120 }),
+      measurement({ metricKey: "web.visits", value: 80 }),
+      measurement({
+        metricKey: "content.page_views",
+        subjectType: "content",
+        subjectId: "page_about",
+        value: 45,
+      }),
+      measurement({
+        dimension: { key: "referrer_host", value: "partner.example.com" },
+        value: 30,
+      }),
+    ]);
+
+    const rows = await factRows();
+    expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.source === "analytics_engine")).toBe(true);
+  });
+
+  it("refuses a referrer that carries an address or a query string", async () => {
+    await expect(
+      projectWorkerTraffic([
+        measurement({
+          dimension: {
+            key: "referrer_host",
+            value: "reader@partner.example.com",
+          },
+        }),
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      projectWorkerTraffic([
+        measurement({
+          dimension: { key: "referrer_host", value: "partner.example.com?q=1" },
+        }),
+      ]),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a source that may not measure the metric", async () => {
+    await expect(
+      projection().project({
+        source: "provider",
+        sourceName: "brevo",
+        sourceMetric: "worker_points",
+        definitionVersion: 1,
+        revision: 1,
+        observedAt: "2026-08-02T01:00:00.000Z",
+        completeThrough: "2026-08-02T00:00:00.000Z",
+        facts: [measurement()],
+      }),
+    ).rejects.toThrow(/source_does_not_own_metric/u);
   });
 });
 

@@ -19,7 +19,9 @@ import {
   analyticsEngineDefinitionVersion,
   analyticsEngineSourceName,
   normalizeAnalyticsEngineRows,
+  normalizeWebTrafficRows,
   queryAnalyticsEngine,
+  queryWebTraffic,
 } from "./analytics-engine-source";
 import {
   brevoAnalyticsCapabilities,
@@ -377,12 +379,16 @@ export async function runScheduledAnalyticsProjection(
   // Analytics Engine reports hours as well as days. The hourly facts serve an
   // intraday range for 90 days and then compact away; the daily facts carry
   // the history past Analytics Engine's own three-month retention.
+  //
+  // One run reads both kinds of point in the dataset: the page views the
+  // Worker request path counts, and the anonymous interactions a browser
+  // reports. They share one source state, because one platform serves both.
   const dataset = environment.FOUNDRY_ANALYTICS_ENGINE_DATASET?.trim() ?? "";
   await projectSource({
     source: "analytics_engine",
     sourceName: analyticsEngineSourceName,
     definitionVersion: analyticsEngineDefinitionVersion,
-    sourceMetric: "interaction_points",
+    sourceMetric: "worker_points",
     completeThrough: lastClosedDay,
     configured: accountId !== "" && analyticsToken !== "" && dataset !== "",
     collect: async () => {
@@ -393,13 +399,25 @@ export async function runScheduledAnalyticsProjection(
         since: externalWindowStart,
         until: lastClosedDay,
       };
-      const [daily, hourly] = await Promise.all([
+      const [daily, hourly, dailyTraffic, hourlyTraffic] = await Promise.all([
         queryAnalyticsEngine({ ...engineQuery, granularity: "day" }),
         queryAnalyticsEngine({ ...engineQuery, granularity: "hour" }),
+        queryWebTraffic({ ...engineQuery, granularity: "day" }),
+        queryWebTraffic({ ...engineQuery, granularity: "hour" }),
       ]);
       return [
         ...normalizeAnalyticsEngineRows(daily, "day"),
         ...normalizeAnalyticsEngineRows(hourly, "hour"),
+        ...normalizeWebTrafficRows({
+          rows: dailyTraffic,
+          granularity: "day",
+          siteId,
+        }),
+        ...normalizeWebTrafficRows({
+          rows: hourlyTraffic,
+          granularity: "hour",
+          siteId,
+        }),
       ];
     },
   });
