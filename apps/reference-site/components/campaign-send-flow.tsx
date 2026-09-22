@@ -138,8 +138,9 @@ export function CampaignSendFlow({
 
   function testNeed(): string {
     if (localDevelopment) {
-      // The line under this step names the state and the settings. This says
-      // the one thing that line does not: nothing here is broken.
+      // The line under this step names the state and keeps the setting names
+      // behind a disclosure. This says the one thing that line does not:
+      // nothing here is broken.
       return (
         "No test can go out from here. Nothing is broken: a test goes out as " +
         "soon as this site is connected to an email provider."

@@ -1224,6 +1224,41 @@
   color: var(--dash-ink);
 }
 
+/* The connection line is one paragraph, or a paragraph with a disclosure
+ * under it. Either way it keeps the one margin above. */
+.connection-status > p {
+  margin: 0;
+}
+
+/* The setting names a connected site holds, kept behind a closed disclosure
+ * for whoever connects one. The summary is a control, so it takes the full
+ * control height a phone needs. */
+.connection-status-details {
+  margin-top: var(--dash-space-2);
+}
+
+.connection-status-details > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+  color: var(--dash-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-status-details > p {
+  margin: var(--dash-space-2) 0 0;
+}
+
+.connection-status-details > ul {
+  margin: var(--dash-space-2) 0 0;
+  padding-left: var(--dash-space-5);
+}
+
+.connection-status-details li + li {
+  margin-top: var(--dash-space-1);
+}
+
 .composer-settings {
   border: 1px solid var(--dash-line);
   border-radius: var(--dash-radius);

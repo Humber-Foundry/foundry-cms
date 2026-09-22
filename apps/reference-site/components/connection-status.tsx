@@ -140,27 +140,43 @@ export function ConnectionStatus({
   const namesBehindDisclosure =
     readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
 
-  // Local development names no setting on screen. Nothing is absent that
-  // anybody here has to install, so a list of configuration names would be
-  // words a site owner cannot use. The setup document behind the link holds
-  // them for whoever connects a real site.
+  // Local development names no setting on the open screen. Nothing is absent
+  // that anybody here has to install, and a list of configuration names is
+  // words a site owner cannot use. The names a connected site holds still
+  // matter to whoever connects one, so they sit behind a closed disclosure
+  // under the line, the same way Settings keeps the site's version numbers.
   if (readiness.state === "local_development") {
     return (
-      <p className="connection-status">
-        {copy.localDevelopmentSentence}
-        {copy.settingNamesShownInline ? (
-          <>
-            {" "}
-            <a
-              href={`${documentationBaseAddress}${readiness.setupGuide}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {copy.setupLinkLabel}
-            </a>
-          </>
+      <div className="connection-status">
+        <p>
+          {copy.localDevelopmentSentence}
+          {copy.settingNamesShownInline ? (
+            <>
+              {" "}
+              <a
+                href={`${documentationBaseAddress}${readiness.setupGuide}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {copy.setupLinkLabel}
+              </a>
+            </>
+          ) : null}
+        </p>
+        {readiness.missingSettings.length > 0 ? (
+          <details className="connection-status-details">
+            <summary>Technical details</summary>
+            <p>A connected site holds these settings:</p>
+            <ul>
+              {readiness.missingSettings.map((name) => (
+                <li key={name}>
+                  <code>{name}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
-      </p>
+      </div>
     );
   }
 
