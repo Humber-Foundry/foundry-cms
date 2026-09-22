@@ -95,7 +95,10 @@ export function SettingsPageBody({
           you approve, and you can revoke any of them on their own.
         </p>
         <p className="panel-actions">
-          <a className="button button-primary" href="/dash/settings/connect-agent">
+          <a
+            className="dash-button dash-button-primary"
+            href="/dash/settings/connect-agent"
+          >
             Connect an agent
           </a>
         </p>
