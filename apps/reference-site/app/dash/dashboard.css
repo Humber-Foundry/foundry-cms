@@ -1224,23 +1224,28 @@
   color: var(--dash-ink);
 }
 
-/* The connection line is one paragraph, or a paragraph with a disclosure
- * under it. Either way it keeps the one margin above. */
+/* In local development the connection line is a short stack of lines: the
+ * state, where a live site sets it, and a disclosure. The stack keeps the one
+ * margin above; each line inside it takes the small gap. */
 .connection-status > p {
   margin: 0;
 }
 
+.connection-status > p + p {
+  margin-top: var(--dash-space-2);
+}
+
 /* The setting names a connected site holds, kept behind a closed disclosure
  * for whoever connects one. The summary is a control, so it takes the full
- * control height a phone needs. */
+ * control height a phone needs; it keeps the browser's own marker, the same
+ * as the other disclosures on the dashboard. */
 .connection-status-details {
   margin-top: var(--dash-space-2);
 }
 
 .connection-status-details > summary {
-  display: flex;
-  align-items: center;
   min-height: var(--dash-control-height);
+  padding: 0.6rem 0;
   color: var(--dash-accent);
   font-weight: 600;
   cursor: pointer;

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { HelpTip } from "./help-tip";
+import { settingsTab } from "./settings-tabs";
 
 /**
  * What is connected: email delivery, site publishing, or the sender details
@@ -51,6 +52,10 @@ export type ConnectionReadiness = Readonly<{
  * details are the owner's own words — a name and a postal address — so that
  * line says it in plain words and keeps the names behind a disclosure for
  * whoever installs them.
+ *
+ * `setOnLiveSite`: where an owner sets this connection once the site is live,
+ * said under the local development sentence. Only a kind with a Settings
+ * section of its own carries one.
  */
 type ConnectionCopy = Readonly<{
   setupLinkLabel: string;
@@ -59,6 +64,7 @@ type ConnectionCopy = Readonly<{
   notConnectedSentence: string;
   connectedMeaning: string;
   settingNamesShownInline: boolean;
+  setOnLiveSite?: Readonly<{ before: string; label: string; href: string }>;
 }>;
 
 /**
@@ -83,6 +89,11 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
       "This means every email setting is installed, not that a message was " +
       "sent.",
     settingNamesShownInline: true,
+    setOnLiveSite: {
+      before: "On a live site the email connection is set in ",
+      label: "Settings → Email",
+      href: settingsTab.email.href,
+    },
   },
   publishing: {
     setupLinkLabel: "How to connect publishing",
@@ -163,6 +174,12 @@ export function ConnectionStatus({
             </>
           ) : null}
         </p>
+        {copy.setOnLiveSite === undefined ? null : (
+          <p>
+            {copy.setOnLiveSite.before}
+            <a href={copy.setOnLiveSite.href}>{copy.setOnLiveSite.label}</a>.
+          </p>
+        )}
         {readiness.missingSettings.length > 0 ? (
           <details className="connection-status-details">
             <summary>Technical details</summary>
