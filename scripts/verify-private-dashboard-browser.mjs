@@ -514,9 +514,11 @@ async function main() {
         `private_dashboard_mobile_horizontal_overflow:${JSON.stringify(overflow)}`,
       );
     }
-    // The Dashboard link is in the Menu sheet too.
+    // The Dashboard link is in the Menu sheet too. It is the shared
+    // DashboardBackLink component (#227): the arrow is decorative and hidden
+    // from the accessibility tree, so the link's accessible name is "Dashboard".
     await openControls();
-    await page.getByRole("link", { name: "← Dashboard" }).click();
+    await page.getByRole("link", { name: "Dashboard", exact: true }).click();
     await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
     await verifyDesignDestination(page);
     await page.getByRole("navigation", { name: "Dashboard sections" })

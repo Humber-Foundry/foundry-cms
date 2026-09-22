@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { PreviewReviewDecision } from "@/components/preview-review-decision";
 import {
   PreviewReviewAnswer,
@@ -40,6 +41,7 @@ export default async function McpPreviewReviewPage({
 
   return (
     <main className="dashboard-main" id="main">
+      <DashboardBackLink href="/dash" label="Back to Overview" />
       <PreviewReviewSummary
         agentName={review.agentName}
         preparedAt={review.preparedAt}
@@ -61,7 +63,17 @@ export default async function McpPreviewReviewPage({
             />
           </>
         ) : (
-          <PreviewReviewAnswer decided={review.decided} />
+          <>
+            <PreviewReviewAnswer decided={review.decided} />
+            {/* The review is answered, so this screen's task has an end. A
+             * plain reader is not a dead end: it hands the owner back to
+             * Overview. */}
+            <p className="panel-actions">
+              <a className="dash-button dash-button-primary" href="/dash">
+                Done
+              </a>
+            </p>
+          </>
         )}
       </section>
     </main>

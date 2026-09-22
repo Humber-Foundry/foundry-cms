@@ -2123,16 +2123,24 @@
   background: var(--dash-surface);
 }
 
-.topbar-back {
+/* The editor topbar's own use of the shared back link (#227): a compact bar
+ * item, not the roomy full-width link every other screen draws. This overrides
+ * `.dash-back-link`'s own spacing and colour for this one context; the base
+ * rule above stays the one every other screen uses unchanged. */
+.editor-topbar .dash-back-link {
+  min-height: auto;
+  margin-bottom: 0;
+  gap: 0.35rem;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
   font-weight: 600;
-  text-decoration: none;
   white-space: nowrap;
 }
 
-.topbar-back:hover {
+.editor-topbar .dash-back-link:hover,
+.editor-topbar .dash-back-link:focus-visible {
   color: var(--dash-ink);
+  text-decoration: none;
 }
 
 /* Wins over the dashboard's generic h1 sizing: this is chrome, not a page
