@@ -202,7 +202,8 @@
  * own border and keeps only a plain gap. A card (`.panel`, like the editor
  * card above) keeps its own border on every side instead — see the
  * exclusion note above. */
-.page-heading + section:not(.content-editor):not(.panel) {
+.page-heading + section:not(.content-editor):not(.panel),
+.dash-tabs + section:not(.content-editor):not(.panel) {
   margin-top: var(--dash-gap);
   padding-top: 0;
   border-top: 0;
@@ -247,10 +248,10 @@
  * them and writes no header, row, menu or empty box of its own.
  *
  * The older one-off rules are still here, because the screens that use them
- * are rebuilt in their own tickets: `.pages-list-rows` and
- * `.pages-list-row` for Pages, `.button` for buttons, `.state-label` and
- * `.state-dirty` for states, `.empty-state` for an empty box. Each screen
- * ticket moves its screen across and takes its old rules out with it.
+ * are rebuilt in their own tickets: `.button` for buttons, `.state-label`
+ * and `.state-dirty` for states, `.empty-state` for an empty box. Each
+ * screen ticket moves its screen across and takes its old rules out with it.
+ * Pages moved across in issue #229.
  *
  * Every gap, margin and padding here comes from the spacing scale at the
  * top of this file, and every text size comes from the type scale. A few
@@ -361,6 +362,44 @@
 .dash-back-link:hover,
 .dash-back-link:focus-visible {
   text-decoration: underline;
+}
+
+/* Tabs --------------------------------------------------------------------
+ *
+ * The sections of one screen, each at its own address. A row of links that
+ * wraps, not a grid: four labels of different lengths never fill complete rows
+ * at every width, and a row that wraps still reads as a list.
+ *
+ * The open tab is marked by colour and by the line under it, and carries
+ * `aria-current="page"`, so a screen reader announces it too. */
+.dash-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dash-space-2) var(--dash-space-4);
+  margin-bottom: var(--dash-space-6);
+  border-bottom: 1px solid var(--dash-line);
+}
+
+.dash-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+  padding: 0 var(--dash-space-1);
+  border-bottom: 2px solid transparent;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dash-tab:hover,
+.dash-tab:focus-visible {
+  color: var(--dash-ink);
+}
+
+.dash-tab[aria-current="page"] {
+  border-bottom-color: var(--dash-accent);
+  color: var(--dash-accent);
 }
 
 /* List and rows -----------------------------------------------------------
@@ -1526,16 +1565,28 @@
   font-size: var(--dash-text-small);
 }
 
-/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean, each
- * behind its own help tip (#150). A row of short labels, not a grid, since
- * five items never fill complete rows at every width. */
-.access-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  margin: 0 0 1rem;
+/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean is written
+ * into the rows themselves now, as plain sentences, in place of the legend of
+ * five help tips that used to sit above the table (#240). The base rule above
+ * capitalises every word, which is right for the single word "owner" and wrong
+ * for a sentence, so these two cells set it back. */
+.member-access-table .inventory-row strong small,
+.member-access-state small {
+  display: block;
+  margin-top: var(--dash-space-1);
   color: var(--ink-soft);
   font-size: var(--dash-text-small);
+  font-weight: 500;
+  text-transform: none;
+}
+
+/* "Invite someone", under the table it adds a row to. The same size as the
+ * body text around it, in the accent colour, so this section still reads with
+ * two type sizes and colour carrying the hierarchy. */
+.dashboard .access-invite-heading {
+  margin: var(--dash-space-6) 0 var(--dash-space-3);
+  color: var(--dash-accent);
+  font-size: var(--dash-text);
 }
 
 .access-sync-retry-controls {
@@ -1543,6 +1594,66 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* Sender details ----------------------------------------------------------
+ *
+ * The five values that go at the bottom of every email, edited in place on
+ * Settings' Email tab (#240). One field per line: each holds a full name, a
+ * postal address or a web address, so two side by side would only make both
+ * too narrow to read what is in them. */
+.sender-details-form {
+  display: grid;
+  gap: var(--dash-space-4);
+  max-width: 34rem;
+  margin-top: var(--dash-space-4);
+}
+
+.sender-details-source {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.sender-details-field {
+  display: grid;
+  gap: var(--dash-space-2);
+}
+
+/* The field's name and its one line of help are the same small size, as the
+ * invite form's labels already are. The value the owner typed is the body
+ * size, so a field reads as two sizes and no more. */
+.sender-details-field-name {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.sender-details-field input,
+.sender-details-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--dash-control-height);
+  padding: var(--dash-space-3);
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  background: var(--dash-field-bg);
+  color: var(--dash-ink);
+}
+
+.sender-details-field input[aria-invalid="true"],
+.sender-details-field textarea[aria-invalid="true"] {
+  border-color: var(--dash-warn-ink);
+}
+
+.sender-details-field small {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.sender-details-field input[aria-invalid="true"] ~ small,
+.sender-details-field textarea[aria-invalid="true"] ~ small {
+  color: var(--dash-warn-ink);
 }
 
 @media (max-width: 720px) {
@@ -4874,73 +4985,11 @@ ul.media-photo-uses {
   border-top: 0;
 }
 
-.pages-list-rows {
+/* The one sentence that says where new pages come from. It reads at the
+ * small size in the soft ink, so the list below it stays the thing the eye
+ * lands on. See ADR-0041. */
+.pages-list-intro {
   margin: 0;
-  padding: 0;
-  border: 1px solid var(--dash-line);
-  border-radius: var(--dash-radius);
-  background: var(--dash-surface);
-  list-style: none;
-}
-
-/* The rule now sits on the row item itself, because a row holds the link and
- * its Rename, Duplicate and Delete buttons, and the line belongs between two
- * rows rather than above the link alone. */
-.pages-list-rows > li + li {
-  border-top: 1px solid var(--dash-line);
-}
-
-/* The list has no `overflow: hidden`, because the home row's "Why can't I
- * delete the home page?" HelpTip opens a panel below the row, and a hidden
- * overflow would cut that panel off. The rounded card corners are matched by
- * hand on the first and last row instead, only where a hover or focus
- * background would otherwise show a square corner over the rounded border. */
-.pages-list-rows > li:first-child .pages-list-row:hover,
-.pages-list-rows > li:first-child .pages-list-row:focus-visible {
-  border-top-left-radius: var(--dash-radius);
-  border-top-right-radius: var(--dash-radius);
-}
-
-.pages-list-rows > li:last-child .pages-list-row:hover,
-.pages-list-rows > li:last-child .pages-list-row:focus-visible {
-  border-bottom-left-radius: var(--dash-radius);
-  border-bottom-right-radius: var(--dash-radius);
-}
-
-.pages-list-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: center;
-  min-height: 3.6rem;
-  padding: 0.85rem 1rem;
-  color: inherit;
-  text-decoration: none;
-}
-
-.pages-list-row:hover,
-.pages-list-row:focus-visible {
-  background: var(--dash-accent-tint);
-}
-
-.pages-list-title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: baseline;
-  color: var(--dash-accent);
-  font-size: var(--dash-text);
-  font-weight: 600;
-}
-
-.pages-list-home {
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-  font-weight: 400;
-}
-
-.pages-list-address,
-.pages-list-state {
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }
@@ -4949,16 +4998,6 @@ ul.media-photo-uses {
   margin: 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
-}
-
-@media (max-width: 45rem) {
-  /* One column on a phone, so a long title never squeezes the address and the
-   * published state into an unreadable sliver. */
-  .pages-list-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.35rem;
-    padding-block: 1rem;
-  }
 }
 
 /* Page switcher and the unsaved-edits prompt ------------------------------
@@ -5171,70 +5210,13 @@ ul.media-photo-uses {
   }
 }
 
-/* Page lifecycle controls (issue #159) -----------------------------------
+/* Page lifecycle dialogs (issues #159, #229) ------------------------------
  *
- * New page sits above the list; Rename, Duplicate and Delete sit inside each
- * row, under the link rather than inside it, because a button inside a link
- * cannot be pressed on its own.
+ * Rename, Duplicate and Delete are items in the row's action menu, which
+ * `.dash-action-menu` above already draws. Each one opens this dialog.
  *
  * Every control here is at least --dash-control-height tall, so each one is a
- * 44px tap target on a phone, and each keeps its corner radius. Two type
- * sizes only: the page title stays the larger one, and every control reads at
- * the smaller size with colour carrying the difference. */
-
-.pages-list-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.pages-list-actions .button {
-  min-height: var(--dash-control-height);
-  display: inline-flex;
-  align-items: center;
-}
-
-.pages-list-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0 1rem 0.85rem;
-}
-
-.pages-list-delete-group {
-  display: inline-flex;
-  align-items: center;
-}
-
-/* The Delete button sits near the right edge of the row, so its HelpTip opens
- * from the trigger's right edge instead of its left. Opening from the left,
- * as every other HelpTip does, would push the panel past the right edge of a
- * phone screen. */
-.pages-list-delete-group .help-tip-panel {
-  left: auto;
-  right: 0;
-}
-
-.pages-list-row-actions button {
-  min-height: var(--dash-control-height);
-  padding: 0 0.9rem;
-  border: 1px solid var(--dash-line);
-  border-radius: var(--dash-field-radius);
-  background: var(--dash-field-bg);
-  color: var(--dash-accent);
-  font: inherit;
-  font-size: var(--dash-text-small);
-  cursor: pointer;
-}
-
-.pages-list-row-actions button:hover:not(:disabled),
-.pages-list-row-actions button:focus-visible:not(:disabled) {
-  background: var(--dash-accent-tint);
-}
-
-.pages-list-row-actions button:disabled {
-  color: var(--dash-ink-soft);
-  cursor: not-allowed;
-}
+ * 44px tap target on a phone, and each keeps its corner radius. */
 
 .page-lifecycle-dialog {
   width: min(30rem, calc(100vw - 2rem));
@@ -5286,59 +5268,6 @@ ul.media-photo-uses {
 
 .page-lifecycle-field span[role="alert"] {
   color: #8a352f;
-}
-
-.page-lifecycle-layouts {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-  padding: 0;
-  border: 0;
-}
-
-.page-lifecycle-layouts legend {
-  padding: 0 0 0.5rem;
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-}
-
-.page-lifecycle-layouts label {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  min-height: var(--dash-control-height);
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--dash-field-line);
-  border-radius: var(--dash-field-radius);
-  background: var(--dash-field-bg);
-  cursor: pointer;
-}
-
-.page-lifecycle-layouts label:has(input:checked) {
-  border-color: var(--dash-accent);
-  background: var(--dash-accent-tint);
-}
-
-/* The round mark is only what the owner looks at — the whole label is what
- * they tap — but a default 13px mark is hard to see, so it is sized up. */
-.page-lifecycle-layouts input[type="radio"] {
-  width: 1.15rem;
-  height: 1.15rem;
-  margin: 0.15rem 0 0;
-  flex: none;
-  accent-color: var(--dash-accent);
-}
-
-.page-lifecycle-layouts label > span {
-  display: grid;
-  gap: 0.25rem;
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-}
-
-.page-lifecycle-layouts strong {
-  color: var(--dash-ink);
-  font-weight: 600;
 }
 
 .page-lifecycle-blockers {
@@ -5408,9 +5337,6 @@ ul.media-photo-uses {
 @media (max-width: 45rem) {
   /* The buttons fill the width one after another, so each one keeps a full
    * 44px tap target instead of being squeezed three to a line. */
-  .pages-list-actions,
-  .pages-list-actions .button,
-  .pages-list-row-actions button,
   .page-lifecycle-buttons button {
     flex: 1 1 auto;
     justify-content: center;

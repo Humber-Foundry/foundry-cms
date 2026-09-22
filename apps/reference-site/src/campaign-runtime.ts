@@ -59,6 +59,7 @@ import {
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
+import { environmentWithStoredSenderDetails } from "./stored-sender-details";
 import {
   campaignDeliverySetupGuide,
   listMissingCampaignDeliverySettings,
@@ -512,7 +513,18 @@ export async function loadCampaignRequestContext(
     // The sender details are separate settings from the delivery secrets, so
     // they are reported under their own heading. The page loads either way,
     // and the screen names exactly the settings the application refused on.
-    const senderSettings = resolveCampaignChannel(environment);
+    //
+    // An Owner edits these five values on Settings' Email tab. A stored value
+    // wins over the environment variable of the same name, and a value that
+    // was never stored still reads the environment variable, so an
+    // installation that stored nothing behaves exactly as it did before
+    // (ADR-0048).
+    const senderSettings = resolveCampaignChannel(
+      await environmentWithStoredSenderDetails(
+        environment,
+        installedSite.application.siteId,
+      ),
+    );
     channelConfiguration = senderSettings.channel;
     senderDetails = senderSettings.readiness;
     if (delivery.state !== "connected") {

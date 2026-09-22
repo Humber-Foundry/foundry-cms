@@ -360,7 +360,7 @@ async function main() {
 
     // Pages opens on the list of every page. The owner opens one from the
     // list, and the address then names the page it opened.
-    await page.locator(".pages-list-row").first().click();
+    await page.locator(".dash-row-link").first().click();
     await page.waitForURL(
       /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
     );

@@ -6,9 +6,12 @@ import type { PageActionSummary } from "@/src/page-lifecycle-view";
  *
  * This is what Pages shows first. Selecting a row opens that page in the same
  * editor, addressed with `?page=<id>`, so the address can be shared and
- * reloaded. The rows and the New page, Rename, Duplicate and Delete controls
- * are drawn by `PageLifecycleList`, because they need the browser; everything
- * around them is worked out on the server.
+ * reloaded. The rows and their Rename, Duplicate and Delete menus are drawn by
+ * `PageLifecycleList`, because they need the browser; everything around them
+ * is worked out on the server.
+ *
+ * Pages are added by a connected agent, not from this screen, so the screen
+ * says so and points at the Connect an agent settings. See ADR-0041.
  */
 export function PagesList({
   pages,
@@ -38,12 +41,16 @@ export function PagesList({
   askedForMissingPage?: boolean;
 }) {
   return (
-    <section className="pages-list" aria-label="Your pages">
+    <section className="pages-list">
       {askedForMissingPage ? (
         <p className="dashboard-note" role="status">
           That page is not in this draft any more. Here are the pages it has.
         </p>
       ) : null}
+      <p className="pages-list-intro">
+        New pages are added by an agent you connect under{" "}
+        <a href="/dash/settings/connect-agent">Connect an agent</a>.
+      </p>
       <PageLifecycleList
         pages={pages}
         workspaceUrl={workspaceUrl}
