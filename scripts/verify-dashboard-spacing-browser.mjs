@@ -261,15 +261,12 @@ const collectSmallTapTargets = (minimumTapTarget) => {
     // Browse/Edit toggle) has its own dedicated browser test —
     // verify-mobile-editor-browser.mjs. The live published page inside
     // `.site-canvas` carries the site's own design system, not the
-    // dashboard's. `.email-preview-message` is the email itself, drawn as an
-    // inbox will draw it, so its button is the email's design, not a
-    // dashboard control. None is one of #173's numbered destinations or
-    // panels.
-    if (
-      el.closest(
-        ".editor-immersive, .site-canvas, .email-preview-message",
-      ) !== null
-    ) {
+    // dashboard's. Neither is one of #173's numbered destinations or panels.
+    //
+    // The email preview needs no exemption: since #238 the email is drawn in
+    // its own frame, so this sweep never reaches it. What it measures on that
+    // screen is the dashboard's own controls, which is right.
+    if (el.closest(".editor-immersive, .site-canvas") !== null) {
       continue;
     }
     // A radio or checkbox's native box is small by design; the tap target

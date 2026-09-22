@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { HelpTip } from "./help-tip";
+import { settingsTab } from "./settings-tabs";
 
 /**
  * What is connected: email delivery, site publishing, or the sender details
@@ -46,11 +47,17 @@ export type ConnectionReadiness = Readonly<{
  * the plain sentence shows by default and the fuller explanation sits behind a
  * `HelpTip` (#149) rather than on every screen that renders it.
  *
- * `settingNamesShownInline`: email and publishing are connected by an operator
- * who reads the setting names, and ADR-0021 puts them on the line. The sender
- * details are the owner's own words — a name and a postal address — so that
- * line says it in plain words and keeps the names behind a disclosure for
- * whoever installs them.
+ * `connectedByOperator`: email and publishing are connected by an operator
+ * who reads the setting names, so ADR-0021 puts an absent name on the line
+ * and local development shows the setup link. The sender details are the
+ * owner's own words — a name and a postal address — so that line says it in
+ * plain words and keeps the names behind a disclosure for whoever installs
+ * them.
+ *
+ * `setOnLiveSite`: where an owner sets this connection once the site is live,
+ * said under the local development sentence. Email carries one because the
+ * Newsletter steps send the owner there (#238). Publishing's line is as it
+ * was; a line for it belongs with the Settings → Site work, not here.
  */
 type ConnectionCopy = Readonly<{
   setupLinkLabel: string;
@@ -58,7 +65,8 @@ type ConnectionCopy = Readonly<{
   connectedSentence: string;
   notConnectedSentence: string;
   connectedMeaning: string;
-  settingNamesShownInline: boolean;
+  connectedByOperator: boolean;
+  setOnLiveSite?: Readonly<{ before: string; label: string; href: string }>;
 }>;
 
 /**
@@ -74,13 +82,20 @@ export const senderDetailsNotSetSentence =
 const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
   email: {
     setupLinkLabel: "How to connect email",
-    localDevelopmentSentence: "Email is off in local development.",
+    localDevelopmentSentence:
+      "Email is off in local development, because this site holds no email " +
+      "provider connection.",
     connectedSentence: "Email is connected.",
     notConnectedSentence: "Email is not connected yet.",
     connectedMeaning:
       "This means every email setting is installed, not that a message was " +
       "sent.",
-    settingNamesShownInline: true,
+    connectedByOperator: true,
+    setOnLiveSite: {
+      before: "On a live site the email connection is set in ",
+      label: "Settings → Email",
+      href: settingsTab.email.href,
+    },
   },
   publishing: {
     setupLinkLabel: "How to connect publishing",
@@ -90,7 +105,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
     connectedMeaning:
       "This means every publishing setting is installed, not that GitHub or " +
       "Cloudflare were reached.",
-    settingNamesShownInline: true,
+    connectedByOperator: true,
   },
   senderDetails: {
     setupLinkLabel: "How to set the sender details",
@@ -103,7 +118,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
       "This means the name, postal address, contact page and unsubscribe " +
       "page for the bottom of every email are set, and Foundry knows which " +
       "address the email comes from.",
-    settingNamesShownInline: false,
+    connectedByOperator: false,
   },
 };
 
@@ -132,9 +147,49 @@ export function ConnectionStatus({
 
   const copy = connectionCopy[kind];
 
+  // Local development names no setting on the open screen. Nothing is absent
+  // that anybody here has to install, and a list of configuration names is
+  // words a site owner cannot use. The names a connected site holds still
+  // matter to whoever connects one, so they sit behind a closed disclosure
+  // under the line, the same way Settings keeps the site's version numbers.
   if (readiness.state === "local_development") {
     return (
-      <p className="connection-status">{copy.localDevelopmentSentence}</p>
+      <div className="connection-status">
+        <p>
+          {copy.localDevelopmentSentence}
+          {copy.connectedByOperator ? (
+            <>
+              {" "}
+              <a
+                href={`${documentationBaseAddress}${readiness.setupGuide}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {copy.setupLinkLabel}
+              </a>
+            </>
+          ) : null}
+        </p>
+        {copy.setOnLiveSite === undefined ? null : (
+          <p>
+            {copy.setOnLiveSite.before}
+            <a href={copy.setOnLiveSite.href}>{copy.setOnLiveSite.label}</a>.
+          </p>
+        )}
+        {readiness.missingSettings.length > 0 ? (
+          <details className="connection-status-details">
+            <summary>Technical details</summary>
+            <p>A connected site holds these settings:</p>
+            <ul>
+              {readiness.missingSettings.map((name) => (
+                <li key={name}>
+                  <code>{name}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </div>
     );
   }
 
@@ -149,9 +204,10 @@ export function ConnectionStatus({
 
   const missingNames = readiness.missingSettings.join(", ");
   const namesInline =
-    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
+    readiness.missingSettings.length > 0 && copy.connectedByOperator;
   const namesBehindDisclosure =
-    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
+    readiness.missingSettings.length > 0 && !copy.connectedByOperator;
+
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {copy.notConnectedSentence}

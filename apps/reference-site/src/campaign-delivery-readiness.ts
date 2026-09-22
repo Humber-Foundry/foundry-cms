@@ -22,7 +22,10 @@ export { emailDeliverySetupGuide as campaignDeliverySetupGuide } from "./setting
  * address.
  *
  * - `local_development` — delivery is off because the site runs in local
- *   development. Nothing is sent and nothing needs to be installed.
+ *   development. Nothing is sent, and nothing has to be installed to carry on
+ *   writing. `missingSettings` then names every delivery setting, because
+ *   local development holds none of them; a screen says in plain words why
+ *   no test can go out and keeps the names behind a disclosure.
  * - `not_configured` — at least one named setting is absent or invalid.
  * - `connected` — every named setting is installed. `providerHealth` then
  *   reports what the provider itself says about the credential and the sender

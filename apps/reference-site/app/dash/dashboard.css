@@ -1372,6 +1372,7 @@
  * in the accent colour; a missing one reads in the full ink used for prose,
  * because it names a setting the owner still has to install. */
 .connection-status {
+  overflow-wrap: anywhere;
   margin: 0.5rem 0 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
@@ -1384,6 +1385,46 @@
 
 .connection-status-missing {
   color: var(--dash-ink);
+}
+
+/* In local development the connection line is a short stack of lines: the
+ * state, where a live site sets it, and a disclosure. The stack keeps the one
+ * margin above; each line inside it takes the small gap. */
+.connection-status > p {
+  margin: 0;
+}
+
+.connection-status > p + p {
+  margin-top: var(--dash-space-2);
+}
+
+/* The setting names a connected site holds, kept behind a closed disclosure
+ * for whoever connects one. The summary is a control, so it takes the full
+ * control height a phone needs; it keeps the browser's own marker, the same
+ * as the other disclosures on the dashboard. */
+.connection-status-details {
+  margin-top: var(--dash-space-2);
+}
+
+.connection-status-details > summary {
+  min-height: var(--dash-control-height);
+  padding: var(--dash-space-2) 0;
+  color: var(--dash-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-status-details > p {
+  margin: var(--dash-space-2) 0 0;
+}
+
+.connection-status-details > ul {
+  margin: var(--dash-space-2) 0 0;
+  padding-left: var(--dash-space-5);
+}
+
+.connection-status-details li + li {
+  margin-top: var(--dash-space-1);
 }
 
 .composer-settings {
@@ -1618,26 +1659,107 @@
   cursor: pointer;
 }
 
-.email-preview-message {
-  margin-bottom: 1rem;
+/* The heading of the preview and the two width choices sit on one line on a
+ * computer and stack on a phone, so neither ever crowds the other. */
+.email-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dash-space-3);
+  margin-bottom: var(--dash-space-4);
 }
 
-.email-preview-message .campaign-preview-line {
-  color: var(--dash-muted, #5a6b60);
+.email-preview-head h2 {
+  margin: 0;
+  font-size: var(--dash-h2);
+}
+
+/* The width switch is the shared toggle. It sits on an ordinary screen rather
+ * than in the page editor's top bar, so each side takes the full control
+ * height a phone needs. Both class names are named here so this outranks
+ * `.mode-toggle button`, which sets the shorter top-bar height further down
+ * this file. */
+.email-preview-widths.mode-toggle button {
+  min-height: var(--dash-control-height);
+  padding: 0 var(--dash-space-4);
+}
+
+/* The frame is drawn at the exact width of a real inbox, never scaled, so the
+ * lines break where they will break when the email arrives. On a narrow
+ * screen the computer width is wider than the dashboard, so this box scrolls
+ * sideways rather than squeezing the email into a shape no reader sees. */
+.email-preview-frame {
+  display: flex;
+  overflow-x: auto;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: var(--dash-space-3);
+  background: var(--dash-canvas);
+  /* `safe` keeps the left edge of the email reachable when it is wider than
+   * this box. Plain centring would push the start of every line out of the
+   * scrollable area, so the first words could not be read at all. */
+  justify-content: center;
+  justify-content: safe center;
+}
+
+/* The box is a tab stop, so a keyboard shows where it is. */
+.email-preview-frame:focus-visible {
+  outline: 2px solid var(--dash-accent);
+  outline-offset: 2px;
+}
+
+.email-preview-page {
+  flex: 0 0 auto;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+/* What the owner reads before an email goes to the whole list. */
+.send-review {
+  display: grid;
+  gap: var(--dash-space-3);
+  margin: var(--dash-space-3) 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: var(--dash-space-4);
+  background: var(--dash-canvas);
+}
+
+.send-review-count {
+  margin: 0;
+  color: var(--dash-ink);
+  font-weight: 700;
+}
+
+.send-review-facts {
+  display: grid;
+  gap: var(--dash-space-3);
+  margin: 0;
+}
+
+.send-review-fact {
+  display: grid;
+  gap: var(--dash-space-1);
+}
+
+.send-review-fact dt {
+  color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }
 
-.campaign-header-image,
-.email-preview-message .rich-text-image {
-  margin: 0.75rem 0;
+.send-review-fact dd {
+  margin: 0;
+  font-size: var(--dash-text-small);
+  overflow-wrap: anywhere;
 }
 
-.campaign-header-image img,
-.email-preview-message .rich-text-image img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--dash-radius);
+/* Why a picture in the email does not draw in the preview. */
+.email-preview-note {
+  margin: var(--dash-space-3) 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
 }
 
 .copy-button {
