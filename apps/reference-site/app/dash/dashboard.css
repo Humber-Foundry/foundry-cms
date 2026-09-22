@@ -3278,7 +3278,7 @@
 }
 
 .analytics .inventory-row {
-  grid-template-columns: 1.4fr 1.2fr 1fr;
+  grid-template-columns: 1.3fr 1.3fr 1fr 1fr;
 }
 
 /* Photo library -----------------------------------------------------------

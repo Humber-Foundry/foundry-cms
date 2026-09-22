@@ -16,17 +16,18 @@ import {
 } from "@humber-foundry/application";
 import {
   pageDisplayTitle,
-  pagePath,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 
+import type { ReportingPeriodDays } from "./analytics-reporting-period";
 import { sampleAnalyticsDashboard } from "./analytics-sample-data";
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import { dashboardTimeZone } from "./dashboard-time";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
+import { publishedContentRoutes } from "./web-traffic-collector";
 
 /**
  * `/dash` reads the aggregate projection through the application layer only.
@@ -35,20 +36,6 @@ import type { HumanAccessRequestContext } from "./human-access-runtime";
  */
 
 export const defaultReportingTimeZone = dashboardTimeZone;
-
-/** The two periods the Visitors screen offers. */
-export const reportingPeriodDays = Object.freeze([7, 30] as const);
-
-export type ReportingPeriodDays = (typeof reportingPeriodDays)[number];
-
-export function resolveReportingPeriodDays(
-  requested: string | number | undefined,
-): ReportingPeriodDays {
-  const days = Number(requested);
-  return reportingPeriodDays.includes(days as ReportingPeriodDays)
-    ? (days as ReportingPeriodDays)
-    : 7;
-}
 
 export type AnalyticsDashboardErrorCode =
   | "analytics_not_authorized"
@@ -183,16 +170,17 @@ function contentTitlesFor(
   return titles;
 }
 
-/** The web address of every page and post the site currently has. */
+/**
+ * The web address of every page and post the site currently has. It is the
+ * same map the Worker counts against, read the other way round, so the screen
+ * and the counter can never disagree about which address a page has.
+ */
 function contentPathsFor(
   definition: SiteDefinition,
 ): Readonly<Record<string, string>> {
   const paths: Record<string, string> = {};
-  for (const page of definition.pages) {
-    paths[page.id] = pagePath(page);
-  }
-  for (const post of definition.blog.posts) {
-    paths[post.id] = `/blog/${post.slug}`;
+  for (const [path, contentId] of publishedContentRoutes(definition)) {
+    paths[contentId] = path;
   }
   return paths;
 }
@@ -210,9 +198,15 @@ function localDevelopmentSampleAllowed(): boolean {
 
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
-  now: () => string = () => new Date().toISOString(),
-  createContext = createAnalyticsDashboardContext,
-  periodDays: ReportingPeriodDays = 7,
+  {
+    now = () => new Date().toISOString(),
+    createContext = createAnalyticsDashboardContext,
+    periodDays = 7,
+  }: {
+    now?: () => string;
+    createContext?: typeof createAnalyticsDashboardContext;
+    periodDays?: ReportingPeriodDays;
+  } = {},
 ): Promise<AnalyticsDashboardData | null> {
   if (humanContext.state !== "authorized") return null;
   const actor = humanContext.identity;

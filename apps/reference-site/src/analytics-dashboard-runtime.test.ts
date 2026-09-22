@@ -14,8 +14,8 @@ import {
   defaultReportingRange,
   defaultReportingTimeZone,
   loadAnalyticsDashboard,
-  resolveReportingPeriodDays,
 } from "./analytics-dashboard-runtime";
+import { resolveReportingPeriodDays } from "./analytics-reporting-period";
 import { installedSiteDefinition } from "../foundry/site-definition";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
 
@@ -123,13 +123,12 @@ describe("the sample figures a developer sees locally", () => {
     const previous = process.env.NODE_ENV;
     vi.stubEnv("NODE_ENV", nodeEnv);
     try {
-      return await loadAnalyticsDashboard(
-        authorizedContext(),
-        () => "2026-07-03T00:00:00.000Z",
-        contextThatFailsWith(
+      return await loadAnalyticsDashboard(authorizedContext(), {
+        now: () => "2026-07-03T00:00:00.000Z",
+        createContext: contextThatFailsWith(
           new AnalyticsDashboardError("analytics_not_configured"),
         ),
-      );
+      });
     } finally {
       vi.stubEnv("NODE_ENV", previous ?? "test");
     }
@@ -156,35 +155,32 @@ describe("loading the dashboard", () => {
   });
 
   it("renders the empty panel when the read model is not reachable", async () => {
-    const data = await loadAnalyticsDashboard(
-      authorizedContext(),
-      () => "2026-07-03T00:00:00.000Z",
-      contextThatFailsWith(
+    const data = await loadAnalyticsDashboard(authorizedContext(), {
+      now: () => "2026-07-03T00:00:00.000Z",
+      createContext: contextThatFailsWith(
         new AnalyticsDashboardError("analytics_not_configured"),
       ),
-    );
+    });
 
     expect(data).toBeNull();
   });
 
   it("propagates AnalyticsPrivacyViolationError to the Next.js error boundary", async () => {
     await expect(
-      loadAnalyticsDashboard(
-        authorizedContext(),
-        () => "2026-07-03T00:00:00.000Z",
-        contextThatFailsWith(
+      loadAnalyticsDashboard(authorizedContext(), {
+        now: () => "2026-07-03T00:00:00.000Z",
+        createContext: contextThatFailsWith(
           new AnalyticsPrivacyViolationError("visitorId", "metrics.visitorId"),
         ),
-      ),
+      }),
     ).rejects.toThrow(AnalyticsPrivacyViolationError);
   });
 
   it("names every page's title by its content id, for the Content section", async () => {
-    const data = await loadAnalyticsDashboard(
-      authorizedContext(),
-      () => "2026-07-03T00:00:00.000Z",
-      contextThatSucceeds(),
-    );
+    const data = await loadAnalyticsDashboard(authorizedContext(), {
+      now: () => "2026-07-03T00:00:00.000Z",
+      createContext: contextThatSucceeds(),
+    });
 
     const home = homePage(installedSiteDefinition);
     expect(data?.contentTitles[home.id]).toBe(pageDisplayTitle(home));
@@ -198,11 +194,10 @@ describe("loading the dashboard", () => {
     vocabularyFailure.name = "AnalyticsVocabularyError";
 
     await expect(
-      loadAnalyticsDashboard(
-        authorizedContext(),
-        () => "2026-07-03T00:00:00.000Z",
-        contextThatFailsWith(vocabularyFailure),
-      ),
+      loadAnalyticsDashboard(authorizedContext(), {
+        now: () => "2026-07-03T00:00:00.000Z",
+        createContext: contextThatFailsWith(vocabularyFailure),
+      }),
     ).rejects.toThrow("unknown metric");
   });
 });

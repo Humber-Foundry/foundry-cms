@@ -25,8 +25,11 @@ import {
  * `server-only`.
  */
 
-export { webTrafficEventKind };
-
+/**
+ * One page view, as the four labels and one marker the dataset holds. The
+ * referrer is two flat fields because they are two separate dataset columns,
+ * which is also how the rollup reads them back.
+ */
 export type WebTrafficPoint = Readonly<{
   /** The published page or post id, or `""` for a path the site does not own. */
   contentId: string;
@@ -45,20 +48,13 @@ const privatePathPrefixes: ReadonlyArray<string> = Object.freeze([
   "/mcp",
 ]);
 
-export function isPublicPagePath(pathname: string): boolean {
-  if (!pathname.startsWith("/")) return false;
-  let decoded = pathname;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return false;
-  }
-  if (decoded === "/dash") return false;
-  if (privatePathPrefixes.some((prefix) => decoded.startsWith(prefix))) {
+export function isPublicPagePath(path: string): boolean {
+  if (!path.startsWith("/")) return false;
+  if (privatePathPrefixes.some((prefix) => path.startsWith(prefix))) {
     return false;
   }
   // Foundry's own internal routes all start a segment with an underscore.
-  return !decoded.split("/").some((segment) => segment.startsWith("_"));
+  return !path.split("/").some((segment) => segment.startsWith("_"));
 }
 
 /** One published web address per page and post, keyed by the address. */
@@ -75,13 +71,17 @@ export function publishedContentRoutes(
   return routes;
 }
 
-/** Treats `/about/` and `/about` as one address, and keeps `/` as `/`. */
-function normalizePath(pathname: string): string {
-  let decoded = pathname;
+/**
+ * The address as the site publishes it: readable, and with no trailing slash
+ * unless it is the home page. A badly encoded address gives `null`, and is
+ * not counted.
+ */
+function readablePath(pathname: string): string | null {
+  let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
   } catch {
-    return pathname;
+    return null;
   }
   if (decoded.length > 1 && decoded.endsWith("/")) return decoded.slice(0, -1);
   return decoded;
@@ -113,19 +113,25 @@ export function webTrafficPointFor({
   } catch {
     return null;
   }
-  if (!isPublicPagePath(url.pathname)) return null;
+  const path = readablePath(url.pathname);
+  if (path === null || !isPublicPagePath(path)) return null;
 
+  // A reader who moved inside the site is not an arrival. Two signals say so,
+  // and either one is enough: the referring host is this host, or the browser
+  // says the request came from this same site. Neither names a person.
   const referrerHost = referrerHostOf(request.headers.get("referer"));
-  const arrival = referrerHost === "" || referrerHost !== url.hostname;
-  const referrer = arrival
-    ? normalizeReferrer(referrerHost)
-    : { key: "", value: "" };
+  const sameSite =
+    referrerHost === url.hostname ||
+    request.headers.get("sec-fetch-site") === "same-origin";
+  const referrer = sameSite
+    ? { key: "", value: "" }
+    : normalizeReferrer(referrerHost);
 
   return {
-    contentId: routes.get(normalizePath(url.pathname)) ?? "",
+    contentId: routes.get(path) ?? "",
     referrerKey: referrer.key,
     referrerValue: referrer.value,
-    arrival,
+    arrival: !sameSite,
   };
 }
 
@@ -144,11 +150,6 @@ export function writeWebTrafficPoint(
   });
 }
 
-/**
- * Counts one served request, and never changes it. Collection is best effort:
- * a dropped point leaves a count low, and nothing else in the request depends
- * on it, so every failure here is swallowed.
- */
 export type WebTrafficEnvironment = Readonly<{
   FOUNDRY_INTERACTIONS?: AnalyticsEngineDataset;
 }>;
@@ -185,6 +186,11 @@ export function withWebTrafficCounting<
   };
 }
 
+/**
+ * Counts one served request, and never changes it. Collection is best effort:
+ * a dropped point leaves a count low, and nothing else in the request depends
+ * on it, so every failure here is swallowed.
+ */
 export function recordWebTraffic({
   request,
   response,

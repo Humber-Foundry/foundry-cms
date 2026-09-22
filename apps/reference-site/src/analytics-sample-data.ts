@@ -14,10 +14,8 @@ import {
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
-import type {
-  AnalyticsDashboardData,
-  ReportingPeriodDays,
-} from "./analytics-dashboard-runtime";
+import type { AnalyticsDashboardData } from "./analytics-dashboard-runtime";
+import type { ReportingPeriodDays } from "./analytics-reporting-period";
 
 /**
  * Made-up figures for local development.

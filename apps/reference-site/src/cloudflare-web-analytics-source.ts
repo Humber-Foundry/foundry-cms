@@ -6,8 +6,6 @@ import {
 
 import { normalizeReferrer } from "./analytics-referrer";
 
-export { normalizeReferrer };
-
 /**
  * Cloudflare Web Analytics is the traffic authority. Foundry imports only the
  * host, published path, normalized referrer host and Web Vitals aggregates it

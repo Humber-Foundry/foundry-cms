@@ -173,7 +173,7 @@ export type WebTrafficRow = Readonly<{
   sample_interval: number;
 }>;
 
-function positiveWeight(value: unknown): number {
+function weightedCount(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new AnalyticsEngineSourceError("row_invalid");
   }
@@ -234,8 +234,8 @@ export function normalizeWebTrafficRows({
     ) {
       throw new AnalyticsEngineSourceError("row_invalid");
     }
-    const pageViews = positiveWeight(row.weighted_page_views);
-    const visits = positiveWeight(row.weighted_visits);
+    const pageViews = weightedCount(row.weighted_page_views);
+    const visits = weightedCount(row.weighted_visits);
     const bucket = row.bucket_start;
     const interval = row.sample_interval;
 
@@ -338,10 +338,44 @@ const instantPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
 
 /**
+ * The parts of a rollup statement every query shares.
+ *
  * The Analytics Engine SQL API takes a statement, and offers no bound
  * parameters. Every interpolated value is therefore checked against a strict
- * pattern first, and the statement is refused when one fails.
+ * pattern first, and the query is refused when one fails.
  */
+function rollupFrame({
+  dataset,
+  since,
+  until,
+  granularity,
+}: {
+  dataset: string;
+  since: string;
+  until: string;
+  granularity: AnalyticsEngineBucketGranularity;
+}): Readonly<{ bucketExpression: string; whereWindow: string }> {
+  if (
+    !datasetPattern.test(dataset) ||
+    !instantPattern.test(since) ||
+    !instantPattern.test(until) ||
+    Date.parse(since) >= Date.parse(until)
+  ) {
+    throw new AnalyticsEngineSourceError("query_invalid");
+  }
+  const clickhouseInstant = (instant: string) =>
+    instant.slice(0, 19).replace("T", " ");
+  return {
+    bucketExpression:
+      granularity === "hour"
+        ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
+        : "formatDateTime(toDate(timestamp), '%Y-%m-%d')",
+    whereWindow: `timestamp >= toDateTime('${clickhouseInstant(since)}')
+  AND timestamp < toDateTime('${clickhouseInstant(until)}')`,
+  };
+}
+
+/** The rollup for the anonymous interactions a browser reports. */
 export function interactionRollupSql({
   dataset,
   since,
@@ -353,20 +387,12 @@ export function interactionRollupSql({
   until: string;
   granularity?: AnalyticsEngineBucketGranularity;
 }): string {
-  if (
-    !datasetPattern.test(dataset) ||
-    !instantPattern.test(since) ||
-    !instantPattern.test(until) ||
-    Date.parse(since) >= Date.parse(until)
-  ) {
-    throw new AnalyticsEngineSourceError("query_invalid");
-  }
-  const clickhouseInstant = (instant: string) =>
-    instant.slice(0, 19).replace("T", " ");
-  const bucketExpression =
-    granularity === "hour"
-      ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
-      : "formatDateTime(toDate(timestamp), '%Y-%m-%d')";
+  const { bucketExpression, whereWindow } = rollupFrame({
+    dataset,
+    since,
+    until,
+    granularity,
+  });
   // blob1 is the event kind and blob2 the public CMS object ID. The kinds are
   // named here, so a page view point never reaches the interaction rollup.
   const kinds = Object.keys(allowedInteractionKinds)
@@ -379,8 +405,7 @@ export function interactionRollupSql({
   SUM(_sample_interval) AS weighted_count,
   MAX(_sample_interval) AS sample_interval
 FROM ${dataset}
-WHERE timestamp >= toDateTime('${clickhouseInstant(since)}')
-  AND timestamp < toDateTime('${clickhouseInstant(until)}')
+WHERE ${whereWindow}
   AND blob1 IN (${kinds})
 GROUP BY bucket_start, event_kind, subject_id
 FORMAT JSON`;
@@ -405,20 +430,12 @@ export function webTrafficRollupSql({
   until: string;
   granularity?: AnalyticsEngineBucketGranularity;
 }): string {
-  if (
-    !datasetPattern.test(dataset) ||
-    !instantPattern.test(since) ||
-    !instantPattern.test(until) ||
-    Date.parse(since) >= Date.parse(until)
-  ) {
-    throw new AnalyticsEngineSourceError("query_invalid");
-  }
-  const clickhouseInstant = (instant: string) =>
-    instant.slice(0, 19).replace("T", " ");
-  const bucketExpression =
-    granularity === "hour"
-      ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
-      : "formatDateTime(toDate(timestamp), '%Y-%m-%d')";
+  const { bucketExpression, whereWindow } = rollupFrame({
+    dataset,
+    since,
+    until,
+    granularity,
+  });
   return `SELECT
   ${bucketExpression} AS bucket_start,
   blob2 AS content_id,
@@ -428,8 +445,7 @@ export function webTrafficRollupSql({
   SUM(double2 * _sample_interval) AS weighted_visits,
   MAX(_sample_interval) AS sample_interval
 FROM ${dataset}
-WHERE timestamp >= toDateTime('${clickhouseInstant(since)}')
-  AND timestamp < toDateTime('${clickhouseInstant(until)}')
+WHERE ${whereWindow}
   AND blob1 = '${webTrafficEventKind}'
 GROUP BY bucket_start, content_id, referrer_key, referrer_value
 FORMAT JSON`;

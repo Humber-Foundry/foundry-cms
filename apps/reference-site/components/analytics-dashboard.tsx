@@ -7,6 +7,7 @@ import type {
 } from "@humber-foundry/application";
 
 import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";
+import { reportingPeriodDays } from "../src/analytics-reporting-period";
 import { HelpTip } from "./help-tip";
 
 /**
@@ -130,9 +131,14 @@ function dayLabel(bucketStartUtc: string) {
   return dayLabelFormat.format(new Date(Date.parse(bucketStartUtc)));
 }
 
+/** The number in a value, or null when there is none to read. */
+function availableNumber(value: AnalyticsValue): number | null {
+  return value.state === "available" ? value.value : null;
+}
+
 function readingValue(reading: AnalyticsReading | undefined) {
   if (reading === undefined) return null;
-  return reading.value.state === "available" ? reading.value.value : null;
+  return availableNumber(reading.value);
 }
 
 /** "Up 12% on the 7 days before", and the plain cases around it. */
@@ -229,15 +235,12 @@ function PageViewChart({
     );
   }
   const highest = counted.reduce((best, day) =>
-    (day.pageViews as { value: number }).value >
-    (best.pageViews as { value: number }).value
+    (availableNumber(day.pageViews) ?? 0) >
+    (availableNumber(best.pageViews) ?? 0)
       ? day
       : best,
   );
-  const highestValue = Math.max(
-    1,
-    (highest.pageViews as { value: number }).value,
-  );
+  const highestValue = Math.max(1, availableNumber(highest.pageViews) ?? 1);
   const step = chartBarWidth + chartBarGap;
   const width = days.length * step - chartBarGap;
   const chartHeight = width / chartAspect;
@@ -254,8 +257,7 @@ function PageViewChart({
         )} with ${formatNumber(highestValue)} page views.`}
       >
         {days.map((day, index) => {
-          const value =
-            day.pageViews.state === "available" ? day.pageViews.value : null;
+          const value = availableNumber(day.pageViews);
           const height =
             value === null
               ? 0
@@ -318,6 +320,19 @@ function ReadingCell({
             }.`}
       </p>
       <p className="analytics-metric-definition">{reading.definition}</p>
+      {isDerived || unavailable ? null : (
+        <p className="analytics-metric-definition">
+          {`From ${sourceName(reading.source)}`}
+          {reading.completeThrough === null
+            ? "."
+            : `, counted up to ${dayLabel(reading.completeThrough)}.`}
+          {reading.unavailableBuckets > 0
+            ? ` ${reading.unavailableBuckets} of ${
+                reading.measuredBuckets + reading.unavailableBuckets
+              } days in this period were not counted.`
+            : ""}
+        </p>
+      )}
     </div>
   );
 }
@@ -344,6 +359,7 @@ function SourceHealthTable({
         <span role="columnheader">Where the number comes from</span>
         <span role="columnheader">How it is doing</span>
         <span role="columnheader">Counted up to</span>
+        <span role="columnheader">Last worked</span>
       </div>
       {sources.map((source) => (
         <div
@@ -354,11 +370,17 @@ function SourceHealthTable({
           <strong role="cell">{sourceName(source.source)}</strong>
           <span role="cell" className="state-label">
             {sourceStatusNames[source.status] ?? source.status}
+            {source.nextRetryAt === null ? "" : " · trying again shortly"}
           </span>
           <span role="cell">
             {source.completeThrough === null
               ? "Nothing yet"
               : dayLabel(source.completeThrough)}
+          </span>
+          <span role="cell">
+            {source.lastSuccessAt === null
+              ? "Never"
+              : dayLabel(source.lastSuccessAt)}
           </span>
         </div>
       ))}
@@ -367,7 +389,7 @@ function SourceHealthTable({
 }
 
 function PeriodSwitch({ periodDays }: { periodDays: number }) {
-  const periods = [7, 30];
+  const periods = reportingPeriodDays;
   return (
     <nav className="analytics-period" aria-label="How far back to look">
       {periods.map((days) => (
@@ -436,6 +458,9 @@ export function AnalyticsDashboard({
       reading: item.readings[0],
     }))
     .filter((item) => item.reading !== undefined);
+  // ADR-0003 asks for Web Vitals beside the content they belong to. No source
+  // collects them yet, so this part of the screen appears only once one does.
+  const pageSpeed = content.items.filter((item) => item.vitals.length > 0);
 
   return (
     <section className="analytics" aria-label="Visitor numbers">
@@ -490,6 +515,10 @@ export function AnalyticsDashboard({
       )}
 
       <h2>Where your visits came from</h2>
+      <p className="analytics-metric-definition">
+        Counted from the page each reader arrived on. A move from one of your
+        pages to another is not an arrival, so it is not listed here.
+      </p>
       {overview.referrers.length === 0 ? (
         <p className="analytics-empty">
           Nothing has been counted about where visits came from in the last{" "}
@@ -509,6 +538,25 @@ export function AnalyticsDashboard({
             </li>
           ))}
         </ol>
+      )}
+
+      {pageSpeed.length === 0 ? null : (
+        <>
+          <h2>How fast your pages are</h2>
+          {pageSpeed.map((item) => (
+            <div className="analytics-subject" key={item.subjectId}>
+              <h3>{contentTitles[item.subjectId] ?? item.subjectId}</h3>
+              <dl className="analytics-grid">
+                {item.vitals.map((reading) => (
+                  <ReadingCell
+                    key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
+                    reading={reading}
+                  />
+                ))}
+              </dl>
+            </div>
+          ))}
+        </>
       )}
 
       <h2>Messages</h2>

@@ -31,7 +31,8 @@ One point holds four labels and two numbers:
 - the event kind, `page_view`;
 - the published page or post id, or an empty label for an address the site
   does not own;
-- the referrer as a bare host or as one of six channel words;
+- the referrer, reduced to a bare host or to a channel word the read model
+  allows, such as `direct` or `search`;
 - an arrival marker, which is 1 when the reader came from somewhere other than
   this site.
 
@@ -65,9 +66,14 @@ and the two series would then be shown apart rather than mixed.
 
 ## Consequences
 
-- Counting is exact for requests the Worker serves, and it misses a page served
-  from a cache in front of the Worker. It counts a machine that reads pages as
-  well as a person, so the readings are labelled as an estimate.
+- Counting is exact for requests the Worker serves. It misses a page served
+  from a cache in front of the Worker and a page the browser re-opened from
+  its own cache, and it counts a machine that reads pages as well as a person.
+  The readings are therefore labelled as an estimate, not as an exact count.
+- An arrival is decided from the referring host and from the browser's
+  `Sec-Fetch-Site` header. Neither names a person. A browser that sends
+  neither is treated as an arrival, so arrivals can read high on a site with
+  many such readers.
 - Analytics Engine allows 100,000 data points a day on the free plan. One point
   per page view puts a site of a few thousand page views a day well inside
   that. A far busier site would need the paid plan, which ADR-0003 already

@@ -1,10 +1,10 @@
 /**
  * Reduces a referrer to something an aggregate may hold.
  *
- * Only a bare host or one of six channel words ever leaves this module. The
- * path, the query string and the fragment of a referring address are dropped
- * here, before any analytics code sees them, so they cannot reach the read
- * model. See ADR-0003 and ADR-0047.
+ * Only a bare host, or one of the channel words the read model allows, ever
+ * leaves this module. The path, the query string and the fragment of a
+ * referring address are dropped here, before any analytics code sees them, so
+ * they cannot reach the read model. See ADR-0003 and ADR-0047.
  */
 
 export type ReferrerDimension = Readonly<{ key: string; value: string }>;

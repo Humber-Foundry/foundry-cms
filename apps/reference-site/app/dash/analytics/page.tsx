@@ -1,8 +1,6 @@
 import { AnalyticsDashboard } from "@/components/analytics-dashboard";
-import {
-  loadAnalyticsDashboard,
-  resolveReportingPeriodDays,
-} from "@/src/analytics-dashboard-runtime";
+import { loadAnalyticsDashboard } from "@/src/analytics-dashboard-runtime";
+import { resolveReportingPeriodDays } from "@/src/analytics-reporting-period";
 import { requireAuthorizedDashboardAccess } from "@/src/dashboard-page-context";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +21,7 @@ export default async function DashboardAnalyticsPage({
   const periodDays = resolveReportingPeriodDays(
     Array.isArray(requested) ? requested[0] : (requested as string | undefined),
   );
-  const analytics = await loadAnalyticsDashboard(
-    access,
-    undefined,
-    undefined,
-    periodDays,
-  );
+  const analytics = await loadAnalyticsDashboard(access, { periodDays });
 
   return (
     <main className="dashboard-main" id="main">

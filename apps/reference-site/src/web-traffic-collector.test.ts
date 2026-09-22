@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { assertAggregateAnalyticsPayload } from "@humber-foundry/application";
 
+import { webTrafficEventKind } from "./analytics-engine-source";
 import {
   isPublicPagePath,
   publishedContentRoutes,
   recordWebTraffic,
-  webTrafficEventKind,
   webTrafficPointFor,
   withWebTrafficCounting,
   writeWebTrafficPoint,
@@ -179,6 +179,37 @@ describe("what one page view records", () => {
       referrerValue: "",
       arrival: false,
     });
+  });
+
+  it("reads the browser's own same-site marker when there is no referrer", () => {
+    const point = webTrafficPointFor({
+      request: pageRequest("https://example.ca/about", {
+        "sec-fetch-site": "same-origin",
+      }),
+      response: htmlResponse(),
+      routes,
+    });
+
+    expect(point).toEqual({
+      contentId: "page_about",
+      referrerKey: "",
+      referrerValue: "",
+      arrival: false,
+    });
+  });
+
+  it("counts an arrival when the browser says the reader came from elsewhere", () => {
+    const point = webTrafficPointFor({
+      request: pageRequest("https://example.ca/about", {
+        "sec-fetch-site": "cross-site",
+        referer: "https://partner.example.com/page",
+      }),
+      response: htmlResponse(),
+      routes,
+    });
+
+    expect(point?.arrival).toBe(true);
+    expect(point?.referrerValue).toBe("partner.example.com");
   });
 
   it("writes four labels and two numbers, and nothing else", () => {
