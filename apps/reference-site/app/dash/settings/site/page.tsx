@@ -9,8 +9,8 @@ import { messageRoomSentence } from "@/src/message-room";
 import {
   loadMutationToken,
   loadPublishedDefinition,
-  requireAuthorizedSettingsAccess,
-} from "@/src/settings-page-context";
+} from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export default async function DashboardSettingsSitePage() {
   const mutationToken = await loadMutationToken();
   const publishing = await readContentPublicationReadiness();
   const ownerNotifications = await loadOwnerNotificationStatus(access);
-  const tab = settingsTab("site");
+  const tab = settingsTab.site;
 
   return (
     <main className="dashboard-main" id="main">

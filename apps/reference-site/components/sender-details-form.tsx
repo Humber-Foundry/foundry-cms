@@ -38,15 +38,19 @@ function inputTypeFor(field: SenderDetailFieldName): string {
 export function SenderDetailsForm({
   values,
   stored,
-  localDevelopment,
+  editable,
   csrfToken,
 }: {
   /** The values in use now, stored ones first and the installation's own after. */
   values: SiteSenderDetails;
   /** Whether any of these were saved here before. */
   stored: boolean;
-  /** Local development sends nothing, so the form says so and saves nothing. */
-  localDevelopment: boolean;
+  /**
+   * Whether this installation can keep a save. A copy of the site with no
+   * database has nowhere to put them, so the form reads as a record of what
+   * the installation uses rather than offering a save it could not keep.
+   */
+  editable: boolean;
   csrfToken: string;
 }) {
   const router = useRouter();
@@ -97,6 +101,17 @@ export function SenderDetailsForm({
         setMessage("Nothing was saved. Fix the values marked below.");
         return;
       }
+      if (
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        body.error === "sender_details_unavailable"
+      ) {
+        setMessage(
+          "Nothing was saved. This copy of the site has nowhere to keep these details.",
+        );
+        return;
+      }
       setMessage("The details could not be saved. Try again.");
     } catch {
       setMessage("The details could not be saved. Try again.");
@@ -108,8 +123,8 @@ export function SenderDetailsForm({
   return (
     <form className="sender-details-form" onSubmit={save}>
       <p className="sender-details-source">
-        {localDevelopment
-          ? "This is a local copy of the site. Nothing here can be sent, and a save is not kept."
+        {!editable
+          ? "This copy of the site keeps nothing, so these can only be changed where the site is installed."
           : stored
             ? "These are the details you saved here."
             : "These are the details whoever set this site up installed. Save them here to change them."}
@@ -126,7 +141,7 @@ export function SenderDetailsForm({
                 name={field}
                 rows={3}
                 defaultValue={values[field]}
-                disabled={localDevelopment}
+                disabled={!editable}
                 aria-invalid={problem === null ? undefined : true}
               />
             ) : (
@@ -134,7 +149,7 @@ export function SenderDetailsForm({
                 name={field}
                 type={inputTypeFor(field)}
                 defaultValue={values[field]}
-                disabled={localDevelopment}
+                disabled={!editable}
                 aria-invalid={problem === null ? undefined : true}
               />
             )}
@@ -146,7 +161,7 @@ export function SenderDetailsForm({
         <button
           className="dash-button dash-button-primary"
           type="submit"
-          disabled={saving || localDevelopment}
+          disabled={saving || !editable}
         >
           Save sender details
         </button>

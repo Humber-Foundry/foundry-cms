@@ -34,15 +34,6 @@ export type SiteSenderDetails = Readonly<
   Record<SenderDetailFieldName, string>
 >;
 
-/** No stored value for any of the five. */
-export const noSenderDetails: SiteSenderDetails = Object.freeze({
-  legalName: "",
-  postalAddress: "",
-  contactUrl: "",
-  unsubscribeUrl: "",
-  senderIdentityId: "",
-});
-
 /**
  * The environment variable each stored value replaces. One map, so the store,
  * the screen and the campaign channel reader can never disagree about which
@@ -84,12 +75,27 @@ export const senderDetailHint: Readonly<
   contactUrl:
     "Must start with https:// and be the full address of a page on your site.",
   unsubscribeUrl:
-    "Must start with https:// . Foundry adds each reader's own code to this " +
-    "address.",
+    "Must start with https:// and be a page on your site. Foundry adds each " +
+    "reader's own code to this address.",
   senderIdentityId:
     "The name whoever set up email delivery gave the sending address. Leave " +
     "it as it is unless they tell you to change it.",
 });
+
+/**
+ * All five values, each read by the same rule. Adding a sixth detail is then
+ * one entry in `senderDetailFieldNames` and one entry in each map above,
+ * rather than an edit to every reader in this file.
+ */
+function senderDetailsBy(
+  read: (field: SenderDetailFieldName) => string,
+): SiteSenderDetails {
+  return Object.freeze(
+    Object.fromEntries(
+      senderDetailFieldNames.map((field) => [field, read(field)]),
+    ),
+  ) as SiteSenderDetails;
+}
 
 /**
  * The values this installation would use if nothing were stored: what the
@@ -98,15 +104,9 @@ export const senderDetailHint: Readonly<
 export function senderDetailsFromEnvironment(
   environment: HumanAccessEnvironment,
 ): SiteSenderDetails {
-  const read = (field: SenderDetailFieldName) =>
-    (environment[senderDetailEnvironmentName[field]] ?? "").trim();
-  return Object.freeze({
-    legalName: read("legalName"),
-    postalAddress: read("postalAddress"),
-    contactUrl: read("contactUrl"),
-    unsubscribeUrl: read("unsubscribeUrl"),
-    senderIdentityId: read("senderIdentityId"),
-  });
+  return senderDetailsBy((field) =>
+    (environment[senderDetailEnvironmentName[field]] ?? "").trim(),
+  );
 }
 
 /**
@@ -122,16 +122,9 @@ export function effectiveSenderDetails(
 ): SiteSenderDetails {
   const fromEnvironment = senderDetailsFromEnvironment(environment);
   if (stored === null) return fromEnvironment;
-  const pick = (field: SenderDetailFieldName) => {
+  return senderDetailsBy((field) => {
     const value = stored[field].trim();
     return value === "" ? fromEnvironment[field] : value;
-  };
-  return Object.freeze({
-    legalName: pick("legalName"),
-    postalAddress: pick("postalAddress"),
-    contactUrl: pick("contactUrl"),
-    unsubscribeUrl: pick("unsubscribeUrl"),
-    senderIdentityId: pick("senderIdentityId"),
   });
 }
 
@@ -164,13 +157,21 @@ export type SenderDetailProblem = Readonly<{
 }>;
 
 /**
- * What is wrong with the values the Owner typed, in plain words.
+ * What is wrong with a set of sender details, in plain words.
+ *
+ * Call this with the values the installation would actually use — the result
+ * of `effectiveSenderDetails` — never with the raw typed values. Leaving a
+ * field empty means "keep what the installation already uses", so judging the
+ * typed values alone would refuse a save that changes one address while the
+ * name still comes from the installation's own setting.
  *
  * A name and a postal address are required: no campaign may be written or sent
- * without them, and Foundry must never stand one in. The two web addresses are
- * optional here only in the sense that leaving one empty keeps whatever the
- * installation's environment already holds; a value that is typed must be a
- * full `https://` address, because it is sent to every reader.
+ * without them, and Foundry must never stand one in. A web address that is
+ * present must be a full `https://` address, because it is sent to every
+ * reader.
+ *
+ * This is also what the Email tab reads to write its state line, so what the
+ * screen says is missing and what a save refuses on can never disagree.
  */
 export function senderDetailProblems(
   details: SiteSenderDetails,
@@ -185,12 +186,22 @@ export function senderDetailProblems(
   if (!isPresent(details.postalAddress)) {
     problems.push({
       field: "postalAddress",
-      message: "Add the postal address that appears at the bottom of every email.",
+      message:
+        "Add the postal address that appears at the bottom of every email.",
     });
   }
+  const addressMissing: Readonly<
+    Record<"contactUrl" | "unsubscribeUrl", string>
+  > = {
+    contactUrl: "Add the web address where people can contact you.",
+    unsubscribeUrl:
+      "Add the web address where people can stop the emails.",
+  };
   for (const field of ["contactUrl", "unsubscribeUrl"] as const) {
     const value = details[field].trim();
-    if (value !== "" && !isHttpsUrl(value)) {
+    if (value === "") {
+      problems.push({ field, message: addressMissing[field] });
+    } else if (!isHttpsUrl(value)) {
       problems.push({
         field,
         message:
@@ -203,6 +214,24 @@ export function senderDetailProblems(
 }
 
 /**
+ * One plain sentence about the sender details, for the Email tab.
+ *
+ * It names what is missing rather than reporting a state, because "not
+ * configured" tells an owner nothing he can act on. It is built from the same
+ * problems a save refuses on, so the screen and the save always agree.
+ */
+export function senderDetailsStateSentence(
+  problems: ReadonlyArray<SenderDetailProblem>,
+): string {
+  if (problems.length === 0) {
+    return "Your sender details are set. Every email carries them at the bottom.";
+  }
+  return `Email cannot be sent yet. ${problems
+    .map((problem) => problem.message)
+    .join(" ")}`;
+}
+
+/**
  * The five values out of whatever a request sent, as strings.
  *
  * A request that omits a value, or sends something that is not a string, gets
@@ -212,15 +241,8 @@ export function senderDetailProblems(
 export function readSenderDetails(value: unknown): SiteSenderDetails | null {
   if (typeof value !== "object" || value === null) return null;
   const source = value as Record<string, unknown>;
-  const read = (field: SenderDetailFieldName) => {
+  return senderDetailsBy((field) => {
     const raw = source[field];
     return typeof raw === "string" ? raw.trim() : "";
-  };
-  return Object.freeze({
-    legalName: read("legalName"),
-    postalAddress: read("postalAddress"),
-    contactUrl: read("contactUrl"),
-    unsubscribeUrl: read("unsubscribeUrl"),
-    senderIdentityId: read("senderIdentityId"),
   });
 }

@@ -4,8 +4,6 @@ import { notFound } from "next/navigation";
 
 import { requireAuthorizedDashboardAccess } from "./dashboard-page-context";
 
-export { loadMutationToken, loadPublishedDefinition } from "./dashboard-page-context";
-
 /**
  * The access context for a Settings screen.
  *

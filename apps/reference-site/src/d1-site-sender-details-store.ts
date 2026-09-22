@@ -82,10 +82,22 @@ export function createD1SiteSenderDetailsStore(
   });
 }
 
+/** Raised when a save is asked of an installation that has no database. */
+export class SiteSenderDetailsUnavailableError extends Error {
+  constructor() {
+    super("sender_details_store_unavailable");
+    this.name = "SiteSenderDetailsUnavailableError";
+  }
+}
+
 /**
- * A store for an installation that has no database, used by local development.
- * It keeps nothing, so every read falls back to the environment variables and
- * every save is dropped.
+ * The store for an installation that has no database, which is what local
+ * development runs as.
+ *
+ * Reading returns "nothing stored", so the installation falls back to its
+ * environment variables. Saving raises rather than dropping the write: a save
+ * that answers "Saved" while keeping nothing would be a lie on screen, and the
+ * screen must always show the true server state.
  */
 export const emptySiteSenderDetailsStore: SiteSenderDetailsStore =
   Object.freeze({
@@ -93,6 +105,6 @@ export const emptySiteSenderDetailsStore: SiteSenderDetailsStore =
       return null;
     },
     async save() {
-      return;
+      throw new SiteSenderDetailsUnavailableError();
     },
   });

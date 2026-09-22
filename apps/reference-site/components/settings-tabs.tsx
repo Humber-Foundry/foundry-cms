@@ -49,13 +49,11 @@ export const settingsTabs: ReadonlyArray<SettingsTab> = Object.freeze([
   },
 ]);
 
-export function settingsTab(section: SettingsSection): SettingsTab {
-  const found = settingsTabs.find((tab) => tab.section === section);
-  // Every caller passes a section from the union above, so this cannot be
-  // reached. It keeps the return type free of `undefined` for the callers.
-  if (found === undefined) throw new Error("unknown_settings_section");
-  return found;
-}
+/** The same four tabs by name, for the route that is showing one of them. */
+export const settingsTab: Readonly<Record<SettingsSection, SettingsTab>> =
+  Object.freeze(
+    Object.fromEntries(settingsTabs.map((tab) => [tab.section, tab])),
+  ) as Readonly<Record<SettingsSection, SettingsTab>>;
 
 export function SettingsTabs({ current }: { current: SettingsSection }) {
   return (

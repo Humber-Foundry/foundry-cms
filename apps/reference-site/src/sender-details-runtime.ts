@@ -30,8 +30,15 @@ export type SenderDetailsForEditing = Readonly<{
   values: SiteSenderDetails;
   /** Whether anything is stored, so the screen can say where the values came from. */
   stored: boolean;
-  /** Whether this installation runs in local development, where nothing is sent. */
-  localDevelopment: boolean;
+  /**
+   * Whether this installation can keep a save at all. An installation with no
+   * database — which is what local development runs as — has nowhere to put
+   * them, so the form reads as a record rather than offering a save it could
+   * not keep.
+   */
+  editable: boolean;
+  /** What is still missing or malformed, in the Owner's own words. */
+  problems: ReadonlyArray<SenderDetailProblem>;
 }>;
 
 export async function loadSenderDetailsForEditing(): Promise<SenderDetailsForEditing> {
@@ -40,10 +47,12 @@ export async function loadSenderDetailsForEditing(): Promise<SenderDetailsForEdi
     environment,
     installedSite.application.siteId,
   );
+  const values = effectiveSenderDetails(environment, stored);
   return Object.freeze({
-    values: effectiveSenderDetails(environment, stored),
+    values,
     stored: stored !== null,
-    localDevelopment: process.env.NODE_ENV === "development",
+    editable: environment.FOUNDRY_DB !== undefined,
+    problems: senderDetailProblems(values),
   });
 }
 
@@ -53,9 +62,14 @@ export type SenderDetailsSaveRefusal = ReadonlyArray<SenderDetailProblem>;
 /**
  * Save all five sender details for this site.
  *
- * The values are checked first and the save is refused whole, so a half-valid
- * set can never reach a campaign footer. The write replaces all five values at
- * once, so sending the same save twice leaves the same row.
+ * The values are checked as the installation would use them — a field left
+ * empty keeps whatever the environment variable of the same name holds — and
+ * the save is refused whole, so a half-valid set can never reach a campaign
+ * footer.
+ *
+ * The write replaces all five values at once, so sending the same save twice
+ * leaves the same row. An installation with no database raises
+ * `SiteSenderDetailsUnavailableError` rather than dropping the write.
  */
 export async function saveSenderDetails({
   details,
@@ -66,9 +80,11 @@ export async function saveSenderDetails({
   savedBy: string;
   savedAt: string;
 }): Promise<SenderDetailsSaveRefusal> {
-  const problems = senderDetailProblems(details);
-  if (problems.length > 0) return problems;
   const environment = await loadHumanAccessEnvironment();
+  const problems = senderDetailProblems(
+    effectiveSenderDetails(environment, details),
+  );
+  if (problems.length > 0) return problems;
   await siteSenderDetailsStore(environment).save({
     siteId: installedSite.application.siteId,
     details,

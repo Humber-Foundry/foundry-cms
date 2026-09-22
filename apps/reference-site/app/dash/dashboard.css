@@ -1573,7 +1573,7 @@
 .member-access-table .inventory-row strong small,
 .member-access-state small {
   display: block;
-  margin-top: 0.25rem;
+  margin-top: var(--dash-space-1);
   color: var(--ink-soft);
   font-size: var(--dash-text-small);
   font-weight: 500;

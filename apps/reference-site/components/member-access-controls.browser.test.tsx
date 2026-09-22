@@ -26,12 +26,11 @@ import {
 } from "./member-access-controls";
 
 /**
- * The real Settings page shares one `useHumanAccessMutation` between the
- * Users panel and the Technical detail retry controls through
- * `SettingsPageBody` (a Client Component the server page renders with plain
- * data). This test-only stand-in reproduces that same wiring without the
- * rest of the page, so the tests below exercise the actual shared-state
- * contract.
+ * Settings' Users tab shares one `useHumanAccessMutation` between the user
+ * table and the retry action under it, through `SettingsUsersBody` (a Client
+ * Component the server page renders with plain data). This test-only stand-in
+ * reproduces that same wiring without the rest of the page, so the tests below
+ * exercise the actual shared-state contract.
  */
 function TestSettingsScope({
   members,

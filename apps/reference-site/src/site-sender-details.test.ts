@@ -7,6 +7,7 @@ import {
   readSenderDetails,
   senderDetailProblems,
   senderDetailsFromEnvironment,
+  senderDetailsStateSentence,
   type SiteSenderDetails,
 } from "./site-sender-details";
 
@@ -80,7 +81,7 @@ describe("sender details", () => {
     });
   });
 
-  it("names a missing legal name and a missing postal address", () => {
+  it("names every value that is still missing", () => {
     const problems = senderDetailProblems(
       stored({ contactUrl: "https://example.test/contact" }),
     );
@@ -88,6 +89,7 @@ describe("sender details", () => {
     expect(problems.map((problem) => problem.field)).toEqual([
       "legalName",
       "postalAddress",
+      "unsubscribeUrl",
     ]);
     expect(problems[0]!.message).toContain("Add the name");
   });
@@ -106,6 +108,39 @@ describe("sender details", () => {
       "contactUrl",
       "unsubscribeUrl",
     ]);
+  });
+
+  it("accepts an empty field whose value the installation already holds", () => {
+    // The Owner changes only the unsubscribe address. The name, the postal
+    // address and the contact address are left empty, which means "keep what
+    // the installation already uses", so the save must not be refused.
+    const typed = stored({ unsubscribeUrl: "https://saved.example/stop" });
+
+    expect(senderDetailProblems(typed).length).toBeGreaterThan(0);
+    expect(
+      senderDetailProblems(effectiveSenderDetails(installedEnvironment, typed)),
+    ).toEqual([]);
+  });
+
+  it("still refuses an empty field the installation has no value for", () => {
+    const withoutName = {
+      ...installedEnvironment,
+      FOUNDRY_CAMPAIGN_LEGAL_NAME: "",
+    };
+    const problems = senderDetailProblems(
+      effectiveSenderDetails(withoutName, stored({ postalAddress: "2 Saved Road" })),
+    );
+
+    expect(problems.map((problem) => problem.field)).toEqual(["legalName"]);
+  });
+
+  it("writes one plain sentence that names what is missing", () => {
+    expect(senderDetailsStateSentence([])).toBe(
+      "Your sender details are set. Every email carries them at the bottom.",
+    );
+    expect(
+      senderDetailsStateSentence(senderDetailProblems(stored())),
+    ).toContain("Email cannot be sent yet. Add the name");
   });
 
   it("accepts a full set", () => {

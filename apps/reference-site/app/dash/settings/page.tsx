@@ -1,10 +1,8 @@
 import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { SettingsTabs, settingsTab } from "@/components/settings-tabs";
 import { SettingsUsersBody } from "@/components/settings-users-body";
-import {
-  loadMutationToken,
-  requireAuthorizedSettingsAccess,
-} from "@/src/settings-page-context";
+import { loadMutationToken } from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +26,7 @@ export default async function DashboardSettingsUsersPage() {
   const members = await access.application.queries.listMembers({
     actor: access.identity,
   });
-  const tab = settingsTab("users");
+  const tab = settingsTab.users;
 
   return (
     <main className="dashboard-main" id="main">

@@ -2,10 +2,8 @@ import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { SettingsTabs, settingsTab } from "@/components/settings-tabs";
 import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
-import {
-  loadMutationToken,
-  requireAuthorizedSettingsAccess,
-} from "@/src/settings-page-context";
+import { loadMutationToken } from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +18,7 @@ export default async function DashboardSettingsAgentsPage() {
   await requireAuthorizedSettingsAccess();
   const mutationToken = await loadMutationToken();
   const mcpConnections = await loadMcpConnectionsForDashboard();
-  const tab = settingsTab("agents");
+  const tab = settingsTab.agents;
 
   return (
     <main className="dashboard-main" id="main">

@@ -66,25 +66,45 @@ stored in the dashboard cannot be accepted there and refused by a send.
 
 A read that fails returns "nothing stored", so a database fault leaves an
 installation reading its environment variables — the behaviour it had before
-anything could be stored. A save reports its own failure, so a lost write is
-never silent.
+anything could be stored.
+
+A save never fails silently. An installation with no database raises
+`SiteSenderDetailsUnavailableError`, the route answers 503, and the form says
+nothing was saved. The screen shows the true server state, so it must never
+report "Saved" for a write that was dropped. The Email tab also reads whether
+a store exists (`FOUNDRY_DB`) to decide whether to offer the save at all,
+rather than reading `NODE_ENV`: the thing that decides whether a save can be
+kept is the store, not the build mode.
 
 ### 4. What the save checks
 
-`senderDetailProblems` refuses a save, whole, when:
+`senderDetailProblems` is given the values the installation would actually use
+— the result of `effectiveSenderDetails`, not the raw typed values — and
+refuses a save, whole, when any of these is true:
 
-- the name is empty, or
-- the postal address is empty, or
-- the contact or unsubscribe address is written but is not an absolute
-  `https://` address with no user name or password in it.
+- the name is empty,
+- the postal address is empty,
+- the contact or unsubscribe address is empty, or
+- either address is not an absolute `https://` address with no user name or
+  password in it.
+
+Judging the effective values is what makes "leave a field empty to keep what
+the installation already uses" true. Judging the typed values alone would
+refuse a save that changes one address while the name still comes from the
+installation's own setting.
 
 The refusal names the value that is wrong, in the owner's own words. A
 half-valid set is never written, because a footer built from one is sent to
 every reader.
 
+Settings' Email tab writes its state line from the same problems
+(`senderDetailsStateSentence`), so what the screen says is missing and what a
+save refuses on can never disagree.
+
 The sending address (`senderIdentityId`) may be left empty in the form. Empty
 means "keep what the installation already uses", which is the same rule as
-every other value.
+every other value. It is not required here, because whoever installed the site
+sets it and delivery readiness already reports it.
 
 ### 5. Who may save
 

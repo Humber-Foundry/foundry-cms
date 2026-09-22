@@ -1,16 +1,12 @@
 import { Fragment } from "react";
 
-import { notFound } from "next/navigation";
-
 import { mcpSupportedScopes } from "@humber-foundry/application";
 
 import { CopyAddressButton } from "@/components/copy-address-button";
 import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
-import {
-  loadMutationToken,
-  requireAuthorizedDashboardAccess,
-} from "@/src/dashboard-page-context";
+import { loadMutationToken } from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 import { mcpAgentCapabilityDescriptions, mcpAgentNeverDoes } from "@/src/mcp-agent-capabilities";
 import { mcpScopeDisplay } from "@/src/mcp-connection-display";
 import {
@@ -71,10 +67,7 @@ function ClientSteps({ instructions }: { instructions: McpClientInstructions }) 
  * This screen never shows a token, a client secret or a personal address.
  */
 export default async function ConnectAgentPage() {
-  const access = await requireAuthorizedDashboardAccess();
-  if (access.membership.role !== "owner") {
-    notFound();
-  }
+  await requireAuthorizedSettingsAccess();
 
   const mutationToken = await loadMutationToken();
   const mcpConnections = await loadMcpConnectionsForDashboard();

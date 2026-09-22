@@ -12,10 +12,9 @@ import {
 import { ownerAlertSenderState } from "@/src/owner-alert-status";
 import { loadOwnerNotificationStatus } from "@/src/public-form-messages-runtime";
 import { loadSenderDetailsForEditing } from "@/src/sender-details-runtime";
-import {
-  loadMutationToken,
-  requireAuthorizedSettingsAccess,
-} from "@/src/settings-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
+import { senderDetailsStateSentence } from "@/src/site-sender-details";
+import { loadMutationToken } from "@/src/dashboard-page-context";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +34,7 @@ export default async function DashboardSettingsEmailPage() {
   const campaignContext = await loadCampaignRequestContext(await headers());
   const emailDelivery = await readCampaignDeliveryReadiness(campaignContext);
   const senderDetails = await loadSenderDetailsForEditing();
-  const tab = settingsTab("email");
+  const tab = settingsTab.email;
   const health = ownerNotifications.health;
 
   return (
@@ -57,10 +56,20 @@ export default async function DashboardSettingsEmailPage() {
           for you. A campaign cannot be written or sent until the name and the
           postal address are here.
         </p>
+        <p
+          className={
+            senderDetails.problems.length === 0
+              ? "connection-status connection-status-connected"
+              : "connection-status connection-status-missing"
+          }
+          role={senderDetails.problems.length === 0 ? undefined : "alert"}
+        >
+          {senderDetailsStateSentence(senderDetails.problems)}
+        </p>
         <SenderDetailsForm
           values={senderDetails.values}
           stored={senderDetails.stored}
-          localDevelopment={senderDetails.localDevelopment}
+          editable={senderDetails.editable}
           csrfToken={mutationToken}
         />
       </section>

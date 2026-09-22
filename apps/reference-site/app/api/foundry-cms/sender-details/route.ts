@@ -11,6 +11,7 @@ import {
 } from "../../../../src/human-access-runtime";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
+import { SiteSenderDetailsUnavailableError } from "../../../../src/d1-site-sender-details-store";
 import { saveSenderDetails } from "../../../../src/sender-details-runtime";
 import { readSenderDetails } from "../../../../src/site-sender-details";
 
@@ -80,6 +81,14 @@ export async function POST(request: Request) {
       error instanceof HumanAccessConfigurationError
     ) {
       return Response.json({ error: "access_unavailable" }, { status: 503 });
+    }
+    // Nothing was written. Saying so keeps the screen honest: it must never
+    // report "Saved" for a write this installation had nowhere to put.
+    if (error instanceof SiteSenderDetailsUnavailableError) {
+      return Response.json(
+        { error: "sender_details_unavailable" },
+        { status: 503 },
+      );
     }
     throw error;
   }

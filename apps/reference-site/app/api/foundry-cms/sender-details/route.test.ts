@@ -29,6 +29,7 @@ vi.mock("../../../../src/sender-details-runtime", () => ({
   saveSenderDetails: mocks.saveSenderDetails,
 }));
 
+import { SiteSenderDetailsUnavailableError } from "../../../../src/d1-site-sender-details-store";
 import { POST } from "./route";
 
 const fullDetails = {
@@ -104,6 +105,19 @@ describe("sender details endpoint", () => {
           message: "Add the name that appears at the bottom of every email.",
         },
       ],
+    });
+  });
+
+  it("says nothing was saved when this installation has nowhere to keep it", async () => {
+    mocks.saveSenderDetails.mockRejectedValue(
+      new SiteSenderDetailsUnavailableError(),
+    );
+
+    const response = await POST(request(fullDetails));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "sender_details_unavailable",
     });
   });
 
