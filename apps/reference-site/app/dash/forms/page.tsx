@@ -90,7 +90,7 @@ export default async function DashboardFormsPage({
         <p className="dashboard-note">
           {ownerAlertSummary(notificationHealth)} Every message is saved here
           even when an alert fails.{" "}
-          <a href="/dash/settings#email-alerts">See email alerts</a>
+          <a href="/dash/settings/email#email-alerts">See email alerts</a>
         </p>
       ) : null}
     </main>

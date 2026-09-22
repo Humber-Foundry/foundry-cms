@@ -12,7 +12,6 @@ import {
   availableMembershipStatusActions,
   otherHumanRole,
 } from "@humber-foundry/application";
-import { HelpTip } from "./help-tip";
 import {
   membershipStatusDisplayLabel,
   roleDisplayLabel,
@@ -40,12 +39,15 @@ const statusActionLabels: Readonly<Record<MembershipStatus, string>> = {
  * What a person holding each role can and cannot do, drawn from the
  * capability table in `@humber-foundry/application` (`roleCapabilities` in
  * `human-access.ts`), not invented for this screen.
+ *
+ * One short sentence each, because these are read inside a table row rather
+ * than in a legend above it (#240).
  */
 const roleMeaning: Readonly<Record<HumanRole, string>> = {
   owner:
-    "Owners can do everything an Editor can, plus manage users, connections, subscriber details and approve bulk sending.",
+    "Can change everything, including users, connections and sending email to the list.",
   editor:
-    "Editors can edit and publish site and blog content, prepare campaigns and review messages. They cannot manage users, connections or subscriber details, or send bulk email.",
+    "Can write and publish pages and posts, and read messages. Cannot change users or connections.",
 };
 
 /**
@@ -53,11 +55,9 @@ const roleMeaning: Readonly<Record<HumanRole, string>> = {
  * used in the status-change confirmations above.
  */
 const statusMeaning: Readonly<Record<MembershipStatus, string>> = {
-  active: "This person can sign in and use the dashboard with their role.",
-  suspended:
-    "This person cannot sign in. An Owner can activate them again.",
-  revoked:
-    "This person's access is permanently removed. They need a new invitation to return.",
+  active: "Can sign in now.",
+  suspended: "Cannot sign in. You can activate them again.",
+  revoked: "Access is removed for good. They need a new invitation to return.",
 };
 
 /**
@@ -187,10 +187,13 @@ export function useHumanAccessMutation({
 
 /**
  * The retry actions for a human access mutation whose result could not be
- * confirmed, or whose Cloudflare policy sync is still pending. These are
- * operator recovery actions rather than something an Owner needs on an
- * ordinary visit, so Settings tucks them inside the "Technical detail"
- * disclosure rather than showing them next to the user table.
+ * confirmed, or whose Cloudflare policy sync is still pending.
+ *
+ * These only appear after a change on this same screen did not confirm, and
+ * retrying means replaying that exact request. They therefore stay on the
+ * Users tab, under the table, with the mutation they belong to. The Site tab
+ * carries the separate "copy access to Cloudflare again" action, which is its
+ * own command and needs no earlier request (#240).
  */
 export function AccessSyncRetryControls({
   mutation,
@@ -223,6 +226,44 @@ export function AccessSyncRetryControls({
         </button>
       ) : null}
     </p>
+  );
+}
+
+/**
+ * "Copy access to Cloudflare again" on Settings' Site tab.
+ *
+ * Every access change is written here first and then copied to Cloudflare. A
+ * copy can fall behind, and this runs it again. It is its own command rather
+ * than a replay of an earlier request, so it owns its own mutation state and
+ * can sit on a different screen from the user table (#240).
+ */
+export function AccessSyncReconcileControls({
+  csrfToken,
+}: {
+  csrfToken: string;
+}) {
+  const mutation = useHumanAccessMutation({ csrfToken });
+  return (
+    <>
+      <p>
+        Who may sign in is kept here and copied to Cloudflare, which is what
+        actually lets a person through. If someone you invited still cannot
+        sign in, run the copy again.
+      </p>
+      <p className="panel-actions">
+        <button
+          className="copy-button"
+          type="button"
+          disabled={mutation.pending}
+          onClick={mutation.reconcileAccess}
+        >
+          Copy access to Cloudflare again
+        </button>
+      </p>
+      <p role="status" aria-live="polite">
+        {mutation.message}
+      </p>
+    </>
   );
 }
 
@@ -287,50 +328,21 @@ function MemberActionConfirmDialog({
 }
 
 /**
- * "Owner", "Editor", "Active", "Suspended" and "Revoked" all appear on this
- * screen as plain words. Each one gets a `HelpTip` explaining what it means
- * for the person holding it, so the table can stay short words instead of
- * full sentences.
- */
-function RoleAndStatusHelp() {
-  return (
-    <p className="access-legend">
-      <span>
-        Owner{" "}
-        <HelpTip label="What can an Owner do?">{roleMeaning.owner}</HelpTip>
-      </span>
-      <span>
-        Editor{" "}
-        <HelpTip label="What can an Editor do?">{roleMeaning.editor}</HelpTip>
-      </span>
-      <span>
-        Active{" "}
-        <HelpTip label="What does Active mean?">
-          {statusMeaning.active}
-        </HelpTip>
-      </span>
-      <span>
-        Suspended{" "}
-        <HelpTip label="What does Suspended mean?">
-          {statusMeaning.suspended}
-        </HelpTip>
-      </span>
-      <span>
-        Revoked{" "}
-        <HelpTip label="What does Revoked mean?">
-          {statusMeaning.revoked}
-        </HelpTip>
-      </span>
-    </p>
-  );
-}
-
-/**
- * Invites, the user table, and the role and access actions on it. The
- * technical retry actions for a mutation that could not be confirmed live
- * in `AccessSyncRetryControls` instead, inside the "Technical detail"
- * disclosure — see `useHumanAccessMutation`'s doc comment for why the two
- * are split.
+ * The user table, then the invite form, then the role and access actions on
+ * each row.
+ *
+ * The table comes first because it answers the question an Owner opens this
+ * screen with: who can sign in today. Inviting someone is the rarer job, so it
+ * sits under the answer (#240).
+ *
+ * What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean is written
+ * into the rows themselves, in plain sentences. There used to be a legend of
+ * five help tips above the table; the owner read it as a row of question marks
+ * that explained the table he could not yet see.
+ *
+ * The technical retry action for a mutation that could not be confirmed lives
+ * in `AccessSyncRetryControls` instead — see `useHumanAccessMutation`'s doc
+ * comment for why the two are split.
  */
 export function MemberAccessPanel({
   members,
@@ -415,30 +427,6 @@ export function MemberAccessPanel({
 
   return (
     <>
-      <form onSubmit={invite} className="access-invite-form">
-        <label>
-          Email
-          <input name="email" type="email" required />
-        </label>
-        <label>
-          Role
-          <select name="role" defaultValue="editor">
-            <option value="editor">Editor</option>
-            <option value="owner">Owner</option>
-          </select>
-        </label>
-        <button
-          className="copy-button"
-          type="submit"
-          disabled={mutation.pending || mutation.retryAvailable}
-        >
-          Invite user
-        </button>
-      </form>
-      <p role="status" aria-live="polite">
-        {mutation.message}
-      </p>
-      <RoleAndStatusHelp />
       <div
         className="inventory-table member-access-table"
         role="table"
@@ -464,10 +452,15 @@ export function MemberAccessPanel({
             <div className="inventory-row" role="row" key={member.id}>
               <strong role="cell">
                 {member.email}
-                <small>{roleDisplayLabel[member.role]}</small>
+                <small>
+                  {roleDisplayLabel[member.role]}. {roleMeaning[member.role]}
+                </small>
               </strong>
-              <span role="cell" className="state-label">
-                {membershipStatusDisplayLabel[member.status]}
+              <span role="cell" className="member-access-state">
+                <span className="state-label">
+                  {membershipStatusDisplayLabel[member.status]}
+                </span>
+                <small>{statusMeaning[member.status]}</small>
               </span>
               <div role="cell" className="member-actions">
                 {isSoleActiveOwner ? (
@@ -507,6 +500,33 @@ export function MemberAccessPanel({
           );
         })}
       </div>
+      {/* One status line for every access change on this screen, between the
+          table and the invite form, so the result of a row action and the
+          result of an invite are both next to the control that caused it. */}
+      <p role="status" aria-live="polite">
+        {mutation.message}
+      </p>
+      <h3 className="access-invite-heading">Invite someone</h3>
+      <form onSubmit={invite} className="access-invite-form">
+        <label>
+          Email
+          <input name="email" type="email" required />
+        </label>
+        <label>
+          Role
+          <select name="role" defaultValue="editor">
+            <option value="editor">Editor</option>
+            <option value="owner">Owner</option>
+          </select>
+        </label>
+        <button
+          className="copy-button"
+          type="submit"
+          disabled={mutation.pending || mutation.retryAvailable}
+        >
+          Invite user
+        </button>
+      </form>
       <MemberActionConfirmDialog
         pendingAction={pendingAction}
         confirmation={confirmation}

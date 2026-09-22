@@ -1,69 +1,46 @@
-import { headers } from "next/headers";
-import { notFound } from "next/navigation";
-
 import { DashboardPageHeader } from "@/components/dashboard-page-header";
-import { SettingsPageBody } from "@/components/settings-page-body";
-import {
-  loadCampaignRequestContext,
-  readCampaignDeliveryReadiness,
-} from "@/src/campaign-runtime";
-import { readContentPublicationReadiness } from "@/src/content-publication-runtime";
-import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
-import { loadOwnerNotificationStatus } from "@/src/public-form-messages-runtime";
-import {
-  loadMutationToken,
-  loadPublishedDefinition,
-  requireAuthorizedDashboardAccess,
-} from "@/src/dashboard-page-context";
+import { SettingsTabs, settingsTab } from "@/components/settings-tabs";
+import { SettingsUsersBody } from "@/components/settings-users-body";
+import { loadMutationToken } from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Settings holds the jobs an owner does rarely: who can sign in, which agents
- * are connected, and the technical record of the installation. Keeping them
- * here is what lets the editing destinations stay about editing.
+ * Settings' Users tab: who can sign in, and what each of them can do.
  *
- * This page only loads the server data; `SettingsPageBody` (a Client
- * Component) lays it out. See that component's doc comment for why: the
- * Users panel and the Technical detail retry buttons share one human access
- * mutation, and a hook can only run inside one client component (#150,
- * ADR-0027).
+ * Settings holds the jobs an owner does rarely, and it is four sections now —
+ * Users, Connected agents, Email and Site — each at its own address, so a link
+ * can point at one of them and the browser's Back button works between them
+ * (#240). This is the first of the four and keeps the `/dash/settings`
+ * address, because it is where the sidebar sends the owner.
+ *
+ * This page only loads the server data; `SettingsUsersBody` (a Client
+ * Component) lays it out. The Users table and the retry action under it share
+ * one human access mutation, and a hook can only run inside one client
+ * component (#150, ADR-0027).
  */
-export default async function DashboardSettingsPage() {
-  const access = await requireAuthorizedDashboardAccess();
-  if (access.membership.role !== "owner") {
-    notFound();
-  }
-
-  const definition = await loadPublishedDefinition();
+export default async function DashboardSettingsUsersPage() {
+  const access = await requireAuthorizedSettingsAccess();
   const mutationToken = await loadMutationToken();
   const members = await access.application.queries.listMembers({
     actor: access.identity,
   });
-  const mcpConnections = await loadMcpConnectionsForDashboard();
-  const ownerNotifications = await loadOwnerNotificationStatus(access);
-  const campaignContext = await loadCampaignRequestContext(await headers());
-  const emailDelivery = await readCampaignDeliveryReadiness(campaignContext);
-  const publishing = await readContentPublicationReadiness();
+  const tab = settingsTab.users;
 
   return (
     <main className="dashboard-main" id="main">
-      <DashboardPageHeader
-        title="Settings"
-        description="Who can sign in, which agents are connected, and site details."
-      />
+      <DashboardPageHeader title="Settings" description={tab.description} />
+      <SettingsTabs current="users" />
 
-      <SettingsPageBody
-        members={members}
-        mcpConnections={mcpConnections}
-        mutationToken={mutationToken}
-        emailDelivery={emailDelivery}
-        publishing={publishing}
-        senderDetails={campaignContext.senderDetails}
-        definition={definition}
-        ownerNotificationHealth={ownerNotifications.health}
-        failedDeliveries={ownerNotifications.failedDeliveries}
-      />
+      <section aria-labelledby="people">
+        <h2 id="people">Users</h2>
+        <p>
+          An invite or an access change takes effect the next time that person
+          loads a page.
+        </p>
+        <SettingsUsersBody members={members} mutationToken={mutationToken} />
+      </section>
     </main>
   );
 }

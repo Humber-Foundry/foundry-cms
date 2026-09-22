@@ -21,6 +21,7 @@ import {
   type NewsletterSignupEnvironment,
   type NewsletterSignupReadiness,
 } from "./newsletter-signup-readiness";
+import { environmentWithStoredSenderDetails } from "./stored-sender-details";
 
 /**
  * This module carries no `server-only` marker on purpose. The scheduled worker
@@ -135,7 +136,15 @@ export function createNewsletterSignupRuntime({
     }),
     sender: confirmationSender(environment, senders, fetcher),
     async readDelivery() {
-      return readNewsletterConfirmationDelivery(environment);
+      // The confirmation message carries the same footer a campaign carries,
+      // so it reads the sender details the Owner saved in Settings before it
+      // falls back to the environment variables (ADR-0048).
+      return readNewsletterConfirmationDelivery(
+        await environmentWithStoredSenderDetails(
+          environment,
+          installedSiteDefinition.site.id,
+        ),
+      );
     },
     ...(clock === undefined ? {} : { clock }),
     ...(createId === undefined ? {} : { createId }),

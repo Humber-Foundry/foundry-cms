@@ -48,3 +48,4 @@
 | [ADR-0041](ADR-0041-page-creation-belongs-to-an-agent.md) | Adding a page is an agent's job, and the dashboard only lists, renames, copies and deletes pages | Accepted | 2026-09-22 |
 | [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md) | Photos is a library, and a photo is placed where it is seen | Accepted | 2026-09-21 |
 | [ADR-0047](ADR-0047-web-traffic-counted-in-the-worker.md) | Web traffic is counted in the Worker request path, with no beacon and no cookie | Accepted | 2026-09-21 |
+| [ADR-0048](ADR-0048-sender-details-are-a-stored-site-setting.md) | The sender details are a stored site setting an Owner edits in Settings, with the environment variables as the per-value fallback | Accepted | 2026-09-22 |
