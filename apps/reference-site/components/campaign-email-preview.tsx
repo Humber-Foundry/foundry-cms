@@ -131,8 +131,8 @@ export function CampaignEmailPreview({
         * with a name: a keyboard can reach it and the arrow keys move it. */}
       <div
         className="email-preview-frame"
-        role="region"
-        aria-label="Email preview area"
+        role="group"
+        aria-label="Scroll the email sideways"
         tabIndex={0}
       >
         <iframe
