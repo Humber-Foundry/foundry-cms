@@ -25,7 +25,6 @@ describe("media library state", () => {
   it("clears asset-scoped retry state when the selected asset changes", () => {
     expect(mediaAssetSelection("asset_replacement")).toEqual({
       assetId: "asset_replacement",
-      replaceAttempt: null,
       deleteAttempt: null,
     });
   });
@@ -39,11 +38,7 @@ describe("media library state", () => {
       mediaAssetSelectionForCatalog("asset_deleted", [
         { assetId: "asset_remaining" },
       ], deleteAttempt),
-    ).toEqual({
-      assetId: "asset_deleted",
-      replaceAttempt: null,
-      deleteAttempt,
-    });
+    ).toEqual({ assetId: "asset_deleted", deleteAttempt });
   });
 
   it("upserts an ambiguously replayed upload instead of duplicating it", () => {

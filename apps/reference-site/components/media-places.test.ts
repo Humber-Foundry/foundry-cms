@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { placeFor, placeNameFor } from "./media-places";
+import { placeNameFor } from "./media-places";
 
 describe("media places", () => {
   it("names the home page's two places", () => {
@@ -20,9 +20,6 @@ describe("media places", () => {
   });
 
   it("shows an unknown id rather than nothing", () => {
-    expect(placeFor("occurrence_new_slot")).toEqual({
-      name: "occurrence_new_slot",
-      detail: "",
-    });
+    expect(placeNameFor("occurrence_new_slot")).toBe("occurrence_new_slot");
   });
 });

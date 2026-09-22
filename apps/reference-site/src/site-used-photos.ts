@@ -15,10 +15,34 @@ import { installedPageComponentRegistry } from "@/foundry/page-components";
 /**
  * A photo the site displays that is not a library asset — a built-in image an
  * installation ships, or an external image address. It shows in the gallery as
- * a read-only "on the page" tile, so "all your photos" includes every photo the
- * site actually shows, not only the ones uploaded to the library.
+ * a read-only tile, so "all your photos" includes every photo the site
+ * actually shows, not only the ones uploaded to the library.
  */
 export type SiteImageTile = Readonly<{ src: string; name: string }>;
+
+/**
+ * What one section's registered image fields hold: the label the owner reads
+ * for each field, and the address stored in it. A section the installation did
+ * not register, or a field left empty, contributes nothing.
+ */
+type SectionImage = Readonly<{ fieldLabel: string; src: string }>;
+
+function sectionImages(
+  section: SitePage["sections"][number],
+): ReadonlyArray<SectionImage> {
+  if (section.type !== "registered") return [];
+  const registration =
+    installedPageComponentRegistry.components[section.component];
+  if (registration === undefined) return [];
+  const images: SectionImage[] = [];
+  for (const [key, field] of Object.entries(registration.fields)) {
+    if (field.control !== "image") continue;
+    const value = (section.props as Record<string, unknown>)[key];
+    if (typeof value !== "string" || value.trim() === "") continue;
+    images.push({ fieldLabel: field.label, src: value });
+  }
+  return images;
+}
 
 // Every page contributes, not only the home page, so "all your photos"
 // includes a photo placed on any page. See ADR-0026.
@@ -26,15 +50,7 @@ function imageAddressesOf(definition: SiteDefinition): ReadonlySet<string> {
   const found = new Set<string>();
   for (const page of definition.pages) {
     for (const section of page.sections) {
-      if (section.type !== "registered") continue;
-      const registration =
-        installedPageComponentRegistry.components[section.component];
-      if (registration === undefined) continue;
-      for (const [key, field] of Object.entries(registration.fields)) {
-        if (field.control !== "image") continue;
-        const value = (section.props as Record<string, unknown>)[key];
-        if (typeof value === "string" && value.trim() !== "") found.add(value);
-      }
+      for (const image of sectionImages(section)) found.add(image.src);
     }
   }
   return found;
@@ -72,9 +88,8 @@ export function siteStaticImageTiles(
 
 /**
  * Every gallery asset the passed definitions reference — occurrences, page
- * image fields and published blog images. A library tile for one of these
- * carries an "on the page" badge even when the photo is placed through an image
- * field rather than a named occurrence place.
+ * image fields and published blog images. A tile for one of these says the
+ * site uses the photo even when no usage line names the place.
  */
 export function siteUsedAssetIds(
   ...definitions: ReadonlyArray<SiteDefinition | undefined>
@@ -91,10 +106,19 @@ export function siteUsedAssetIds(
  * Where each photo is used, as lines the owner reads: "About — Top of the
  * page". Photos shows them under the photo, after the words "Used on:".
  *
+ * A library photo is keyed by its asset id. A built-in or external photo has
+ * no asset id, so it is keyed by the address the site stores for it — the same
+ * value `SiteImageTile.src` carries, so a tile of either kind finds its lines.
+ *
  * Every page contributes, not only the home page, so a photo placed on any
  * page names that page here. See ADR-0026 and ADR-0043.
  */
 export type SitePhotoUsage = ReadonlyMap<string, ReadonlyArray<string>>;
+
+/** What a photo is keyed by: its asset id, or its own address. */
+function photoKey(src: string): string {
+  return mediaAssetIdFromPublishedPath(src) ?? src;
+}
 
 /**
  * One line telling the owner where a photo is used: the page it is on and the
@@ -136,11 +160,11 @@ function collectAssetIds(value: unknown, into: Set<string>): void {
 }
 
 /**
- * What to call each photo's place inside one section. The empty key holds the
- * section's own name, which every photo in it falls back to. A foundation
- * section has no installation name, so its photos are named by their page
- * alone — a section type such as "callToAction" is an internal word the owner
- * never sees.
+ * What to call each photo's place inside one section, keyed by the photo. The
+ * empty key holds the section's own name, which every photo in it falls back
+ * to. A foundation section has no installation name, so its photos are named
+ * by their page alone — a section type such as "callToAction" is an internal
+ * word the owner never sees.
  */
 function sectionPlaceNames(
   section: SitePage["sections"][number],
@@ -151,20 +175,14 @@ function sectionPlaceNames(
     installedPageComponentRegistry.components[section.component];
   if (registration === undefined) return names.set("", "");
   names.set("", registration.label);
-  const imageFields = Object.entries(registration.fields).filter(
-    ([, field]) => field.control === "image",
-  );
-  for (const [key, field] of imageFields) {
-    const value = (section.props as Record<string, unknown>)[key];
-    if (typeof value !== "string") continue;
-    const assetId = mediaAssetIdFromPublishedPath(value);
-    if (assetId === null) continue;
+  const images = sectionImages(section);
+  for (const image of images) {
     // One image field per section needs no field name; more than one does, so
     // the owner can tell which photo is which.
     names.set(
-      assetId,
-      imageFields.length > 1
-        ? `${registration.label}: ${field.label}`
+      photoKey(image.src),
+      images.length > 1
+        ? `${registration.label}: ${image.fieldLabel}`
         : registration.label,
     );
   }
@@ -189,14 +207,16 @@ function collectPageUses(
     for (const section of page.sections) {
       const placeNames = sectionPlaceNames(section);
       // Every photo the section holds, however deeply — a photo inside a list
-      // of cards counts as much as one in the section's own image field.
+      // of cards counts as much as one in the section's own image field — and
+      // every built-in photo it shows, which has no asset id of its own.
       const held = new Set<string>();
       collectAssetIds(section, held);
-      for (const assetId of held) {
+      for (const image of sectionImages(section)) held.add(photoKey(image.src));
+      for (const key of held) {
         addUse(
           into,
-          assetId,
-          usageLine(page.title, placeNames.get(assetId) ?? placeNames.get("")!),
+          key,
+          usageLine(page.title, placeNames.get(key) ?? placeNames.get("")!),
         );
       }
     }

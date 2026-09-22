@@ -31,13 +31,21 @@ const sparePhoto = {
   height: 800,
 };
 
-/** The harbour photo is on two pages; the spare photo is on none. */
+/**
+ * The harbour photo is on two pages; the spare photo is on none. A built-in
+ * site photo has no asset id, so its lines are keyed by its own address.
+ */
 const usage = new Map([
   [
     "asset_harbour",
     ["About — Top of the page", "Foundry Reference — Full-width image"],
   ],
+  ["/foundry-gathering.svg", ["About — Full-width image"]],
 ]);
+
+/** The library's own tiles, apart from the read-only built-in site photos. */
+const libraryTiles =
+  ".media-gallery .media-gallery-tile:not(.media-gallery-tile-site)";
 
 async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   const deadline = Date.now() + 5_000;
@@ -64,7 +72,7 @@ function galleryTileImages(count: number): Promise<string[]> {
     }, 5_000);
     const observer = new MutationObserver(() => {
       const images = document.querySelectorAll<HTMLImageElement>(
-        ".media-gallery .media-gallery-tile img",
+        ".media-gallery .media-gallery-tile:not(.media-gallery-tile-site) img",
       );
       if (images.length < count) return;
       clearTimeout(deadline);
@@ -101,6 +109,9 @@ describe("photo library browser acceptance", () => {
           csrfToken: "csrf",
           workspaceId: "workspace_owner",
           initialAssets: [],
+          siteImages: [
+            { src: "/foundry-gathering.svg", name: "foundry-gathering.svg" },
+          ],
           usage,
           usedAssetIds: new Set(["asset_harbour"]),
         }),
@@ -134,7 +145,7 @@ describe("photo library browser acceptance", () => {
       "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
       "/api/foundry-cms/media?assetId=asset_spare&libraryToken=signed-media-library&variant=thumbnail",
     ]);
-    const tiles = host.querySelectorAll(".media-gallery .media-gallery-tile");
+    const tiles = host.querySelectorAll(libraryTiles);
     expect(tiles[1].textContent).toContain("4 KB");
   });
 
@@ -143,7 +154,7 @@ describe("photo library browser acceptance", () => {
       Response.json(grantWith([inUsePhoto, sparePhoto])),
     );
     const tiles = await waitFor(() => {
-      const found = host.querySelectorAll<HTMLElement>(".media-gallery-tile");
+      const found = host.querySelectorAll<HTMLElement>(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
@@ -152,6 +163,9 @@ describe("photo library browser acceptance", () => {
       "Used on: Foundry Reference — Full-width image",
     );
     expect(tiles[1].textContent).toContain("Not used yet");
+    // A built-in site photo names its page and place too.
+    const siteTile = host.querySelector(".media-gallery-tile-site");
+    expect(siteTile?.textContent).toContain("Used on: About — Full-width image");
   });
 
   it("holds no way to place a photo — that belongs to the page editor", async () => {
@@ -159,7 +173,7 @@ describe("photo library browser acceptance", () => {
       Response.json(grantWith([inUsePhoto, sparePhoto])),
     );
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
@@ -182,7 +196,7 @@ describe("photo library browser acceptance", () => {
       return Response.json(grantWith([inUsePhoto, sparePhoto]));
     });
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
@@ -213,7 +227,7 @@ describe("photo library browser acceptance", () => {
       return Response.json(grantWith(remaining));
     });
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
@@ -227,7 +241,7 @@ describe("photo library browser acceptance", () => {
       assetId: "asset_spare",
     });
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 1 ? found : undefined;
     });
     expect(host.textContent).toContain("Photo deleted.");

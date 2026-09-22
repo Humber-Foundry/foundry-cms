@@ -175,6 +175,30 @@ describe("sitePhotoUsage", () => {
     expect(sitePhotoUsage(definition).get("asset_cta")).toEqual(["About"]);
   });
 
+  it("names the page and section of a built-in photo, which has no asset id", () => {
+    const definition = withSecondPage({
+      media: [],
+      sections: [
+        {
+          id: "section_about_photo",
+          type: "registered",
+          component: "photoBand",
+          props: {
+            imageSrc: "/foundry-gathering.svg",
+            imageAlt: "Alt",
+            caption: "Caption",
+          },
+        },
+      ],
+    });
+
+    // A gallery tile for a built-in photo carries its own address, so the
+    // lines are found under that address.
+    expect(sitePhotoUsage(definition).get("/foundry-gathering.svg")).toEqual([
+      "About — Full-width image",
+    ]);
+  });
+
   it("keeps one line for a photo two definitions both use the same way", () => {
     const definition = twoPagesWithAPhotoEach();
 

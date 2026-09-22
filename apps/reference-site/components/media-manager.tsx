@@ -67,9 +67,13 @@ export function MediaManager({
   /** Photos the site shows that are not library assets (built-in/external). */
   siteImages?: ReadonlyArray<SiteImageTile>;
   /** Where each photo is used, one line per use. */
-  usage?: SitePhotoUsage;
-  /** Gallery assets the published site or the draft references. */
-  usedAssetIds?: ReadonlySet<string>;
+  usage: SitePhotoUsage;
+  /**
+   * Every photo the published site or the draft references. Both values are
+   * required: without them every photo would read as used nowhere and the
+   * deletion guard would let a photo the site needs be deleted.
+   */
+  usedAssetIds: ReadonlySet<string>;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [message, setMessage] = useState("");
@@ -311,9 +315,8 @@ export function MediaManager({
         <div>
           <h2 id="media-heading">All photos</h2>
           <p>
-            Every photo your site uses, and every one you have uploaded. Photos
-            are stored privately; drop a new one in to add it to the library. To
-            put a photo on a page, open that page and change the photo there.
+            Photos are stored privately. To put one on a page, open that page
+            and change the photo there.
           </p>
         </div>
       </div>
@@ -367,14 +370,23 @@ export function MediaManager({
                   {selectedPhoto.width}×{selectedPhoto.height} ·{" "}
                   {photoSizeLabel(selectedPhoto.byteLength)}
                 </p>
-                <ul className="media-photo-uses">
-                  {photoUsageBadges(selectedUse).map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
+                {selectedUse.state === "named" ? (
+                  <>
+                    <p className="media-photo-uses">Used on:</p>
+                    <ul className="media-photo-uses">
+                      {selectedUse.lines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="media-photo-uses">
+                    {photoUsageBadges(selectedUse)[0]}
+                  </p>
+                )}
                 <div className="media-asset-actions">
                   <button
-                    className="copy-button"
+                    className="dash-button dash-button-destructive"
                     type="button"
                     disabled={busy}
                     onClick={() => void deleteSelected()}

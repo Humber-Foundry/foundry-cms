@@ -29,11 +29,7 @@ export function mediaDeleteFailureMessage(
 }
 
 export function mediaAssetSelection(assetId: string) {
-  return {
-    assetId,
-    replaceAttempt: null,
-    deleteAttempt: null,
-  } as const;
+  return { assetId, deleteAttempt: null } as const;
 }
 
 export function mediaAssetSelectionForCatalog<DeleteAttempt>(
@@ -46,11 +42,7 @@ export function mediaAssetSelectionForCatalog<DeleteAttempt>(
     deleteAttempt !== null &&
     !assets.some((asset) => asset.assetId === selectedAssetId)
   ) {
-    return {
-      assetId: selectedAssetId,
-      replaceAttempt: null,
-      deleteAttempt,
-    } as const;
+    return { assetId: selectedAssetId, deleteAttempt } as const;
   }
   return mediaAssetSelection(
     assets.some((asset) => asset.assetId === selectedAssetId)

@@ -3825,10 +3825,14 @@ div.media-gallery-tile-site {
   font-size: var(--dash-text-small);
 }
 
-.media-photo-uses {
+p.media-photo-uses {
   margin: 0;
-  padding: 0;
-  list-style: none;
+}
+
+ul.media-photo-uses {
+  margin: 0;
+  padding: 0 0 0 1rem;
+  list-style: disc;
 }
 
 .media-photo-uses,

@@ -165,6 +165,14 @@ export function MediaGallery({
         // stored in the library — but it is one of the owner's photos, so it
         // belongs in the gallery. In the picker it can be chosen (by its
         // address); on the Photos page it is shown read-only.
+        // A built-in photo has no asset id, so its lines are keyed by its own
+        // address. The site shows it, so it is always used somewhere: when no
+        // line names the place, the tile still says the site uses it.
+        const used = photoUsage(image.src, usage);
+        const badges =
+          used.state === "named"
+            ? photoUsageBadges(used)
+            : ["Used on your site"];
         const frame = (
           <>
             <span className="media-gallery-frame">
@@ -172,7 +180,11 @@ export function MediaGallery({
             </span>
             <span className="media-gallery-name">{image.name}</span>
             <span className="media-gallery-meta">Built-in site image</span>
-            <span className="media-gallery-badge">Used on your site</span>
+            {badges.map((badge) => (
+              <span className="media-gallery-badge" key={badge}>
+                {badge}
+              </span>
+            ))}
           </>
         );
         return (
