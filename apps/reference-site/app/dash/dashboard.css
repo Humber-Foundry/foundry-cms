@@ -544,6 +544,14 @@
     grid-row: 2;
     grid-column: 1;
   }
+
+  /* A state on its own line may wrap. Kept on one line, the longest state
+   * the dashboard writes ("Goes live when you next publish the site") runs
+   * past the row's padding on a 390px phone and touches the list's border,
+   * and CI's fonts draw it wider than a Mac's. */
+  .dash-row-state .dash-state {
+    white-space: normal;
+  }
 }
 
 /* State label -------------------------------------------------------------
