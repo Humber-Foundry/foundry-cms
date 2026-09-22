@@ -216,7 +216,10 @@ export type PageStartingLayout = Readonly<{
 }>;
 
 /**
- * The starting points the New page control offers.
+ * The starting points a new page may be built from.
+ *
+ * Only MCP `foundry.page.create` offers these now. The dashboard has no
+ * control that adds a page. See ADR-0041.
  *
  * Three is enough to be useful without becoming a catalogue the owner has to
  * read. Every layout below is built from foundation sections that are already

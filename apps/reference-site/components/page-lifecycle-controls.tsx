@@ -30,33 +30,45 @@ type FormState = Readonly<{
   slug: string;
 }>;
 
-const emptyForm: FormState = { title: "", slug: "" };
-
-const dialogTitles: Readonly<Record<OpenDialog["kind"], string>> = {
-  rename: "Rename this page",
-  duplicate: "Duplicate this page",
-  delete: "Delete this page?",
-};
-
-const submitLabels: Readonly<Record<OpenDialog["kind"], string>> = {
-  rename: "Save changes",
-  duplicate: "Duplicate page",
-  delete: "Delete page",
-};
+/** The form before a dialog fills it in. It is never shown like this. */
+const noPageChosen: FormState = { title: "", slug: "" };
 
 /**
- * The boxes each dialog draws, so a refusal that names one of them is shown
- * beside that box instead of as a sentence over the whole dialog.
+ * How one dialog is drawn: its heading, its submit button, and the boxes it
+ * holds.
  *
- * The delete dialog draws no box at all, so every refusal it gets is a loose
- * one and reads as a sentence.
+ * `fields` is the one answer to "which boxes does this dialog draw". The
+ * dialog reads it to decide whether to draw the page name and the web
+ * address, and a refusal reads it to decide whether to show a sentence: a
+ * refusal that names one of these boxes is shown beside that box, and a
+ * refusal that names anything else reads as a sentence. The delete dialog
+ * holds no box, so every refusal it gets reads as a sentence.
  */
-const dialogFields: Readonly<
-  Record<OpenDialog["kind"], ReadonlyArray<string>>
+const dialogShapes: Readonly<
+  Record<
+    OpenDialog["kind"],
+    Readonly<{
+      title: string;
+      submitLabel: string;
+      fields: ReadonlyArray<string>;
+    }>
+  >
 > = {
-  rename: ["title", "slug"],
-  duplicate: ["title", "slug"],
-  delete: [],
+  rename: {
+    title: "Rename this page",
+    submitLabel: "Save changes",
+    fields: ["title", "slug"],
+  },
+  duplicate: {
+    title: "Duplicate this page",
+    submitLabel: "Duplicate page",
+    fields: ["title", "slug"],
+  },
+  delete: {
+    title: "Delete this page?",
+    submitLabel: "Delete page",
+    fields: [],
+  },
 };
 
 /**
@@ -88,7 +100,7 @@ export function PageLifecycleList({
   workspaceUrl: string;
 }) {
   const [open, setOpen] = useState<OpenDialog | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<FormState>(noPageChosen);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>(
@@ -196,9 +208,9 @@ export function PageLifecycleList({
         // names anything else has no box to sit beside, so its own sentence —
         // which names what was wrong — is shown instead. An empty list names
         // nothing at all, so the dialog falls back to the general sentence.
-        const drawn = dialogFields[current.kind];
+        const boxesOnScreen = dialogShapes[current.kind].fields;
         const loose = Object.entries(fields).filter(
-          ([key]) => !drawn.includes(key),
+          ([key]) => !boxesOnScreen.includes(key),
         );
         setMessage(
           loose.length > 0
@@ -223,7 +235,7 @@ export function PageLifecycleList({
 
   const current = open;
   const showsNameAndAddress =
-    current !== null && current.kind !== "delete";
+    current !== null && dialogShapes[current.kind].fields.length > 0;
   const slugChangeWarning =
     current !== null &&
     current.kind === "rename" &&
@@ -271,7 +283,7 @@ export function PageLifecycleList({
               void submit(current);
             }}
           >
-            <h2 id="page-lifecycle-title">{dialogTitles[current.kind]}</h2>
+            <h2 id="page-lifecycle-title">{dialogShapes[current.kind].title}</h2>
             {current.kind === "delete" ? (
               <DeleteExplanation page={current.page} />
             ) : null}
@@ -359,7 +371,7 @@ export function PageLifecycleList({
                   (current.kind === "delete" && !current.page.canDelete)
                 }
               >
-                {busy ? "Working…" : submitLabels[current.kind]}
+                {busy ? "Working…" : dialogShapes[current.kind].submitLabel}
               </button>
             </div>
           </form>

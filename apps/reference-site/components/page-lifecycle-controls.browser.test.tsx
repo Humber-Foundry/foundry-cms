@@ -153,7 +153,7 @@ function dialogText(host: HTMLElement) {
 }
 
 /**
- * Answer the next revision request with one refusal, then put the real
+ * Answer every request in this test with one refusal, then put the real
  * `fetch` back when the test ends.
  */
 function refuseWith(status: number, body: unknown) {

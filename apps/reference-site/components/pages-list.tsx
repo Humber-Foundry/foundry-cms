@@ -41,7 +41,7 @@ export function PagesList({
   askedForMissingPage?: boolean;
 }) {
   return (
-    <section className="pages-list" aria-label="Your pages">
+    <section className="pages-list">
       {askedForMissingPage ? (
         <p className="dashboard-note" role="status">
           That page is not in this draft any more. Here are the pages it has.

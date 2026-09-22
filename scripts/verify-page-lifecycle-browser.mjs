@@ -3,17 +3,19 @@
  * pages (issue #159), the home page offering no way to delete it (issues
  * #206 and #229), and the rebuilt rows and action menus (issue #229).
  *
- * Runs the real dashboard and walks the whole journey a site owner walks to
- * get a second page: read the list, check the home page's action menu holds
- * no Delete, copy the home page to make a second one, edit it in the canvas,
- * point a navigation item at it with the page picker, follow that link inside
- * the canvas and land on the new page in the editor, open its preview, then
- * take the link away and delete the page.
+ * Runs the real dashboard and walks the whole journey a site owner walks
+ * once a second page exists: read the list, check the home page's action
+ * menu holds no Delete, add a page the way a connected agent does, find it
+ * in the list, edit it in the canvas, point a navigation item at it with the
+ * page picker, follow that link inside the canvas and land on the page in the
+ * editor, open its preview, then take the link away and delete the page.
  *
- * The screen has no "New page" control. Pages are added by a connected agent
- * through MCP `foundry.page.create` (ADR-0041), which
- * `apps/reference-site/src/page-lifecycle-view.test.ts` drives, so the second
- * page here is made by copying the home page.
+ * The screen has no "New page" control. A page is added by a connected agent
+ * calling MCP `foundry.page.create` (ADR-0041), which runs the application's
+ * own `createPage` command. `addPageLikeAnAgent` below posts that same
+ * command to the revisions route, because a dev server holds no MCP
+ * connection; `apps/reference-site/src/page-lifecycle-view.test.ts` drives
+ * the real MCP tool.
  *
  * Following a link inside the canvas is the end-to-end check ADR-0024 left
  * for this ticket, because until now the reference site had one page and a
@@ -51,11 +53,15 @@ function schemaVersionOfThisRepository() {
     ),
     "utf8",
   );
-  const found = /schemas\/site-definition\/(\d+\.\d+\.\d+)"/u.exec(source);
-  if (found === null) {
-    throw new Error("page_lifecycle_schema_version_unreadable");
+  const found = [
+    ...source.matchAll(
+      /"\$id":"https:\/\/foundrycms\.dev\/schemas\/site-definition\/(\d+\.\d+\.\d+)"/gu,
+    ),
+  ];
+  if (found.length !== 1) {
+    throw new Error(`page_lifecycle_schema_version_unreadable:${found.length}`);
   }
-  return found[1];
+  return found[0][1];
 }
 
 /**

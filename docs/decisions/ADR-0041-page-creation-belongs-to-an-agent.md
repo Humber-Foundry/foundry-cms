@@ -66,8 +66,10 @@ nothing depends on the menu for safety.
 ### 4. A refused save speaks through the box it names
 
 The old dialog answered any 422 whose errors all mapped to visible boxes
-with the sentence "Check the boxes marked below." The dialog has no boxes to
-check, so the sentence was wrong every time it appeared.
+with one fixed sentence telling the owner to check the boxes marked below.
+The dialog has no checkboxes, so that sentence was wrong every time it
+appeared. Issue #229 asked for the sentence to be taken out of the
+repository, so it is not written out here either.
 
 Now a refusal that names a box the dialog draws is shown beside that box
 alone, and the dialog writes no sentence over the top of it. A refusal that
@@ -88,12 +90,20 @@ is shown instead.
   "Something below needs your attention."** Rejected. A field message that is
   already on screen says the same thing better, and a second sentence over
   the top of it makes the owner read twice to learn one fact.
+- **Keep the "Home page" marker beside the home page's title.** Rejected.
+  Issue #229 names exactly three things a row holds: the title, the labelled
+  address and the state. "Address: /" already says which page is served at
+  the top of the site, and a fourth piece of text on the row would add a
+  third text size to it.
 
 ## Consequences
 
-- The only way to make a second page from the dashboard is Duplicate. The
-  browser journey in `scripts/verify-page-lifecycle-browser.mjs` now copies
-  the home page instead of pressing "New page".
+- The only way to make a page from the dashboard is Duplicate, which copies
+  a page that is already there. The browser journey in
+  `scripts/verify-page-lifecycle-browser.mjs` no longer presses "New page":
+  it posts the `create_page` operation to the revisions route, the same
+  application command `foundry.page.create` runs, because a dev server holds
+  no MCP connection. It then reloads the list to prove the page is there.
 - `pageStartingLayouts` is no longer drawn anywhere in the dashboard. It
   stays in `packages/site-definition` because `foundry.page.create` takes a
   starting layout.
