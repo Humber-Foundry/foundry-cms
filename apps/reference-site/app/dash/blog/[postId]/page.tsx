@@ -21,7 +21,8 @@ export const dynamic = "force-dynamic";
 /**
  * One saved post, on its own screen (#230): where it stands, the preview of
  * this exact draft, the schedule that preview unlocks, and the writing box.
- * The back link returns to the posts list, so this screen is never a dead end.
+ * The back link returns to the posts list, so the person can always get back
+ * to it.
  */
 export default async function DashboardBlogPostPage({
   params,

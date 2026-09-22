@@ -11,11 +11,15 @@ import {
   blogHasPendingSitePublish,
   blogPostExecutionFailureNote,
   blogPostLifecycleAction,
+  blogPostPublishedLine,
   blogPostScheduleStanding,
   confirmArchiveWithdrawal,
+  declineScheduleRequestCommand,
   formatLocalScheduleTime,
   openArchiveWithdrawalPreview,
+  pendingScheduleRequestNote,
 } from "./blog-operations";
+import { formatDashboardMoment } from "../src/dashboard-time";
 
 describe("blog post lifecycle controls", () => {
   const postId = createBlogPostId(
@@ -231,6 +235,56 @@ describe("blog execution failure note", () => {
 
   it("is null when there is no summary yet", () => {
     expect(blogPostExecutionFailureNote(undefined)).toBeNull();
+  });
+
+  it("names the time a scheduled publish finished, only while the post is live", () => {
+    const live = { label: "On your site", tone: "live" } as const;
+    const draft = { label: "Draft — not on your site", tone: "draft" } as const;
+    const finished = summary({ latestExecution: execution("completed") });
+    expect(blogPostPublishedLine(live, finished)).toBe(
+      `Published ${formatDashboardMoment("2026-11-01T08:31:00.000Z")}.`,
+    );
+    // A post taken off the site again keeps its old execution record; the
+    // record no longer says when the post went live, so nothing is said.
+    expect(blogPostPublishedLine(draft, finished)).toBeNull();
+    // A publish through the site-wide Publish button leaves no record.
+    expect(blogPostPublishedLine(live, summary({}))).toBeNull();
+    expect(
+      blogPostPublishedLine(live, summary({ latestExecution: execution("failed") })),
+    ).toBeNull();
+    expect(blogPostPublishedLine(live, undefined)).toBeNull();
+  });
+});
+
+describe("an app's pending schedule request", () => {
+  const postId = createBlogPostId(
+    "00000000-0000-4000-8000-00000000000d",
+  );
+  const proposal = {
+    id: "proposal-1",
+    localDateTime: "2026-10-01T09:00",
+    ianaTimeZone: "America/Vancouver",
+  } as const;
+
+  it("says who asked, and when, in one sentence", () => {
+    expect(pendingScheduleRequestNote("Draft Assistant", proposal)).toBe(
+      `Draft Assistant asked to publish this at ${formatLocalScheduleTime(
+        "2026-10-01T09:00",
+        "America/Vancouver",
+      )}.`,
+    );
+    expect(pendingScheduleRequestNote(null, proposal)).toMatch(/^An app asked/u);
+  });
+
+  it("builds the one decline command both Blog screens send", () => {
+    expect(declineScheduleRequestCommand(postId, proposal)).toEqual({
+      body: {
+        operation: "decline_schedule_proposal",
+        postId,
+        proposalId: "proposal-1",
+      },
+      operation: "decline-blog-post-schedule-proposal",
+    });
   });
 });
 

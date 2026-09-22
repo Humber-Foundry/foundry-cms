@@ -1401,9 +1401,10 @@
   font-size: var(--dash-text-small);
 }
 
-/* Where one post stands, and the preview of this exact draft, on one line.
- * They wrap onto separate lines on a phone, where the row is too narrow to
- * keep 1rem between the words and the button. */
+/* One line of words and buttons about one post: where it stands with its
+ * preview and publish buttons, or an app's publish request with its Decline
+ * button. They wrap onto separate lines on a phone, where the row is too
+ * narrow to keep 1rem between the words and the button. */
 .dash-post-standing {
   display: flex;
   flex-wrap: wrap;

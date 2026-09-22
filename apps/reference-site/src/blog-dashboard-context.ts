@@ -10,6 +10,7 @@ import {
   loadBlogPostOperationsApplication,
 } from "./blog-post-operations-runtime";
 import { blogScheduleRequestAgentNames } from "./blog-schedule-request-runtime";
+import type { HumanAccessEnvironment } from "./human-access-configuration";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 
 /**
@@ -48,44 +49,55 @@ export async function loadBlogPostSummaries(
   postIds: ReadonlyArray<BlogPostId>,
 ): Promise<BlogPostSummaries> {
   try {
-    const environment = await loadHumanAccessEnvironment();
-    const siteId = installedSiteDefinition.site.id;
-    const summaries = await loadBlogPostOperationalSummaries(
-      environment,
-      siteId,
+    return await readBlogPostSummaries(
+      await loadHumanAccessEnvironment(),
       postIds,
     );
-    const pendingProposalsByPostId = new Map(
-      [...summaries.entries()].flatMap(([postId, summary]) =>
-        summary.pendingScheduleProposal === null
-          ? []
-          : [[postId, summary.pendingScheduleProposal] as const],
-      ),
-    );
-    return {
-      summaries,
-      pendingScheduleRequestAgentNames: await blogScheduleRequestAgentNames(
-        environment,
-        pendingProposalsByPostId,
-      ),
-    };
   } catch {
     return noBlogPostSummaries;
   }
 }
 
+async function readBlogPostSummaries(
+  environment: HumanAccessEnvironment,
+  postIds: ReadonlyArray<BlogPostId>,
+): Promise<BlogPostSummaries> {
+  const summaries = await loadBlogPostOperationalSummaries(
+    environment,
+    installedSiteDefinition.site.id,
+    postIds,
+  );
+  const pendingProposalsByPostId = new Map(
+    [...summaries.entries()].flatMap(([postId, summary]) =>
+      summary.pendingScheduleProposal === null
+        ? []
+        : [[postId, summary.pendingScheduleProposal] as const],
+    ),
+  );
+  return {
+    summaries,
+    pendingScheduleRequestAgentNames: await blogScheduleRequestAgentNames(
+      environment,
+      pendingProposalsByPostId,
+    ),
+  };
+}
+
 /**
  * The same read, plus every archived post. Only the posts list draws archived
  * posts, so one post's own screen uses `loadBlogPostSummaries` and never asks
- * the store for a list it would throw away.
+ * the store for a list it would throw away. Both reads share one environment
+ * and one `catch`: without a store, both are empty.
  */
 export async function loadBlogPostOperationalContext(
   postIds: ReadonlyArray<BlogPostId>,
 ): Promise<BlogPostOperationalContext> {
-  const summaries = await loadBlogPostSummaries(postIds);
   try {
     const environment = await loadHumanAccessEnvironment();
-    const application = await loadBlogPostOperationsApplication(environment);
+    const [summaries, application] = await Promise.all([
+      readBlogPostSummaries(environment, postIds),
+      loadBlogPostOperationsApplication(environment),
+    ]);
     return {
       ...summaries,
       archivedPosts: await application.queries.listArchivedPosts(
@@ -93,6 +105,6 @@ export async function loadBlogPostOperationalContext(
       ),
     };
   } catch {
-    return { ...summaries, archivedPosts: [] };
+    return { ...noBlogPostSummaries, archivedPosts: [] };
   }
 }

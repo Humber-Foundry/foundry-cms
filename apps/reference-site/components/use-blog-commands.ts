@@ -11,6 +11,7 @@ import {
   blogMutationKey,
   blogOperationErrorCode,
   blogOperationErrorMessage,
+  changeNotAcceptedMessage,
   changeNotConfirmedMessage,
 } from "./blog-operations";
 
@@ -20,7 +21,7 @@ import {
  * The posts list, the writing box and one post's own screen each send some of
  * the same commands (#230). Holding the busy flag, the sentence shown back,
  * the mutation token and the unfinished attempt in one place means the three
- * screens cannot drift apart in what they say or in how they retry.
+ * screens say the same words and retry the same way.
  *
  * Every accepted change reloads `returnTo`. Nothing here keeps a copy of what
  * the server holds: the screen is drawn again from the server's own answer, so
@@ -65,7 +66,7 @@ export function useBlogCommands({
       setMutationToken(result.mutationToken);
       setPendingAttempt(null);
       if (!result.response.ok) {
-        setMessage("The change was not accepted. Refresh and try again.");
+        setMessage(changeNotAcceptedMessage);
         return;
       }
       window.location.assign(returnTo);
@@ -125,9 +126,9 @@ export function useBlogCommands({
     busy,
     /**
      * For a step that does not go through this hook — opening a preview, or
-     * the approval a schedule needs first. Hold the screen while the request
-     * is open, or a second press sends a second write under a new key, and
-     * nothing collapses the two.
+     * the approval a schedule needs first. Keep every control off while the
+     * request is open, or a second press sends a second write under a new
+     * key, and nothing collapses the two.
      */
     setBusy,
     message,

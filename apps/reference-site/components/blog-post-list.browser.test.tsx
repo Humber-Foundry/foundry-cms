@@ -555,7 +555,7 @@ describe("blog posts list browser acceptance", () => {
     await expect
       .element(
         page.getByText(
-          "Write your first post to start your blog; it stays a private draft until you publish it.",
+          "Write your first post to start your blog.",
         ),
       )
       .toBeInTheDocument();

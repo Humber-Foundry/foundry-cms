@@ -16,14 +16,16 @@ import {
   blogHasPendingSitePublish,
   blogPostExecutionFailureNote,
   blogPostName,
+  blogPostPublishedLine,
   blogPostScheduleStanding,
   blogPostStanding,
   blogScreenDescription,
   changeNotConfirmedMessage,
   confirmArchiveWithdrawal,
-  formatLocalScheduleTime,
+  declineScheduleRequestCommand,
   openArchiveWithdrawalPreview,
   openInNewTab,
+  pendingScheduleRequestNote,
   previewNotOpenedMessage,
   revisionCommandBase,
   type ArchiveWithdrawalLocation,
@@ -47,7 +49,7 @@ import { useBlogCommands } from "./use-blog-commands";
  * writing box opened by itself on an empty site and hid the list, the "New
  * post" control and the per-post preview, so a site owner never saw that they
  * were there. Writing one post now lives on its own screen; this one lists
- * what exists and offers the way in.
+ * what exists and holds the link to write a new one.
  *
  * Every action on a post row goes through the row's "…" menu. Which actions a
  * row carries depends on where that post stands — a post with no schedule has
@@ -106,6 +108,7 @@ export function BlogPostList({
   // top of the first. `DashboardActionMenu` never draws an action turned off,
   // so the menu is left out until the answer arrives instead.
   const changeInFlight = commands.busy || commands.pendingAttempt !== null;
+  const command = revisionCommandBase(revision);
 
   /**
    * Opens the exact preview of a stalled archive's withdrawal revision —
@@ -232,7 +235,7 @@ export function BlogPostList({
             action={newPostButton}
           >
             {archivedPosts.length === 0
-              ? "Write your first post to start your blog; it stays a private draft until you publish it."
+              ? "Write your first post to start your blog."
               : "Write a new post, or restore an archived one below."}
           </DashboardEmptyState>
         ) : (
@@ -246,21 +249,20 @@ export function BlogPostList({
                 const executionFailure = blogPostExecutionFailureNote(summary);
                 const pendingRequest = summary?.pendingScheduleProposal ?? null;
                 const pendingRequestAgentName =
-                  pendingScheduleRequestAgentNames.get(post.id) ?? "An app";
+                  pendingScheduleRequestAgentNames.get(post.id) ?? null;
                 const actions: DashboardAction[] = [];
-                const command = revisionCommandBase(revision);
                 if (pendingRequest !== null) {
+                  const decline = declineScheduleRequestCommand(
+                    post.id,
+                    pendingRequest,
+                  );
                   actions.push({
                     id: "decline",
                     label: "Decline the app's publish request",
                     onSelect: () => {
                       void commands.sendBlogOperation(
-                        {
-                          operation: "decline_schedule_proposal",
-                          postId: post.id,
-                          proposalId: pendingRequest.id,
-                        },
-                        "decline-blog-post-schedule-proposal",
+                        decline.body,
+                        decline.operation,
                       );
                     },
                   });
@@ -344,15 +346,20 @@ export function BlogPostList({
                     },
                   });
                 }
+                // The date that matters for where the post stands: when a
+                // scheduled publish put it on the site, when it is due to
+                // go on, or otherwise when the draft was last saved.
                 const noteParts = [
-                  scheduleStanding.line ?? `Last saved ${draftSaved}`,
+                  blogPostPublishedLine(standing, summary) ??
+                    scheduleStanding.line ??
+                    `Last saved ${draftSaved}`,
                   executionFailure,
                   pendingRequest === null
                     ? null
-                    : `${pendingRequestAgentName} asked to publish this at ${formatLocalScheduleTime(
-                        pendingRequest.localDateTime,
-                        pendingRequest.ianaTimeZone,
-                      )}`,
+                    : pendingScheduleRequestNote(
+                        pendingRequestAgentName,
+                        pendingRequest,
+                      ),
                 ].filter((part): part is string => part !== null);
                 return (
                   <DashboardListRow

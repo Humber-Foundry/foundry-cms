@@ -17,8 +17,10 @@ import {
   blogPostPreviewUrl,
   blogPostScheduleStanding,
   blogPostStanding,
-  formatLocalScheduleTime,
+  dateNotReadMessage,
+  declineScheduleRequestCommand,
   openInNewTab,
+  pendingScheduleRequestNote,
   previewNotOpenedMessage,
   revisionCommandBase,
   scheduleNeedsApprovalMessage,
@@ -203,7 +205,7 @@ export function BlogPostScreen({
   async function schedulePost(localValue: string) {
     const instant = new Date(localValue);
     if (localValue === "" || Number.isNaN(instant.getTime())) {
-      commands.setMessage("That date and time could not be read. Try again.");
+      commands.setMessage(dateNotReadMessage);
       return;
     }
     commands.setMessage("");
@@ -283,13 +285,11 @@ export function BlogPostScreen({
         // it is here too: schedule the post below, or decline the request.
         <div className="dash-post-standing">
           <p className="composer-hint">
-            {pendingScheduleRequestAgentName ?? "An app"} asked to publish this
-            at{" "}
-            {formatLocalScheduleTime(
-              pendingRequest.localDateTime,
-              pendingRequest.ianaTimeZone,
-            )}
-            . Use “Schedule this post” below to publish it then, or decline the
+            {pendingScheduleRequestNote(
+              pendingScheduleRequestAgentName,
+              pendingRequest,
+            )}{" "}
+            Use “Schedule this post” below to publish it then, or decline the
             request.
           </p>
           <button
@@ -297,14 +297,11 @@ export function BlogPostScreen({
             className="dash-button dash-button-plain"
             disabled={changeInFlight}
             onClick={() => {
-              void commands.sendBlogOperation(
-                {
-                  operation: "decline_schedule_proposal",
-                  postId: post.id,
-                  proposalId: pendingRequest.id,
-                },
-                "decline-blog-post-schedule-proposal",
+              const decline = declineScheduleRequestCommand(
+                post.id,
+                pendingRequest,
               );
+              void commands.sendBlogOperation(decline.body, decline.operation);
             }}
           >
             Decline the app&apos;s publish request

@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * The writing box for one new post, on its own screen (#230). The back link
- * returns to the posts list, so this screen is never a dead end.
+ * returns to the posts list, so the person can always get back to it.
  */
 export default async function NewBlogPostPage({
   searchParams,
@@ -54,7 +54,7 @@ export default async function NewBlogPostPage({
       />
       <DashboardPageHeader
         title="New post"
-        description="Write your post here; it stays a private draft until you publish it."
+        description="Write a private draft to publish when it is ready."
       />
       <NewBlogPostScreen
         revision={dashboardWorkspace.contentRevision}

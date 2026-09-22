@@ -6,7 +6,7 @@
  * `/api/foundry-cms/content-revisions` and
  * `/api/foundry-cms/blog-operations`, and they all have to say the same words
  * about the same server answers. Those words, and the reads that go with
- * them, live here, so one screen can never drift from another. The three
+ * them, live here, so no two screens say different things. The three
  * addresses live in `blog-links.ts`, which a server page reads too.
  *
  * This module is browser-safe. It holds no binding, no secret and no adapter.
@@ -23,6 +23,7 @@ import type {
 } from "@humber-foundry/site-definition";
 
 import { formatLocalScheduleTime } from "./schedule-time-format";
+import { formatDashboardMoment } from "../src/dashboard-time";
 import {
   sendContentRevisionAttempt,
   sendHumanMutationAttempt,
@@ -199,6 +200,82 @@ export function blogPostExecutionFailureNote(
     : "First publication failed; it is not live yet.";
 }
 
+/**
+ * When a scheduled publish put this post on the site, in the owner's words.
+ *
+ * The CMS holds no published time for a post: `BlogPost` has none, and a
+ * publish through the site-wide Publish button leaves no record. A scheduled
+ * publish that finished does leave one, so that time is named while the post
+ * is on the site. Once the post comes off the site again the record no longer
+ * says when it went live, so nothing is said. `null` in every other case.
+ */
+export function blogPostPublishedLine(
+  standing: Readonly<{ tone: BlogPostStateTone }>,
+  summary: BlogPostOperationalSummary | undefined,
+): string | null {
+  const execution = summary?.latestExecution ?? null;
+  if (standing.tone !== "live" || execution?.state !== "completed") {
+    return null;
+  }
+  return `Published ${formatDashboardMoment(execution.updatedAt)}.`;
+}
+
+/** The fields of a pending schedule request the two Blog screens read. */
+export type PendingScheduleRequest = Readonly<{
+  id: string;
+  localDateTime: string;
+  ianaTimeZone: string;
+}>;
+
+/**
+ * The one sentence that says an app asked to publish a post, and when. A
+ * request nobody has named reads as the plain word "An app" — see
+ * CONTEXT.md "App / Connected app".
+ */
+export function pendingScheduleRequestNote(
+  agentName: string | null,
+  request: PendingScheduleRequest,
+): string {
+  return `${agentName ?? "An app"} asked to publish this at ${formatLocalScheduleTime(
+    request.localDateTime,
+    request.ianaTimeZone,
+  )}.`;
+}
+
+/**
+ * The command that declines an app's schedule request, as both Blog screens
+ * send it: the body for the blog-operations route, and the name its
+ * idempotency key is built from. See ADR-0038.
+ */
+export function declineScheduleRequestCommand(
+  postId: BlogPostId,
+  request: PendingScheduleRequest,
+): Readonly<{
+  body: Readonly<{
+    operation: "decline_schedule_proposal";
+    postId: BlogPostId;
+    proposalId: string;
+  }>;
+  operation: "decline-blog-post-schedule-proposal";
+}> {
+  return {
+    body: {
+      operation: "decline_schedule_proposal",
+      postId,
+      proposalId: request.id,
+    },
+    operation: "decline-blog-post-schedule-proposal",
+  };
+}
+
+/** What a screen says when a date and time it was given cannot be read. */
+export const dateNotReadMessage =
+  "That date and time could not be read. Try again.";
+
+/** What a screen says when the server refused a change and gave no reason. */
+export const changeNotAcceptedMessage =
+  "The change was not accepted. Refresh and try again.";
+
 /** What a screen says when a preview could not be opened. */
 export const previewNotOpenedMessage =
   "The preview could not be opened. Try again.";
@@ -239,7 +316,7 @@ export const scheduleNeedsApprovalMessage =
 const blogOperationErrorMessages: Readonly<Record<string, string>> = {
   approval_stale: scheduleNeedsApprovalMessage,
   approval_required: scheduleNeedsApprovalMessage,
-  local_time_invalid: "That date and time could not be read. Try again.",
+  local_time_invalid: dateNotReadMessage,
   civil_time_resolution_mismatch:
     "That local time does not exist or is ambiguous in this time zone. Pick a different time.",
   production_operation_in_progress:
@@ -257,8 +334,7 @@ const blogOperationErrorMessages: Readonly<Record<string, string>> = {
 };
 
 export function blogOperationErrorMessage(code: string): string {
-  return blogOperationErrorMessages[code] ??
-    "The change was not accepted. Refresh and try again.";
+  return blogOperationErrorMessages[code] ?? changeNotAcceptedMessage;
 }
 
 export function blogOperationErrorCode(body: unknown): string {
