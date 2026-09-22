@@ -260,9 +260,17 @@ const collectSmallTapTargets = (minimumTapTarget) => {
     // Browse/Edit toggle) has its own dedicated browser test —
     // verify-mobile-editor-browser.mjs. The live published page inside
     // `.site-canvas` carries the site's own design system, not the
-    // dashboard's. Neither is one of #173's numbered destinations or
+    // dashboard's. `.email-preview-message` is the email itself, drawn as an
+    // inbox will draw it, so its button is the email's design, not a
+    // dashboard control. None is one of #173's numbered destinations or
     // panels.
-    if (el.closest(".editor-immersive, .site-canvas") !== null) continue;
+    if (
+      el.closest(
+        ".editor-immersive, .site-canvas, .email-preview-message",
+      ) !== null
+    ) {
+      continue;
+    }
     // A radio or checkbox's native box is small by design; the tap target
     // is the label that wraps it (a design option, a preset look), which
     // this sweep already measures as its own `<label>` element.
@@ -297,6 +305,42 @@ const collectSmallTapTargets = (minimumTapTarget) => {
   return offenders.slice(0, 20);
 };
 
+/**
+ * Opens one saved email's screen and runs the same checks there.
+ *
+ * The preview card and the four sending steps used to render on
+ * /dash/campaigns, which this sweep visits. Since #237 they are on one email's
+ * own screen, which needs an email to open, so this writes one through the
+ * writing box the first time and opens it from the list after that.
+ */
+async function checkCampaignScreen(page, origin, viewportLabel) {
+  await page.goto(`${origin}/dash/campaigns`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  if ((await page.locator(".dash-row").count()) === 0) {
+    await page.getByRole("button", { name: "New email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns\/new/u, { timeout: 20_000 });
+    const composer = page.locator("form.composer");
+    await composer.waitFor({ state: "visible", timeout: 20_000 });
+    await composer.locator('input[name="subject"]').fill("News from the harbour");
+    await composer
+      .locator('textarea[name="previewText"]')
+      .fill("What changed at the harbour this month.");
+    await composer.locator('input[name="callToActionLabel"]').fill("Read more");
+    await composer
+      .locator('input[name="callToActionHref"]')
+      .fill("https://example.com/read");
+    await composer
+      .locator(".rich-text-editor [contenteditable]")
+      .fill("The new pontoon is finished and the winter berths are open.");
+    await page.getByRole("button", { name: "Save email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns(\?|$)/u, { timeout: 30_000 });
+  }
+  const row = page.locator(".dash-row").first();
+  await row.waitFor({ timeout: 20_000 });
+  const href = await row.locator("a.dash-row-link").getAttribute("href");
+  await checkDestination(page, origin, "One email", href, viewportLabel);
+}
+
 const destinations = [
   ["Overview", "/dash"],
   ["Pages", "/dash/pages"],
@@ -305,6 +349,7 @@ const destinations = [
   ["Design", "/dash/design"],
   ["Messages", "/dash/forms"],
   ["Newsletter", "/dash/campaigns"],
+  ["New email", "/dash/campaigns/new"],
   ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
@@ -506,6 +551,7 @@ async function main() {
         await checkDestination(page, origin, name, href, viewportLabel);
       }
       await checkPagesSettingsPanel(page, origin, viewportLabel);
+      await checkCampaignScreen(page, origin, viewportLabel);
       await context.close();
 
       if (foreignRequests.length > 0) {

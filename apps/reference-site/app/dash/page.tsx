@@ -1,3 +1,4 @@
+import { campaignHref } from "@/components/campaign-links";
 import { formatLocalScheduleTime } from "@/components/schedule-time-format";
 import { AttentionList } from "@/components/attention-list";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
@@ -211,9 +212,12 @@ export default async function DashboardOverviewPage({
               })),
               ...pendingCampaignRequests.map((request) => ({
                 key: `campaign-schedule-${request.campaignId}`,
-                href: `/dash/campaigns#campaign-${encodeURIComponent(
+                // One email has its own screen since #237, so the item opens
+                // that email rather than an anchor on the list.
+                href: campaignHref(
                   request.campaignId,
-                )}`,
+                  dashboardWorkspace.workspaceId,
+                ),
                 label: `${request.agentName} asked to send "${request.subject}" at ${formatLocalScheduleTime(
                   request.localDateTime,
                   request.ianaTimeZone,

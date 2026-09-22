@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySiteDefinitionEdits,
+  contrastRatio,
   defaultSiteDesign,
   designContract,
   designEditsForDesign,
@@ -11,37 +12,6 @@ import {
   type DesignPreset,
   type SiteDesign,
 } from "./index";
-
-/**
- * Relative luminance and contrast ratio from WCAG 2.2. The Design module offers
- * colours the owner cannot inspect for readability, so the contract itself has
- * to guarantee every offered pair is legible.
- */
-function channelLuminance(channel: number): number {
-  const value = channel / 255;
-  return value <= 0.04045
-    ? value / 12.92
-    : ((value + 0.055) / 1.055) ** 2.4;
-}
-
-function relativeLuminance(hex: string): number {
-  const match = /^#([0-9a-f]{6})$/iu.exec(hex);
-  if (match === null) {
-    throw new TypeError(`not_a_six_digit_hex_colour:${hex}`);
-  }
-  const value = Number.parseInt(match[1]!, 16);
-  return (
-    0.2126 * channelLuminance((value >> 16) & 0xff) +
-    0.7152 * channelLuminance((value >> 8) & 0xff) +
-    0.0722 * channelLuminance(value & 0xff)
-  );
-}
-
-export function contrastRatio(first: string, second: string): number {
-  const a = relativeLuminance(first);
-  const b = relativeLuminance(second);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-}
 
 const accentOptions = designContract.tokens["colour.accent"].options;
 const neutralOptions = designContract.tokens["colour.neutral"].options;
@@ -93,17 +63,20 @@ describe("design token contract", () => {
     }
   });
 
-  it("offers only accent colours that carry white button text at WCAG AA", () => {
+  it("offers only accent colours that carry their own ink at WCAG AA", () => {
+    // ADR-0040 made each accent option name the ink that reads on it, rather
+    // than leaving white written here by hand. This check reads that ink, so
+    // an accent registered with an ink it cannot carry fails.
     for (const option of accentOptions) {
       const preview = option.preview;
       expect(preview.kind, option.value).toBe("accent");
       if (preview.kind !== "accent") continue;
       expect(
-        contrastRatio(preview.colour, "#ffffff"),
+        contrastRatio(preview.colour, preview.inkColour),
         `accent ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
       expect(
-        contrastRatio(preview.deepColour, "#ffffff"),
+        contrastRatio(preview.deepColour, preview.inkColour),
         `accent hover ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
     }
@@ -121,6 +94,24 @@ describe("design token contract", () => {
       expect(
         contrastRatio(preview.softInk, preview.paper),
         `soft ink on paper ${option.value}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("offers only page tones whose card surface carries the same text", () => {
+    // ADR-0040 lets a page component paint a card, a photo mount or an input
+    // field with `--design-card`, and put ordinary page text on it. The card
+    // therefore owes the same reading guarantee the paper gives.
+    for (const option of neutralOptions) {
+      const preview = option.preview;
+      if (preview.kind !== "neutral") continue;
+      expect(
+        contrastRatio(preview.ink, preview.card),
+        `ink on card ${option.value}`,
+      ).toBeGreaterThanOrEqual(7);
+      expect(
+        contrastRatio(preview.softInk, preview.card),
+        `soft ink on card ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
     }
   });

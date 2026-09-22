@@ -6,17 +6,55 @@ import { userEvent } from "vitest/browser";
 
 import {
   designPresets,
+  homePage,
   referenceSiteDefinition,
   siteDesignAttributes,
+  type SiteDefinition,
 } from "@humber-foundry/site-definition";
+
+import { installedPageComponentRegistry } from "@/foundry/page-components";
 
 import { ContentEditor } from "./content-editor";
 
-function designRevision(workspaceId: string) {
+// The real stylesheets, so the preview panel paints what a visitor would see.
+import "../app/globals.css";
+import "../app/public.css";
+
+/**
+ * A site whose home page also carries the bespoke page components. The owner's
+ * review found the fault on those: he chose another look and the preview panel
+ * did not move, because their styles held their own colours and fonts.
+ */
+function definitionWithBespokeSections(): SiteDefinition {
+  const home = homePage(referenceSiteDefinition);
+  const bespoke = [
+    "imageCopyStory",
+    "connectorCards",
+    "invitationNewsletter",
+  ].map((component, index) =>
+    installedPageComponentRegistry.createDefault(
+      component,
+      `section_bespoke_${index}`,
+      { definition: referenceSiteDefinition, page: home },
+    ),
+  );
+  const page = { ...home, sections: [...home.sections, ...bespoke] };
+  return {
+    ...referenceSiteDefinition,
+    pages: referenceSiteDefinition.pages.map((candidate) =>
+      candidate.id === home.id ? page : candidate,
+    ),
+  };
+}
+
+function designRevision(
+  workspaceId: string,
+  definition: SiteDefinition = referenceSiteDefinition,
+) {
   return {
     workspaceId,
     revision: 4,
-    definition: referenceSiteDefinition,
+    definition,
     inputs: {
       contentHash: "design-content-hash",
       schemaVersion: "1.7.0",
@@ -28,7 +66,7 @@ function designRevision(workspaceId: string) {
   } as never;
 }
 
-function mountDesign(workspaceId: string) {
+function mountDesign(workspaceId: string, definition?: SiteDefinition) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -36,7 +74,7 @@ function mountDesign(workspaceId: string) {
     root.render(
       createElement(ContentEditor, {
         csrfToken: "csrf-design-test",
-        initialRevision: designRevision(workspaceId),
+        initialRevision: designRevision(workspaceId, definition),
         initialPreviewUrl: "/preview/design",
         activeWorkspaceUrl: "/dash/design?workspace=design",
         heading: "Design",
@@ -181,6 +219,75 @@ describe("design studio browser acceptance", () => {
         .querySelector(".design-preview .services")
         ?.getAttribute("data-component-variant"),
     ).toBe("cards");
+  });
+
+  it("changes the preview panel's own colours when another look is chosen", async () => {
+    const { host, root } = mountDesign(
+      "workspace_design_preview_paint",
+      definitionWithBespokeSections(),
+    );
+    mounted.push(root);
+    await settle();
+
+    const painted = () => {
+      const canvas = host.querySelector<HTMLElement>(
+        ".design-preview .site-canvas",
+      )!;
+      const read = (selector: string, property: string) =>
+        getComputedStyle(
+          canvas.querySelector<HTMLElement>(selector)!,
+        ).getPropertyValue(property);
+      return {
+        page: getComputedStyle(canvas).backgroundColor,
+        heading: read(".story-copy h2", "color"),
+        body: read(".story-copy > p:last-child", "color"),
+        accent: read(".handwritten-label", "color"),
+        band: read(".connector-section", "background-color"),
+        closingBand: read(".invitation-section", "background-color"),
+        button: read(".invitation-action", "background-color"),
+        buttonInk: read(".invitation-action", "color"),
+      };
+    };
+
+    const before = painted();
+    // The colour the owner watched stay put.
+    expect(before.heading).not.toBe("rgb(33, 37, 48)");
+
+    await choose(host, "Studio");
+    const after = painted();
+
+    for (const key of Object.keys(before) as Array<keyof typeof before>) {
+      expect(after[key], key).not.toBe(before[key]);
+    }
+  });
+
+  it("changes the preview panel's heading font when another heading font is chosen", async () => {
+    const { host, root } = mountDesign(
+      "workspace_design_preview_font",
+      definitionWithBespokeSections(),
+    );
+    mounted.push(root);
+    await settle();
+
+    const headingFonts = () =>
+      Array.from(
+        host.querySelectorAll<HTMLElement>(
+          ".design-preview .site-canvas h1, .design-preview .site-canvas h2",
+        ),
+      ).map((heading) => getComputedStyle(heading).fontFamily);
+
+    const before = headingFonts();
+    expect(before.length).toBeGreaterThan(3);
+    expect(new Set(before).size, "one heading font before").toBe(1);
+    expect(before[0]).toBe('Charter, "Source Serif 4", Georgia, serif');
+
+    await choose(host, "Technical mono");
+    const after = headingFonts();
+
+    expect(new Set(after).size, "one heading font after").toBe(1);
+    expect(after[0]).toBe(
+      '"IBM Plex Mono", "Source Code Pro", ui-monospace, monospace',
+    );
   });
 
   it("names every control and every option in the owner's words", async () => {
