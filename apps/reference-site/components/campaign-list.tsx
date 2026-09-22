@@ -19,6 +19,7 @@ import {
   campaignStateLabels,
   refusalCodeOf,
   refusalMessage,
+  readCampaignList,
   readCampaignReadiness,
   sendCampaignCommand,
   type DeliveryReadiness,
@@ -84,7 +85,18 @@ export function CampaignList({
   useEffect(() => {
     let current = true;
     void readCampaignReadiness().then((readiness) => {
-      if (current && readiness !== null) setSenderDetails(readiness.senderDetails);
+      if (current && readiness !== null)
+        setSenderDetails(readiness.senderDetails);
+    });
+    // An app can write a send-time request at any moment, and this list is the
+    // only place a person can answer one. Reading the list when the screen
+    // opens keeps what the owner sees equal to what the server holds, however
+    // long the browser held the copy it was sent.
+    void readCampaignList().then((list) => {
+      if (current && list !== null) {
+        setCampaigns(list.campaigns);
+        setScheduleRequests(list.scheduleRequests);
+      }
     });
     return () => {
       current = false;
@@ -98,16 +110,10 @@ export function CampaignList({
   const senderDetailsMissing = senderDetails?.state === "not_configured";
 
   async function reloadCampaigns() {
-    const response = await fetch("/api/foundry-cms/campaigns", {
-      cache: "no-store",
-    });
-    if (!response.ok) return;
-    const body = (await response.json()) as {
-      campaigns: ReadonlyArray<CampaignListEntry>;
-      scheduleRequests?: ReadonlyArray<PendingScheduleRequest>;
-    };
-    setCampaigns(body.campaigns);
-    setScheduleRequests(body.scheduleRequests ?? []);
+    const list = await readCampaignList();
+    if (list === null) return;
+    setCampaigns(list.campaigns);
+    setScheduleRequests(list.scheduleRequests);
   }
 
   /**

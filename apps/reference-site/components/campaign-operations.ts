@@ -11,8 +11,10 @@
  */
 
 import type {
+  Campaign,
   CampaignBulkStateReport,
   CampaignId,
+  CampaignRevision,
   CampaignLifecycleState,
   CampaignTestDeliveryApplication,
   CampaignTestDeliveryEvidence,
@@ -262,6 +264,31 @@ export async function readCampaignReadiness(): Promise<Readonly<{
   } catch {
     return null;
   }
+}
+
+/**
+ * Every campaign this site holds, with the send-time requests apps have made
+ * that nobody has answered yet. Answers null when the list cannot be read, so
+ * the screen keeps showing the last answer it did get.
+ */
+export async function readCampaignList(): Promise<Readonly<{
+  campaigns: ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
+  scheduleRequests: ReadonlyArray<PendingScheduleRequest>;
+}> | null> {
+  const response = await fetch("/api/foundry-cms/campaigns", {
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const body = (await response.json()) as {
+    campaigns: ReadonlyArray<
+      Readonly<{ campaign: Campaign; revision: CampaignRevision }>
+    >;
+    scheduleRequests?: ReadonlyArray<PendingScheduleRequest>;
+  };
+  return {
+    campaigns: body.campaigns,
+    scheduleRequests: body.scheduleRequests ?? [],
+  };
 }
 
 /** The server's whole report about one campaign, or null when it cannot be read. */

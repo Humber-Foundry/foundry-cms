@@ -66,24 +66,20 @@ export function NewCampaignScreen({
         return;
       }
       setMessage("Email draft saved. Nothing is sent from here.");
-      router.push(campaignListHref(workspace));
+      // The list is a server-rendered screen, and the browser still holds the
+      // copy it read before this email existed. Drop that copy first, then go
+      // back to the list, or the owner returns to a list without the email
+      // they just wrote.
       router.refresh();
+      router.push(campaignListHref(workspace));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section aria-labelledby="new-campaign-heading">
-      <div className="dashboard-section-heading">
-        <div>
-          <h2 id="new-campaign-heading">Write the email</h2>
-          <p>
-            It stays a private draft until you send a test and approve it.
-          </p>
-          <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
-        </div>
-      </div>
+    <section aria-label="New email">
+      <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
       {senderDetailsMissing ? null : (
         <EmailComposer
           heading="New email"

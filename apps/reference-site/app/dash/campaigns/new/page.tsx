@@ -42,7 +42,7 @@ export default async function NewCampaignPage({
         <div>
           <h1>New email</h1>
           <p>
-            Write the email here. Nothing is sent until you send a test and
+            Write it here. It stays a private draft until you send a test and
             approve it.
           </p>
         </div>

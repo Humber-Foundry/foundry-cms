@@ -83,9 +83,9 @@ export default async function DashboardCampaignPage({
       </p>
       <div className="page-heading">
         <div>
-          <h1>Email</h1>
+          <h1>{revision.subject}</h1>
           <p>
-            Check how it looks, send yourself a test, then send it to your
+            Read it through, send yourself a test, then send it to your
             subscribers.
           </p>
         </div>

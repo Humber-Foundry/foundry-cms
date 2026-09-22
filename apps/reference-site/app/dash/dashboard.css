@@ -914,6 +914,13 @@
   gap: 0.5rem;
 }
 
+/* A row action that is a real link, such as Newsletter's "Open" (#237). It is
+ * drawn as the button beside it, so it drops the underline every other link
+ * in the dashboard keeps. */
+.post-list-actions a.copy-button {
+  text-decoration: none;
+}
+
 /* The schedule form (or its "needs a preview first" note) sits under the
  * title and buttons, the full width of the row. */
 .post-list-full-row {

@@ -156,17 +156,8 @@ export function CampaignScreen({
   }
 
   return (
-    <section aria-labelledby="campaign-screen-heading">
-      <div className="dashboard-section-heading">
-        <div>
-          <h2 id="campaign-screen-heading">{revision.subject}</h2>
-          <p>
-            Read it through, send yourself a test, then send it to your
-            subscribers.
-          </p>
-          <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
-        </div>
-      </div>
+    <section aria-label="This email">
+      <ConnectionStatus kind="senderDetails" readiness={senderDetails} />
       {editing ? (
         <EmailComposer
           key={`${revision.campaignId}:${revision.revisionNumber}`}
