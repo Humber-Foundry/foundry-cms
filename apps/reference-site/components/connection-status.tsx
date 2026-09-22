@@ -134,24 +134,31 @@ export function ConnectionStatus({
 
   const copy = connectionCopy[kind];
 
-  // Local development holds none of the settings a connected site holds. The
-  // names go behind the disclosure rather than on the line, because nobody
-  // has to fix anything here: the sentence is the whole answer for the owner,
-  // and the names are for whoever connects a real site.
+  const missingNames = readiness.missingSettings.join(", ");
+  const namesInline =
+    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
+  const namesBehindDisclosure =
+    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
+
+  // Local development holds none of the settings a connected site holds, so
+  // the list names them all. Which kind puts them on the line and which puts
+  // them behind the disclosure is the same rule as for a setting that is
+  // absent on a live site, so one screen cannot read two ways.
   if (readiness.state === "local_development") {
     return (
       <p className="connection-status">
         {copy.localDevelopmentSentence}
-        {readiness.missingSettings.length === 0 ? null : (
+        {namesInline ? (
+          <> A connected site holds these settings: {missingNames}.</>
+        ) : null}
+        {namesBehindDisclosure ? (
           <>
             {" "}
             <HelpTip label={settingNamesLabel}>
-              {`A connected site holds them as ${readiness.missingSettings.join(
-                ", ",
-              )}.`}
+              {`A connected site holds them as ${missingNames}.`}
             </HelpTip>
           </>
-        )}
+        ) : null}
       </p>
     );
   }
@@ -165,11 +172,6 @@ export function ConnectionStatus({
     );
   }
 
-  const missingNames = readiness.missingSettings.join(", ");
-  const namesInline =
-    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
-  const namesBehindDisclosure =
-    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {copy.notConnectedSentence}

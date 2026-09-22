@@ -9,6 +9,7 @@ import { createSiteId } from "@humber-foundry/site-definition";
 import {
   campaignPreviewContentSecurityPolicy,
   campaignPreviewDocument,
+  picturesFromAnotherWebsite,
   refusalMessage,
   testFailureMessage,
   unsubscribeAddressShown,
@@ -125,15 +126,37 @@ describe("the document the email preview frame draws", () => {
     expect(preview).toContain('<base target="_blank">');
   });
 
-  it("leaves a picture from somebody else's server as written, for the policy to refuse", () => {
+  it("leaves a picture from somebody else's server as written, and counts it", () => {
     const preview = campaignPreviewDocument(
       '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
         "</head><body>" +
         '<img src="https://tracker.example.net/pixel.gif" alt="">' +
+        '<img src="https://example.org/api/media/asset_header" alt="">' +
         "</body></html>",
     );
 
+    // The policy refuses it, so the screen has to say a picture is missing
+    // rather than leave a gap nobody can explain.
     expect(preview).toContain('src="https://tracker.example.net/pixel.gif"');
+    expect(picturesFromAnotherWebsite(preview)).toBe(1);
+  });
+
+  it("puts the policy after the document type when an email has no head", () => {
+    const preview = campaignPreviewDocument(
+      "<!doctype html><body><p>Plain</p></body>",
+    );
+
+    // Anything before the document type puts the browser into quirks mode and
+    // draws the email in a layout no inbox uses.
+    expect(preview.startsWith("<!doctype html><meta http-equiv=")).toBe(true);
+  });
+
+  it("counts no outside picture in an email whose photos all come from this site", async () => {
+    const rendered = await renderCampaignRevision(revision, 412);
+
+    expect(
+      picturesFromAnotherWebsite(campaignPreviewDocument(rendered.html.bytes)),
+    ).toBe(0);
   });
 });
 
@@ -148,6 +171,17 @@ describe("the unsubscribe address the review shows", () => {
 
   it("shows an address it cannot read back exactly as it is stored", () => {
     expect(unsubscribeAddressShown("not an address")).toBe("not an address");
+  });
+
+  it("takes the marker out whatever the parameter is called", () => {
+    // The parameter's name belongs to whoever builds the address. Matching
+    // the marker means renaming it there cannot leave a machine's word on
+    // screen.
+    expect(
+      unsubscribeAddressShown(
+        "https://example.org/stop?list=news&t={{foundry.unsubscribe.token}}",
+      ),
+    ).toBe("https://example.org/stop?list=news");
   });
 });
 

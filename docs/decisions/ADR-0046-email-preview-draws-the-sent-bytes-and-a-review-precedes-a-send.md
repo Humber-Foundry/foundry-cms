@@ -49,7 +49,8 @@ no others, both in `campaignPreviewDocument`:
   each picture as an absolute address so a mail client can load it (ADR-0014),
   and that address names the public origin, which the dashboard may not be
   running on. A picture from anywhere else is left exactly as written and the
-  policy then refuses it.
+  policy then refuses it. The screen counts those and says so under the frame,
+  so a gap in the preview is never left unexplained.
 
 The frame carries `sandbox="allow-same-origin"` and nothing else. Without
 `allow-scripts` nothing in the email can run; `allow-same-origin` is what lets
@@ -81,9 +82,12 @@ only while the report and the screen hold that same revision; otherwise it
 offers no send control and asks for a reload.
 
 The review carries one tick, "I have read this and it is right." Approving,
-sending now and picking a send time all stay shut until it is ticked, and the
-tick clears whenever the email's fingerprint changes. The confirm control
-names the count: "Send to 412 people now".
+sending now and picking a send time all stay shut until it is ticked. One tick
+opens one step: it clears when the email's fingerprint changes, because a
+changed email has not been read, and it clears when the approval changes, so
+the tick that opened "Approve this email for sending" is not still ticked when
+the same screen turns into "Send to 412 people now". The confirm control names
+the count.
 
 The sending name and address leave the server. They are the installation's own
 sending identity, which every recipient already reads in their inbox. A test
@@ -97,8 +101,12 @@ refusal code and its wording are unchanged. An agent still never sends
 
 ## Consequences
 
-- The preview and the sent email cannot disagree, because they are the same
-  bytes. A renderer change shows in the dashboard with no second edit.
+- The preview and the sent email cannot disagree about the words, because they
+  are the same bytes. A renderer change shows in the dashboard with no second
+  edit.
+- They can disagree about pictures. A picture kept on another website is
+  refused by the policy and does not draw, and the line under the frame says
+  how many. A gallery photo always draws.
 - The preview shows raw email HTML, so it carries none of the dashboard's
   typography. That is the point: an inbox carries none of it either.
 - Adding a setting to `campaignDeliverySettingNames` changes what the local
@@ -116,6 +124,11 @@ arrives.
 **Block the network by stripping every address out of the preview.** Rejected:
 an email with no pictures is not the email as it will arrive. The policy
 refuses everything off this site instead, and the site's own photos still draw.
+
+**Allow pictures from any `https://` address so every email draws whole.**
+Rejected: the dashboard would then fetch from whatever address a campaign
+carries, which a preview must not do. The count under the frame is the cheaper
+answer, and an owner who has to see the picture can send themselves a test.
 
 **Add a separate reply-to setting.** Rejected as out of scope. The delivery
 adapter sends no reply-to header, so a reply goes to the sending address, and

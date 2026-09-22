@@ -234,9 +234,12 @@ describe("campaign endpoint", () => {
   });
 
   it("reports one campaign's send state and its verified test recipients", async () => {
+    // The rendered artifact names the revision it came from. The review has
+    // to be read from that same revision, never from whatever is current.
     mocks.render.mockResolvedValue({
       campaignId: "20000000-0000-4000-8000-000000000001",
       campaignFingerprint: "fingerprint-one",
+      revisionNumber: 7,
       eligibleSubscriberCount: 412,
     });
     mocks.currentEvidence.mockResolvedValue({
@@ -284,7 +287,7 @@ describe("campaign endpoint", () => {
     expect(mocks.getRevision).toHaveBeenCalledWith({
       actor: identity,
       campaignId: "20000000-0000-4000-8000-000000000001",
-      revisionNumber: undefined,
+      revisionNumber: 7,
     });
     expect(body.sendSummary).toEqual({
       campaignRevisionId: sentRevision.id,

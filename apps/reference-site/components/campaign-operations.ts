@@ -24,7 +24,6 @@ import type {
 import {
   mediaAssetIdFromImageAddress,
   mediaImageSrc,
-  type RichTextDocument,
 } from "@humber-foundry/site-definition";
 
 import { senderDetailsNotSetSentence } from "./connection-status";
@@ -246,15 +245,27 @@ const refusalSentences: Readonly<Record<string, string>> = {
 };
 
 /**
- * One refusal, written the way the screens report it: the plain sentence, then
- * the server's own code so whoever has to fix it has the exact reason. An
- * answer that named no code gets the sentence alone.
+ * One answer from the server, written the way every screen reports it: the
+ * plain sentence a person reads, then the server's own code, because whoever
+ * has to fix it needs the exact reason and that code is the stable name for
+ * it. An answer that named no code gets the sentence alone.
  */
-export function refusalMessage(code: string): string {
-  const sentence =
-    refusalSentences[code] ??
-    "That step did not go through. Nothing was sent.";
+function plainReason(
+  sentences: Readonly<Record<string, string>>,
+  fallback: string,
+  code: string,
+): string {
+  const sentence = sentences[code] ?? fallback;
   return code === "" ? sentence : `${sentence} Reason: ${code}.`;
+}
+
+/** One refusal, in the words a site owner reads. */
+export function refusalMessage(code: string): string {
+  return plainReason(
+    refusalSentences,
+    "That step did not go through. Nothing was sent.",
+    code,
+  );
 }
 
 /**
@@ -265,6 +276,9 @@ export function refusalMessage(code: string): string {
  * and what to do, because a bare code reads as a fault in the dashboard when
  * the answer is usually somewhere else.
  */
+const emailChangedMidTest =
+  "The email changed while the test was going out. Send a new test.";
+
 const testFailureSentences: Readonly<Record<string, string>> = {
   provider_unavailable:
     "The email provider could not be reached, so no test went out.",
@@ -283,10 +297,8 @@ const testFailureSentences: Readonly<Record<string, string>> = {
     "The email provider would not take this email.",
   provider_campaign_not_found:
     "The email provider no longer holds this email. Send the test again.",
-  provider_campaign_fingerprint_mismatch:
-    "The email changed while the test was going out. Send a new test.",
-  campaign_revision_changed:
-    "The email changed while the test was going out. Send a new test.",
+  provider_campaign_fingerprint_mismatch: emailChangedMidTest,
+  campaign_revision_changed: emailChangedMidTest,
   foundry_send_proof_invalid:
     "The test could not be proved to belong to this site, so it was stopped.",
   test_recipient_binding_changed:
@@ -296,41 +308,13 @@ const testFailureSentences: Readonly<Record<string, string>> = {
     "There is no verified test address on file for you.",
 };
 
-/**
- * One undelivered test, written the way the step reports it: the plain
- * sentence, then the provider's own code so whoever has to fix it has the
- * exact reason.
- */
+/** One undelivered test, in the words a site owner reads. */
 export function testFailureMessage(code: string): string {
-  const sentence =
-    testFailureSentences[code] ?? "The test has not been delivered yet.";
-  return code === "" ? sentence : `${sentence} Reason: ${code}.`;
-}
-
-/**
- * The address the dashboard preview draws for one campaign image. A campaign
- * stores each image as an absolute address so the sent email can load it. A
- * gallery photo's address is the site's own `/api/media/<assetId>` route made
- * absolute; the preview draws it by its same-origin path so it loads while the
- * dashboard runs on any host. An external picture is drawn as written.
- */
-export function campaignPreviewSrc(url: string): string {
-  const assetId = mediaAssetIdFromImageAddress(url);
-  return assetId === null ? url : mediaImageSrc(assetId);
-}
-
-/** The email body with every image address drawn by its same-origin path. */
-export function previewEmailContent(
-  document: RichTextDocument,
-): RichTextDocument {
-  return {
-    ...document,
-    children: document.children.map((block) =>
-      block.type === "image"
-        ? { ...block, src: campaignPreviewSrc(block.src) }
-        : block,
-    ),
-  };
+  return plainReason(
+    testFailureSentences,
+    "The test has not been delivered yet.",
+    code,
+  );
 }
 
 /**
@@ -366,6 +350,27 @@ const campaignPreviewHead =
 /** Matches the `src` of one `<img>` tag in the renderer's own output. */
 const renderedImageSource = /(<img\b[^>]*?\bsrc=")([^"]*)(")/giu;
 
+/** The opening `<head>` tag, and the document type that comes before it. */
+const openingHeadTag = /<head\b[^>]*>/iu;
+const documentType = /^<!doctype\b[^>]*>/iu;
+
+/**
+ * The two lines above, put where a browser will read them: straight after the
+ * opening `<head>` tag, or after the document type when a document has no head
+ * of its own. Never before the document type, which would put the browser into
+ * quirks mode and draw the email in a layout no inbox uses.
+ */
+function withPreviewHead(html: string): string {
+  const head = openingHeadTag.exec(html);
+  if (head !== null) {
+    const after = head.index + head[0].length;
+    return html.slice(0, after) + campaignPreviewHead + html.slice(after);
+  }
+  const type = documentType.exec(html);
+  const after = type === null ? 0 : type[0].length;
+  return html.slice(0, after) + campaignPreviewHead + html.slice(after);
+}
+
 /**
  * The exact bytes the campaign renderer produces, made safe to draw inside the
  * dashboard.
@@ -375,15 +380,16 @@ const renderedImageSource = /(<img\b[^>]*?\bsrc=")([^"]*)(")/giu;
  * 1. The head gains the content security policy and the base target above, so
  *    the frame can load nothing off this site and can run nothing.
  * 2. Every gallery picture is drawn by its same-origin `/api/media/<assetId>`
- *    path, the same rule `campaignPreviewSrc` applies everywhere else in the
- *    dashboard. A campaign stores each picture as an absolute address so the
+ *    path. A campaign stores each picture as an absolute address so the
  *    sent email can load it; that address names the site's public origin,
  *    which the dashboard may not be running on. A picture from anywhere else
  *    is left exactly as written, and the policy above then refuses it.
  *
  * Nothing is removed, reworded or reordered, so what the frame draws is the
- * email the delivery provider will send. The Content ID beside the frame is
- * the fingerprint of those exact bytes.
+ * email the delivery provider will send, with the one exception the policy
+ * makes: a picture from another website does not draw. The screen counts those
+ * with `picturesFromAnotherWebsite` and says so. The Content ID beside the
+ * frame is the fingerprint of the exact bytes.
  */
 export function campaignPreviewDocument(html: string): string {
   const sameOriginPictures = html.replace(
@@ -401,12 +407,21 @@ export function campaignPreviewDocument(html: string): string {
         : `${opening}${mediaImageSrc(assetId)}${closing}`;
     },
   );
-  const head = sameOriginPictures.indexOf("<head>");
-  return head === -1
-    ? `${campaignPreviewHead}${sameOriginPictures}`
-    : sameOriginPictures.slice(0, head + "<head>".length) +
-      campaignPreviewHead +
-      sameOriginPictures.slice(head + "<head>".length);
+  return withPreviewHead(sameOriginPictures);
+}
+
+/**
+ * How many pictures in this email are loaded from another website.
+ *
+ * The preview refuses them, so the screen has to say one is missing rather
+ * than draw a gap the owner cannot explain. Read the preview document, not the
+ * renderer's bytes, because by then every gallery photo is already a path on
+ * this site and anything left is somewhere else.
+ */
+export function picturesFromAnotherWebsite(previewDocument: string): number {
+  return Array.from(previewDocument.matchAll(renderedImageSource)).filter(
+    ([, , address]) => !address!.startsWith("/"),
+  ).length;
 }
 
 /**
@@ -419,7 +434,12 @@ export function campaignPreviewDocument(html: string): string {
 export function unsubscribeAddressShown(address: string): string {
   try {
     const parsed = new URL(address);
-    parsed.searchParams.delete("token");
+    // Whichever parameter carries the marker, it is the token's. Matching the
+    // marker rather than the parameter's name means renaming the parameter
+    // where the address is built cannot leave a machine's word on screen.
+    for (const [name, value] of Array.from(parsed.searchParams)) {
+      if (value.includes("{{")) parsed.searchParams.delete(name);
+    }
     return parsed.toString();
   } catch {
     return address;

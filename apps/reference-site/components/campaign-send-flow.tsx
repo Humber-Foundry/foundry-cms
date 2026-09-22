@@ -120,12 +120,17 @@ export function CampaignSendFlow({
       ? report.sendSummary
       : null;
 
-  // A changed email must be read again before it can go out. The fingerprint
-  // changes on every edit, so clearing the tick on it is the same rule the
-  // server applies to an approval.
+  // The tick is one reading of one review, and it is spent on one step.
+  //
+  // It clears when the email changes, because a changed email has not been
+  // read. It also clears when the approval changes, because approving is
+  // itself a step: without this, the tick that opened "Approve this email for
+  // sending" would still be ticked when the same screen turns into "Send to
+  // 412 people now", and the send would go out on a review nobody read twice.
+  const approvalId = authorization?.id ?? "";
   useEffect(() => {
     setSendReviewed(false);
-  }, [report.rendered.campaignFingerprint]);
+  }, [report.rendered.campaignFingerprint, approvalId]);
 
   function testNeed(): string {
     if (localDevelopment) {
@@ -247,6 +252,22 @@ export function CampaignSendFlow({
       stage === "not_connected"
       ? "later"
       : "now";
+  }
+
+  /**
+   * The review and its tick, shown above whichever control the send step is
+   * offering. Approving and sending each need the same reading, so they show
+   * the same block rather than two that could drift apart.
+   */
+  function review(summary: CampaignSendSummary) {
+    return (
+      <CampaignSendReview
+        summary={summary}
+        reviewed={sendReviewed}
+        busy={busy}
+        onReviewed={setSendReviewed}
+      />
+    );
   }
 
   function scheduleThisEmail() {
@@ -469,12 +490,7 @@ export function CampaignSendFlow({
           ) : stage === "needs_approval" ? (
             testEvidence === null ? null : (
               <div className="send-step-outcome">
-                <CampaignSendReview
-                  summary={reviewSummary}
-                  reviewed={sendReviewed}
-                  busy={busy}
-                  onReviewed={setSendReviewed}
-                />
+                {review(reviewSummary)}
                 <button
                   type="button"
                   className="dash-button dash-button-primary"
@@ -493,12 +509,7 @@ export function CampaignSendFlow({
             )
           ) : authorization === null ? null : (
             <div className="send-step-outcome">
-              <CampaignSendReview
-                summary={reviewSummary}
-                reviewed={sendReviewed}
-                busy={busy}
-                onReviewed={setSendReviewed}
-              />
+              {review(reviewSummary)}
               <button
                 type="button"
                 className="dash-button dash-button-primary"

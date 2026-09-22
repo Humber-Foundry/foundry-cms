@@ -369,16 +369,11 @@ describe("one campaign's screen, browser acceptance", () => {
       "Email is off in local development, because this site holds no email " +
         "provider credentials.",
     );
-    // The setting names are for whoever connects a real site, so they sit
-    // behind the shared help control rather than filling the step.
-    await userEvent.click(
-      page.getByRole("button", { name: "Which settings are these?" }),
-    );
-    await vi.waitFor(() =>
-      expect(host.textContent).toContain(
-        "A connected site holds them as FOUNDRY_BREVO_API_KEY, " +
-          "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON.",
-      ),
+    // The same rule as a live site with a setting absent: the email
+    // connection puts the names on the line (ADR-0021).
+    expect(host.textContent).toContain(
+      "A connected site holds these settings: FOUNDRY_BREVO_API_KEY, " +
+        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON.",
     );
     // Nothing was sent, and nothing reads as a fault.
     expect(server.commands).toHaveLength(0);
@@ -408,6 +403,19 @@ describe("one campaign's screen, browser acceptance", () => {
       campaignId: server.campaign.id,
       testExecutionId: "40000000-0000-4000-8000-000000000001",
     });
+
+    // One tick opens one step. Approving is a step, so the send that follows
+    // needs its own reading; otherwise the same tick would send the email.
+    const send = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Send to 412 people now");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(send.disabled).toBe(true);
   });
 
   it("makes the owner read a review naming the list before it will send", async () => {

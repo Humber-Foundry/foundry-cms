@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { campaignPreviewDocument } from "./campaign-operations";
+import {
+  campaignPreviewDocument,
+  picturesFromAnotherWebsite,
+} from "./campaign-operations";
 import { HelpTip } from "./help-tip";
 
 /**
@@ -58,6 +61,8 @@ export function CampaignEmailPreview({
   const [width, setWidth] = useState<PreviewWidth>("computer");
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(shortestPreview);
+  const previewDocument = campaignPreviewDocument(html);
+  const outsidePictures = picturesFromAnotherWebsite(previewDocument);
 
   /**
    * Make the frame as tall as the email in it.
@@ -70,21 +75,33 @@ export function CampaignEmailPreview({
    */
   const fitToEmail = useCallback(() => {
     const inside = frame.current?.contentDocument;
-    if (inside === null || inside === undefined) return;
+    const view = frame.current?.contentWindow;
+    if (!inside?.body || !view) return;
+    // Measure the email's own body, never the frame's document element. The
+    // document element is as tall as the frame, so reading it and then setting
+    // the frame from it is a loop that never settles.
+    const edges = view.getComputedStyle(inside.body);
+    const tall =
+      inside.body.scrollHeight +
+      (Number.parseFloat(edges.marginTop) || 0) +
+      (Number.parseFloat(edges.marginBottom) || 0);
     setHeight(
-      Math.min(
-        Math.max(inside.documentElement.scrollHeight + 2, shortestPreview),
-        tallestPreview,
-      ),
+      Math.min(Math.max(Math.ceil(tall) + 2, shortestPreview), tallestPreview),
     );
   }, []);
 
-  // The frame does not load again when the width changes, so the height is
-  // measured again after the browser has laid the email out at the new width.
+  // The frame is measured twice, and only twice.
+  //
+  // Once on its load event, which a browser holds until the email's pictures
+  // have loaded, so a picture cannot arrive after the measurement. Once more
+  // here, because changing the width does not load the frame again, and the
+  // email reflows to a different height at the new width. Watching the email
+  // for every resize instead would set the frame's height from inside a
+  // resize callback, which browsers report as a resize loop.
   useEffect(() => {
-    const frameRequest = requestAnimationFrame(fitToEmail);
-    return () => cancelAnimationFrame(frameRequest);
-  }, [fitToEmail, width, html]);
+    const pending = requestAnimationFrame(fitToEmail);
+    return () => cancelAnimationFrame(pending);
+  }, [fitToEmail, width, previewDocument]);
 
   return (
     <section className="email-preview" aria-label="Email preview">
@@ -125,9 +142,20 @@ export function CampaignEmailPreview({
           // the email's pictures would not draw at all.
           sandbox="allow-same-origin"
           referrerPolicy="no-referrer"
-          srcDoc={campaignPreviewDocument(html)}
+          srcDoc={previewDocument}
         />
       </div>
+      {outsidePictures === 0 ? null : (
+        <p className="email-preview-note">
+          {outsidePictures === 1
+            ? "One picture in this email is kept on another website, so this " +
+              "preview does not draw it. People who get the email will see it."
+            : `${outsidePictures} pictures in this email are kept on other ` +
+              "websites, so this preview does not draw them. People who get " +
+              "the email will see them."}{" "}
+          The preview reaches nothing outside your own site.
+        </p>
+      )}
       {text === null || contentId === null ? null : (
         <details>
           <summary>How the email reads, and technical details</summary>

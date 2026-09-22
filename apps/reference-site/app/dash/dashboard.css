@@ -1508,26 +1508,11 @@
   overflow-wrap: anywhere;
 }
 
-.email-preview-message {
-  margin-bottom: 1rem;
-}
-
-.email-preview-message .campaign-preview-line {
-  color: var(--dash-muted, #5a6b60);
+/* Why a picture in the email does not draw in the preview. */
+.email-preview-note {
+  margin: var(--dash-space-3) 0 0;
+  color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
-}
-
-.campaign-header-image,
-.email-preview-message .rich-text-image {
-  margin: 0.75rem 0;
-}
-
-.campaign-header-image img,
-.email-preview-message .rich-text-image img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--dash-radius);
 }
 
 .copy-button {
