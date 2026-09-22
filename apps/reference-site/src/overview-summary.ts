@@ -1,0 +1,289 @@
+import type {
+  AnalyticsOverviewView,
+  ContentPublicationHistoryEntry,
+  ContentPublicationStatus,
+} from "@humber-foundry/application";
+
+import { dashboardRoutes } from "@/components/dashboard-destinations";
+
+/**
+ * What Overview shows, worked out from data other modules already load.
+ *
+ * Everything here is a plain function of its arguments. No binding, no
+ * database and no `server-only` import, so the rules the owner reads on
+ * screen — which number is shown, which sentence replaces a number that
+ * cannot be read, what counts as recent activity — are covered by ordinary
+ * unit tests.
+ *
+ * The honesty rule for this whole module: a number that a source cannot
+ * supply is never guessed, never replaced by a zero, and never added to
+ * another source's number. Overview says which source is missing instead.
+ */
+
+/** One of the key numbers at the top of Overview. */
+export type OverviewNumber = Readonly<{
+  key: string;
+  /** What this counts, in the owner's words. */
+  label: string;
+  /** The screen that holds this number and explains it. */
+  href: string;
+  /**
+   * The figure as the owner reads it, or `null` when there is none to show.
+   * A value that is real but too small to report exactly is written in
+   * words, such as "fewer than 5".
+   */
+  value: string | null;
+  /**
+   * One sentence, shown only when there is no figure. It says which source
+   * could not supply it.
+   */
+  note: string | null;
+}>;
+
+function formatCount(value: number): string {
+  return value.toLocaleString("en-CA");
+}
+
+/**
+ * A key number a store answers with a plain count. `null` means the store
+ * could not answer on this request, and the card then carries `missingNote`
+ * in place of a figure.
+ */
+function countedNumber({
+  key,
+  label,
+  href,
+  count,
+  missingNote,
+}: {
+  key: string;
+  label: string;
+  href: string;
+  count: number | null;
+  missingNote: string;
+}): OverviewNumber {
+  return count === null
+    ? { key, label, href, value: null, note: missingNote }
+    : { key, label, href, value: formatCount(count), note: null };
+}
+
+/**
+ * Visits over the reporting period, from the Visitors read model.
+ *
+ * Two parts of a site can each count visits, and their counts are different
+ * measurements of the same thing. They are never added together. When there
+ * is more than one, Overview shows no single figure and sends the owner to
+ * Visitors, which lists each count with the part that made it.
+ */
+export function visitsOverviewNumber(
+  overview: AnalyticsOverviewView | null,
+  periodDays: number,
+): OverviewNumber {
+  const shared = {
+    key: "visits",
+    label: `Visits in the last ${periodDays} days`,
+    href: `${dashboardRoutes.visitors}?days=${periodDays}`,
+  };
+  if (overview === null) {
+    return {
+      ...shared,
+      value: null,
+      note: "Your site's visit counter is not reporting yet. Visitors says what it counts.",
+    };
+  }
+  const series = overview.metrics.filter(
+    (reading) => reading.metricKey === "web.visits",
+  );
+  if (series.length === 0) {
+    return {
+      ...shared,
+      value: null,
+      note: "Your site's visit counter has reported nothing for this period. Open Visitors.",
+    };
+  }
+  if (series.length > 1) {
+    return {
+      ...shared,
+      value: null,
+      note: "More than one part of your site counts visits. The counts are never added together, so Visitors shows each one on its own.",
+    };
+  }
+  const reading = series[0].value;
+  if (reading.state === "available") {
+    return { ...shared, value: formatCount(reading.value), note: null };
+  }
+  if (reading.state === "suppressed") {
+    // A real answer, written in words because the exact figure is small
+    // enough that reporting it could point at one person.
+    return { ...shared, value: reading.label, note: null };
+  }
+  return {
+    ...shared,
+    value: null,
+    note: "Your site's visit counter has not reported for this period. Open Visitors.",
+  };
+}
+
+/**
+ * Messages nobody has read yet. `null` means the message store could not be
+ * read on this request.
+ */
+export function messagesOverviewNumber(
+  unreadCount: number | null,
+): OverviewNumber {
+  return countedNumber({
+    key: "messages",
+    label: "Messages you have not read",
+    href: dashboardRoutes.messages,
+    count: unreadCount,
+    missingNote:
+      "Your message store could not be read just now. Open Messages to try again.",
+  });
+}
+
+/**
+ * People who confirmed their place on the newsletter list. An Editor sees
+ * this same count on Subscribers; no address is read to work it out.
+ */
+export function subscribersOverviewNumber(
+  confirmedCount: number | null,
+): OverviewNumber {
+  return countedNumber({
+    key: "subscribers",
+    label: "People on your list",
+    href: dashboardRoutes.subscribers,
+    count: confirmedCount,
+    missingNote:
+      "Your subscriber list could not be read just now. Open Subscribers to try again.",
+  });
+}
+
+/**
+ * How many pages the live site serves. This is read from the published site
+ * itself, which the screen already holds, so it is always available.
+ */
+export function pagesOverviewNumber(
+  publishedPageCount: number,
+): OverviewNumber {
+  return {
+    key: "pages",
+    label: "Pages on your site",
+    href: dashboardRoutes.pages,
+    value: formatCount(publishedPageCount),
+    note: null,
+  };
+}
+
+/**
+ * The address a reader types, taken from the site's own canonical origin.
+ * A blank or malformed origin gives `null`, and the site card's View site
+ * link then names the site only, rather than printing a broken address.
+ */
+export function publicSiteAddress(canonicalOrigin: string): string | null {
+  try {
+    return new URL(canonicalOrigin).host;
+  } catch {
+    return null;
+  }
+}
+
+/** One line of "Recent activity". */
+export type OverviewActivityItem = Readonly<{
+  key: string;
+  /** What happened, in the owner's words. */
+  label: string;
+  /** When it happened, already written for a reader. */
+  time: string;
+  href: string;
+}>;
+
+/**
+ * What a publish attempt means to the owner, in one short line.
+ *
+ * The long stage-by-stage words stay in `components/publication-history.tsx`,
+ * where the owner is watching a publish run. A line in a list of recent
+ * activity only has to say whether the site went live.
+ */
+function publishLabel(status: ContentPublicationStatus): string {
+  if (status === "verified-live") return "Your site was published";
+  if (status === "failed" || status === "blocked") {
+    return "A publish stopped before anything went live";
+  }
+  // The CMS lost sight of this publish; it is not known to be running.
+  if (status === "unknown") {
+    return "What happened to a publish is still being checked";
+  }
+  return "A publish is still running";
+}
+
+/** How many lines Recent activity shows. */
+export const overviewActivityLimit = 5;
+
+/**
+ * The id of the Published history heading in
+ * `components/publication-history.tsx`. A publish line in Recent activity
+ * opens the editor at that panel.
+ */
+const publishedHistoryAnchor = "publication-history-heading";
+
+/**
+ * The last few things that happened to the site: each publish attempt, and
+ * the last save of the draft.
+ *
+ * The publishes come from the same records the Published history panel
+ * reads. The save is one time for the whole draft, because a save writes
+ * every page together, and the CMS keeps that one time rather than a list.
+ * So there is at most one save line, and it is written without naming a
+ * person: a workspace can be written by an owner, an editor or a connected
+ * app, and these records do not say which.
+ */
+export function recentSiteActivity({
+  publications,
+  draftSavedAt,
+  draftRevision,
+  editorHref,
+  formatMoment,
+}: {
+  publications: ReadonlyArray<ContentPublicationHistoryEntry>;
+  /** When the draft was last written, as a stored instant. */
+  draftSavedAt: string;
+  /** 0 means the draft has never been changed, so there is no save to show. */
+  draftRevision: number;
+  /** Where a line opens: the page editor, with the draft already selected. */
+  editorHref: string;
+  formatMoment: (value: string) => string;
+}): ReadonlyArray<OverviewActivityItem> {
+  // A publish has no screen of its own. The record of every publish is the
+  // Published history panel inside the page editor, so a publish line opens
+  // the editor at that panel, and the save line opens the editor itself.
+  const publishedHistoryHref = `${editorHref}#${publishedHistoryAnchor}`;
+  const entries: ReadonlyArray<{ at: string; item: OverviewActivityItem }> = [
+    ...publications.map((entry) => ({
+      at: entry.publication.updatedAt,
+      item: {
+        key: `publication-${entry.publication.id}`,
+        label: publishLabel(entry.publication.status),
+        time: formatMoment(entry.publication.updatedAt),
+        href: publishedHistoryHref,
+      },
+    })),
+    ...(draftRevision > 0
+      ? [
+          {
+            at: draftSavedAt,
+            item: {
+              key: "draft-saved",
+              label: "Your draft was saved",
+              time: formatMoment(draftSavedAt),
+              href: editorHref,
+            },
+          },
+        ]
+      : []),
+  ];
+  return entries
+    .slice()
+    .sort((left, right) => right.at.localeCompare(left.at))
+    .slice(0, overviewActivityLimit)
+    .map((entry) => entry.item);
+}

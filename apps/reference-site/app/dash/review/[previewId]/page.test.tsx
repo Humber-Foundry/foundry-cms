@@ -133,6 +133,34 @@ describe("Draft review screen", () => {
     expect(markup).not.toContain("Approve this draft");
   });
 
+  const approvedReview = () =>
+    review({
+      decided: {
+        decision: "approved",
+        approvalId: "approval-1",
+        reason: null,
+        decidedAt: "2026-09-18T11:00:00.000Z",
+      },
+    });
+
+  it("shows a way back to Overview at the top, on every answer state (#227)", async () => {
+    const undecided = await markupFor(review());
+    expect(undecided).toContain('class="dash-back-link" href="/dash"');
+    expect(undecided).toContain("Back to Overview");
+
+    const decided = await markupFor(approvedReview());
+    expect(decided).toContain('class="dash-back-link" href="/dash"');
+  });
+
+  it("has no Done control until the draft is answered, then one that returns to Overview (#227)", async () => {
+    const undecided = await markupFor(review());
+    expect(undecided).not.toContain(">Done<");
+
+    const decided = await markupFor(approvedReview());
+    expect(decided).toContain(">Done<");
+    expect(decided).toContain('dash-button-primary" href="/dash"');
+  });
+
   it("is not found when the preview no longer matches the current draft", async () => {
     mocks.access.mockResolvedValue({ state: "authorized", membership });
     mocks.mutationToken.mockResolvedValue("token-70");

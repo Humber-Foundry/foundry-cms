@@ -7,6 +7,7 @@ import {
   summarizePublicFormSubmission,
 } from "@humber-foundry/application";
 
+import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { FormSubmissionControls } from "@/components/form-submission-controls";
 import { HelpTip } from "@/components/help-tip";
 import { formatDashboardMoment } from "@/src/dashboard-time";
@@ -55,9 +56,7 @@ export default async function FormSubmissionPage({
 
   return (
     <main className="dashboard-main">
-      <p>
-        <a href="/dash/forms">← Back to Messages</a>
-      </p>
+      <DashboardBackLink href="/dash/forms" label="Back to Messages" />
       <h1>{summary.senderName ?? "Message"}</h1>
       <p>
         {submission.formId} form ·{" "}

@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 
+import { DashboardBackLink } from "@/components/dashboard-back-link";
+import { DashboardDoneLink } from "@/components/dashboard-done-link";
 import { PreviewReviewDecision } from "@/components/preview-review-decision";
 import {
   PreviewReviewAnswer,
@@ -40,6 +42,7 @@ export default async function McpPreviewReviewPage({
 
   return (
     <main className="dashboard-main" id="main">
+      <DashboardBackLink href="/dash" label="Back to Overview" />
       <PreviewReviewSummary
         agentName={review.agentName}
         preparedAt={review.preparedAt}
@@ -61,7 +64,13 @@ export default async function McpPreviewReviewPage({
             />
           </>
         ) : (
-          <PreviewReviewAnswer decided={review.decided} />
+          <>
+            <PreviewReviewAnswer decided={review.decided} />
+            {/* The review is answered, so this screen's task is finished.
+             * Done returns the owner to Overview, where the review was
+             * listed. */}
+            <DashboardDoneLink href="/dash" />
+          </>
         )}
       </section>
     </main>
