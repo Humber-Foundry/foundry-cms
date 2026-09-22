@@ -126,6 +126,55 @@ describe("sitePhotoUsage", () => {
     ]);
   });
 
+  it("names the section for a photo held deeper inside its content", () => {
+    // A photo can sit inside a list of cards, not in the section's own image
+    // field. The line then names the section, so no use is left unnamed.
+    const definition = withSecondPage({
+      media: [],
+      sections: [
+        {
+          id: "section_about_photo",
+          type: "registered",
+          component: "photoBand",
+          props: {
+            imageSrc: "/foundry-gathering.svg",
+            imageAlt: "Alt",
+            caption: "Caption",
+            cards: [{ imageSrc: "/api/media/asset_nested" }],
+          },
+        },
+      ],
+    });
+
+    expect(sitePhotoUsage(definition).get("asset_nested")).toEqual([
+      "About — Full-width image",
+    ]);
+  });
+
+  it("names the page alone for a photo in a foundation section", () => {
+    // A foundation section has no installation name, and its type word is
+    // never shown to the owner, so the line names the page on its own.
+    const definition = withSecondPage({
+      media: [],
+      sections: [
+        {
+          id: "section_about_cta",
+          type: "callToAction",
+          variant: "banner",
+          eyebrow: "",
+          title: "Come in",
+          body: {
+            version: 1,
+            blocks: [{ type: "image", src: "/api/media/asset_cta" }],
+          },
+          action: { id: "link_cta", label: "Start", href: "#top" },
+        },
+      ] as never,
+    });
+
+    expect(sitePhotoUsage(definition).get("asset_cta")).toEqual(["About"]);
+  });
+
   it("keeps one line for a photo two definitions both use the same way", () => {
     const definition = twoPagesWithAPhotoEach();
 

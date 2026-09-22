@@ -9,10 +9,8 @@ import { MediaGallery } from "./media-gallery";
 import {
   chosenPhoto,
   chosenSiteImage,
-  photoUsageNames,
   type ChosenPhoto,
 } from "./media-gallery-item";
-import { placeNameFor } from "./media-places";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -200,13 +198,11 @@ export function MediaPicker({
   const selectedAssetItem = assets.find(
     (candidate) => candidate.assetId === selectedAsset,
   );
-  // The picker knows the places the draft holds, not the page each one is on,
-  // so its lines name the place alone.
-  const usage = new Map(
-    assets.map((asset) => [
-      asset.assetId,
-      photoUsageNames(occurrences, asset.assetId, placeNameFor),
-    ]),
+  // The picker holds the draft's photo places without the page each one is
+  // on, so a tile here says only that the site uses the photo. Photos names
+  // the page and the place.
+  const usedAssetIds = new Set(
+    occurrences.map((occurrence) => occurrence.assetId),
   );
   const selectionReady =
     selectedSiteImage !== undefined ||
@@ -253,7 +249,7 @@ export function MediaPicker({
       {assets.length > 0 || siteImages.length > 0 ? (
         <MediaGallery
           assets={assets}
-          usage={usage}
+          usedAssetIds={usedAssetIds}
           siteImages={siteImages}
           selectableSiteImages
           libraryToken={libraryToken}

@@ -7,50 +7,6 @@ export type MediaOccurrenceState = Readonly<{
   crop: MediaCrop | null;
 }>;
 
-export const fullFrameCrop: MediaCrop = Object.freeze({
-  x: 0,
-  y: 0,
-  width: 1,
-  height: 1,
-});
-
-export function cropBaseRevisionForEdit(
-  baseRevision: number | null,
-  currentRevision: number,
-): number {
-  return baseRevision ?? currentRevision;
-}
-
-export function cropForCatalogRefresh(
-  localCrop: MediaCrop,
-  baseRevision: number | null,
-  occurrences: ReadonlyArray<MediaOccurrenceState>,
-  occurrenceId: string,
-): MediaCrop {
-  return baseRevision === null
-    ? cropForOccurrence(occurrences, occurrenceId)
-    : localCrop;
-}
-
-export function mediaOccurrenceAttemptAfterFailure<Attempt>(
-  attempt: Attempt,
-  responseStatus: number | undefined,
-  responseBody: unknown,
-): Attempt | null {
-  const error =
-    typeof responseBody === "object" &&
-    responseBody !== null &&
-    "error" in responseBody
-      ? responseBody.error
-      : undefined;
-  return responseStatus === 409 &&
-    (error === "media_revision_conflict" ||
-      error === "content_revision_conflict" ||
-      error === "content_revision_stale")
-    ? null
-    : attempt;
-}
-
 export function mediaDeleteFailureMessage(
   body: unknown,
   retryAfter: string | null,
@@ -65,9 +21,11 @@ export function mediaDeleteFailureMessage(
     return `Another media change is still finishing. Retry in ${seconds} seconds.`;
   }
   if (error === "media_asset_referenced") {
-    return "This asset is still referenced by revision history and cannot be deleted.";
+    // The screen refuses a photo the site uses before it sends anything, so
+    // this is the answer when the screen's own list was out of date.
+    return "This photo could not be deleted. Your site still uses it. Open the page that shows it, change the photo there, then try again.";
   }
-  return "The asset could not be deleted. Retry the same request.";
+  return "The photo could not be deleted. Retry the same request.";
 }
 
 export function mediaAssetSelection(assetId: string) {
@@ -108,71 +66,5 @@ export function upsertMediaAsset<Asset extends Readonly<{ assetId: string }>>(
   return [
     ...assets.filter((candidate) => candidate.assetId !== asset.assetId),
     asset,
-  ];
-}
-
-export function cropForOccurrence(
-  occurrences: ReadonlyArray<
-    Readonly<{ occurrenceId: string; crop: MediaCrop | null }>
-  >,
-  occurrenceId: string,
-): MediaCrop {
-  return (
-    occurrences.find(
-      (occurrence) => occurrence.occurrenceId === occurrenceId,
-    )?.crop ?? fullFrameCrop
-  );
-}
-
-export function cropForSelectedRevision(
-  selectedOccurrenceId: string,
-  revision: Readonly<{ occurrenceId: string; crop: MediaCrop | null }>,
-) {
-  return selectedOccurrenceId === revision.occurrenceId
-    ? revision.crop ?? fullFrameCrop
-    : undefined;
-}
-
-export function mediaOccurrenceMutationsEnabled(
-  contentStale: boolean,
-  contentRevision: Readonly<{ revision: number }> | undefined,
-) {
-  return !contentStale && contentRevision !== undefined;
-}
-
-export function mergeMediaOccurrenceState(
-  workspaceOccurrences: ReadonlyArray<MediaOccurrenceState>,
-  contentOccurrences: ReadonlyArray<
-    Readonly<{
-      occurrenceId: string;
-      revision: number;
-      asset: Readonly<{ assetId: string }>;
-      crop: MediaCrop | null;
-    }>
-  >,
-): ReadonlyArray<MediaOccurrenceState> {
-  const workspaceById = new Map(
-    workspaceOccurrences.map((occurrence) => [
-      occurrence.occurrenceId,
-      occurrence,
-    ]),
-  );
-  const inherited = contentOccurrences.map(
-    (occurrence): MediaOccurrenceState =>
-      workspaceById.get(occurrence.occurrenceId) ?? {
-        occurrenceId: occurrence.occurrenceId,
-        revision: 0,
-        assetId: occurrence.asset.assetId,
-        crop: occurrence.crop,
-      },
-  );
-  const contentIds = new Set(
-    contentOccurrences.map((occurrence) => occurrence.occurrenceId),
-  );
-  return [
-    ...inherited,
-    ...workspaceOccurrences.filter(
-      (occurrence) => !contentIds.has(occurrence.occurrenceId),
-    ),
   ];
 }

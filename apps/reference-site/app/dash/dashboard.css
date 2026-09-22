@@ -3371,14 +3371,10 @@ div.media-gallery-tile-site {
   font-size: var(--dash-text-small);
 }
 
-ul.media-photo-uses {
+.media-photo-uses {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-p.media-photo-uses {
-  margin: 0;
 }
 
 .media-photo-uses,

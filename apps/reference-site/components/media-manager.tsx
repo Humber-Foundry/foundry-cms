@@ -12,7 +12,12 @@ import {
   mediaAccessRequestBody,
   parseMediaCatalogGrant,
 } from "./media-catalog-grant";
-import { mediaThumbnailUrl, photoSizeLabel } from "./media-gallery-item";
+import {
+  mediaThumbnailUrl,
+  photoSizeLabel,
+  photoUsage,
+  photoUsageBadges,
+} from "./media-gallery-item";
 import { createMediaUploadAttempt, isAcceptedPhoto } from "./media-upload";
 import {
   mediaAssetSelection,
@@ -249,22 +254,20 @@ export function MediaManager({
     deleteAttempt.current !== null &&
     !assets.some((asset) => asset.assetId === selectedAsset);
   const selectedPhoto = assets.find((asset) => asset.assetId === selectedAsset);
-  // Every place the selected photo is used. A use that no line names still
-  // counts, so the guard below never deletes a photo the site needs.
-  const selectedUses = usage?.get(selectedAsset) ?? [];
-  const selectedUsedElsewhere =
-    selectedUses.length === 0 && (usedAssetIds?.has(selectedAsset) ?? false);
+  // Where the selected photo is used. A use that no line names still counts,
+  // so the guard below never deletes a photo the site needs.
+  const selectedUse = photoUsage(selectedAsset, usage, usedAssetIds);
   const refusalMessage =
-    selectedUses.length > 0
-      ? `This photo cannot be deleted. It is used on ${selectedUses.join(", and on ")}. Change the photo ${selectedUses.length === 1 ? "there" : "in those places"} first.`
-      : "This photo cannot be deleted. It is used on your site. Change it where it is used first.";
+    selectedUse.state === "named"
+      ? `This photo cannot be deleted. It is used on ${selectedUse.lines.join("; ")}. Change the photo ${selectedUse.lines.length === 1 ? "there" : "in each place"} first.`
+      : "This photo cannot be deleted. Your site still uses it. Change it where it is used first.";
 
   async function deleteSelected() {
     if (selectedAsset === "") return;
     // The library refuses a photo the site still uses, and says where it is
     // used. The server refuses it as well; this refusal is the one the owner
     // reads.
-    if (selectedUses.length > 0 || selectedUsedElsewhere) {
+    if (selectedUse.state !== "unused") {
       setMessage(refusalMessage);
       return;
     }
@@ -363,19 +366,11 @@ export function MediaManager({
                   {selectedPhoto.width}×{selectedPhoto.height} ·{" "}
                   {photoSizeLabel(selectedPhoto.byteLength)}
                 </p>
-                {selectedUses.length > 0 ? (
-                  <ul className="media-photo-uses">
-                    {selectedUses.map((line) => (
-                      <li key={line}>Used on: {line}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="media-photo-uses">
-                    {selectedUsedElsewhere
-                      ? "Used on your site."
-                      : "Not used yet."}
-                  </p>
-                )}
+                <ul className="media-photo-uses">
+                  {photoUsageBadges(selectedUse).map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
                 <div className="media-asset-actions">
                   <button
                     className="copy-button"

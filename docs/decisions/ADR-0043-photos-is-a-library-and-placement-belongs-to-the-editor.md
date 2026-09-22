@@ -46,12 +46,19 @@ there is one line per use — `Used on: About — Top of the page` — and a pho
 used nowhere says `Not used yet`. `sitePhotoUsage` in
 `apps/reference-site/src/site-used-photos.ts` builds those lines by walking
 every page of the published definition and of the draft: each page's media
-occurrences, each registered section's image fields, and each published blog
-post. The page title and the place name stay together, so the line names both.
+occurrences, every photo a section holds however deeply, and every published
+blog post. The page title and the place name stay together, so the line names
+both. A section the installation registered is named by its own label; a
+foundation section has no such label, so its photos are named by their page
+alone, because a section type word such as `callToAction` is not the owner's
+language.
 
 **Deleting a photo the site uses is refused, and the refusal names every place
 that uses it.** The library refuses it before the request is sent, and the
-server keeps its own refusal.
+server keeps its own refusal. The screen's lines come from the page render, so
+a photo freed in the page editor is still called used until Photos is loaded
+again; the answer is a refusal too many, never a photo deleted out from under
+a page.
 
 **A photo is placed where it is seen.** Two surfaces place a photo, and only
 two: the page editor, at the photo itself, and MCP `foundry.media.place`.
@@ -69,16 +76,21 @@ because occurrence ids arrive from the server.
   surface, so a stored crop is still honoured everywhere it is drawn, and no
   screen sets one. A crop editor, if one is wanted, belongs beside the photo in
   the page editor.
-- `renderedMediaOccurrenceIds` and `requireRenderedMediaOccurrenceId` keep
-  their one remaining reader, the media route, which still serves a rendered
-  occurrence. ADR-0026's note that `media-manager.tsx` reads them is now
-  historical.
+- The media route still calls `requireRenderedMediaOccurrenceId`, which reads
+  `renderedMediaOccurrenceIds`, so both stay. ADR-0026's note that
+  `media-manager.tsx` reads that list is now historical.
+- The dashboard's crop state helpers (`cropForOccurrence`,
+  `cropForCatalogRefresh`, `cropForSelectedRevision`,
+  `cropBaseRevisionForEdit`) and the placement helpers
+  (`mergeMediaOccurrenceState`, `mediaOccurrenceAttemptAfterFailure`,
+  `mediaOccurrenceMutationsEnabled`) had no reader left, so they are deleted
+  with the screen that used them.
 - The media route's `replace` and `crop` operations are unchanged, and MCP
   `foundry.media.place` is unchanged, so an agent and the page editor keep
   working exactly as before.
-- The photo picker still shows where a photo is used, but names the place
-  alone, because the picker holds the draft's places without the page each one
-  belongs to.
+- A photo tile in the picker says only that the site uses the photo. The
+  picker holds the draft's photo places without the page each one is on, and a
+  place name with no page would name a page it cannot see.
 
 ## Alternatives considered
 

@@ -1,12 +1,14 @@
 import "server-only";
 
-import { type SiteDefinition } from "@humber-foundry/site-definition";
+import {
+  type SiteDefinition,
+  type SitePage,
+} from "@humber-foundry/site-definition";
 import {
   mediaAssetIdFromPublishedPath,
   siteDefinitionMediaAssetIds,
 } from "@humber-foundry/site-definition";
 
-import { photoUsageLabel } from "@/components/media-gallery-item";
 import { placeNameFor } from "@/components/media-places";
 import { installedPageComponentRegistry } from "@/foundry/page-components";
 
@@ -94,6 +96,19 @@ export function siteUsedAssetIds(
  */
 export type SitePhotoUsage = ReadonlyMap<string, ReadonlyArray<string>>;
 
+/**
+ * One line telling the owner where a photo is used: the page it is on and the
+ * place on that page, such as "About — Top of the page". A page whose place
+ * has no name of its own is named on its own.
+ */
+function usageLine(pageTitle: string, placeName: string): string {
+  const page = pageTitle.trim();
+  const place = placeName.trim();
+  if (page === "") return place;
+  if (place === "") return page;
+  return `${page} — ${place}`;
+}
+
 function addUse(
   into: Map<string, Set<string>>,
   assetId: string,
@@ -120,6 +135,42 @@ function collectAssetIds(value: unknown, into: Set<string>): void {
   }
 }
 
+/**
+ * What to call each photo's place inside one section. The empty key holds the
+ * section's own name, which every photo in it falls back to. A foundation
+ * section has no installation name, so its photos are named by their page
+ * alone — a section type such as "callToAction" is an internal word the owner
+ * never sees.
+ */
+function sectionPlaceNames(
+  section: SitePage["sections"][number],
+): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  if (section.type !== "registered") return names.set("", "");
+  const registration =
+    installedPageComponentRegistry.components[section.component];
+  if (registration === undefined) return names.set("", "");
+  names.set("", registration.label);
+  const imageFields = Object.entries(registration.fields).filter(
+    ([, field]) => field.control === "image",
+  );
+  for (const [key, field] of imageFields) {
+    const value = (section.props as Record<string, unknown>)[key];
+    if (typeof value !== "string") continue;
+    const assetId = mediaAssetIdFromPublishedPath(value);
+    if (assetId === null) continue;
+    // One image field per section needs no field name; more than one does, so
+    // the owner can tell which photo is which.
+    names.set(
+      assetId,
+      imageFields.length > 1
+        ? `${registration.label}: ${field.label}`
+        : registration.label,
+    );
+  }
+  return names;
+}
+
 function collectPageUses(
   definition: SiteDefinition,
   into: Map<string, Set<string>>,
@@ -130,31 +181,23 @@ function collectPageUses(
       addUse(
         into,
         occurrence.asset.assetId,
-        photoUsageLabel(page.title, placeNameFor(occurrence.occurrenceId)),
+        usageLine(page.title, placeNameFor(occurrence.occurrenceId)),
       );
     }
-    // A photo chosen for a section's image field. The place is the section's
-    // own name, because that is what the owner sees on the page.
+    // A photo chosen for a section. The place is the section's own name,
+    // because that is what the owner sees on the page.
     for (const section of page.sections) {
-      if (section.type !== "registered") continue;
-      const registration =
-        installedPageComponentRegistry.components[section.component];
-      if (registration === undefined) continue;
-      const imageFields = Object.entries(registration.fields).filter(
-        ([, field]) => field.control === "image",
-      );
-      for (const [key, field] of imageFields) {
-        const value = (section.props as Record<string, unknown>)[key];
-        if (typeof value !== "string") continue;
-        const assetId = mediaAssetIdFromPublishedPath(value);
-        if (assetId === null) continue;
-        // One image field per section needs no field name; more than one
-        // does, so the owner can tell which photo is which.
-        const placeName =
-          imageFields.length > 1
-            ? `${registration.label}: ${field.label}`
-            : registration.label;
-        addUse(into, assetId, photoUsageLabel(page.title, placeName));
+      const placeNames = sectionPlaceNames(section);
+      // Every photo the section holds, however deeply — a photo inside a list
+      // of cards counts as much as one in the section's own image field.
+      const held = new Set<string>();
+      collectAssetIds(section, held);
+      for (const assetId of held) {
+        addUse(
+          into,
+          assetId,
+          usageLine(page.title, placeNames.get(assetId) ?? placeNames.get("")!),
+        );
       }
     }
   }
@@ -173,7 +216,7 @@ function collectPostUses(
     collectAssetIds(post.seo?.shareImage, ids);
     collectAssetIds(post.body, ids);
     for (const assetId of ids) {
-      addUse(into, assetId, photoUsageLabel(post.title, "Blog post"));
+      addUse(into, assetId, usageLine(post.title, "Blog post"));
     }
   }
 }

@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 
 import type { MediaAsset } from "@humber-foundry/application";
 
-import { mediaThumbnailUrl, photoSizeLabel } from "./media-gallery-item";
+import {
+  mediaThumbnailUrl,
+  photoSizeLabel,
+  photoUsage,
+  photoUsageBadges,
+} from "./media-gallery-item";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile, SitePhotoUsage } from "../src/site-used-photos";
@@ -94,17 +99,13 @@ export function MediaGallery({
         <li className="media-gallery-deleting">{deletingMessage}</li>
       )}
       {assets.map((asset) => {
-        const usedIn = usage?.get(asset.assetId) ?? [];
-        // A photo can be used in a way no line names — inside a list of cards,
-        // for one — so the plain "used" badge is the honest answer there.
+        const used = photoUsage(asset.assetId, usage, usedAssetIds);
+        // The picker leaves a photo used nowhere unmarked: its uses do not
+        // matter while choosing one.
         const badges =
-          usedIn.length > 0
-            ? usedIn.map((line) => `Used on: ${line}`)
-            : usedAssetIds?.has(asset.assetId)
-              ? ["Used on your site"]
-              : showUnusedPhotos
-                ? ["Not used yet"]
-                : [];
+          used.state === "unused" && !showUnusedPhotos
+            ? []
+            : photoUsageBadges(used);
         return (
           <li key={asset.assetId}>
             <button
@@ -145,7 +146,7 @@ export function MediaGallery({
               {badges.map((badge) => (
                 <span
                   className={
-                    badge === "Not used yet"
+                    used.state === "unused"
                       ? "media-gallery-badge media-gallery-badge-unused"
                       : "media-gallery-badge"
                   }

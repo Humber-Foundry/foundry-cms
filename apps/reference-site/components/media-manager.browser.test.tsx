@@ -193,6 +193,7 @@ describe("photo library browser acceptance", () => {
 
     expect(deleted).toBeUndefined();
     expect(host.textContent).toContain("This photo cannot be deleted.");
+    expect(host.textContent).toContain("Change the photo in each place first.");
     expect(host.textContent).toContain("About — Top of the page");
     expect(host.textContent).toContain("Foundry Reference — Full-width image");
   });
