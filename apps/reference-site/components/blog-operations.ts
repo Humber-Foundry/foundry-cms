@@ -78,6 +78,14 @@ export function blogPostLifecycleAction(
   return null;
 }
 
+/**
+ * The name a post is shown under. A post saved with no title still needs a
+ * name: the title is the only thing an owner can read on a row or press.
+ */
+export function blogPostName(title: string): string {
+  return title.trim() === "" ? "Untitled post" : title;
+}
+
 /** How a post's state is coloured on its row. See `DashboardStateLabel`. */
 export type BlogPostStateTone = "live" | "draft" | "plain";
 
@@ -88,24 +96,30 @@ export function blogPostStanding(
 ): Readonly<{
   label: string;
   tone: BlogPostStateTone;
-  operation: "unpublish_blog_post" | "republish_blog_post" | null;
-  actionLabel: string | null;
+  /**
+   * The one lifecycle change this post can take now, with the words for it.
+   * `null` when the post is waiting on the next site publish and there is
+   * nothing to offer. The operation and its words travel together, so a
+   * screen can never draw a control with no command behind it.
+   */
+  action: Readonly<{
+    operation: "unpublish_blog_post" | "republish_blog_post";
+    label: string;
+  }> | null;
 }> {
   const operation = blogPostLifecycleAction(post, verifiedPublicPostIds);
   if (operation === "unpublish_blog_post") {
     return {
       label: "On your site",
       tone: "live",
-      operation,
-      actionLabel: "Unpublish",
+      action: { operation, label: "Unpublish" },
     };
   }
   if (operation === "republish_blog_post") {
     return {
       label: "Draft — not on your site",
       tone: "draft",
-      operation,
-      actionLabel: "Publish",
+      action: { operation, label: "Publish" },
     };
   }
   return {
@@ -114,8 +128,7 @@ export function blogPostStanding(
         ? "Goes live when you next publish the site"
         : "Comes off the site when you next publish",
     tone: "plain",
-    operation: null,
-    actionLabel: null,
+    action: null,
   };
 }
 

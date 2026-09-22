@@ -7,7 +7,7 @@ import {
   type BlogPostOperationalSummary,
   type ContentRevision,
 } from "@humber-foundry/application";
-import type { BlogPost } from "@humber-foundry/site-definition";
+import type { BlogPost, BlogPostId } from "@humber-foundry/site-definition";
 
 import { BlogCommandFeedback } from "./blog-command-feedback";
 import { blogListHref, blogPostHref } from "./blog-links";
@@ -24,7 +24,6 @@ import { BlogPostComposer } from "./blog-post-composer";
 import { DashboardStateLabel } from "./dashboard-state-label";
 import { PublishingConnectionStatus } from "./connection-status";
 import type { SiteImageTile } from "../src/site-used-photos";
-import type { BlogPostId } from "@humber-foundry/site-definition";
 import {
   sendContentRevisionAttempt,
   sendHumanMutationAttempt,
@@ -50,7 +49,8 @@ function ScheduleForm({
       <label>
         <span>Publish date and time</span>
         <small className="composer-hint">
-          In your own time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}).
+          In your own time zone (
+          {Intl.DateTimeFormat().resolvedOptions().timeZone}).
         </small>
         <input
           type="datetime-local"
@@ -60,7 +60,11 @@ function ScheduleForm({
           onChange={(event) => setLocalValue(event.target.value)}
         />
       </label>
-      <button type="submit" className="dash-button dash-button-plain" disabled={busy}>
+      <button
+        type="submit"
+        className="dash-button dash-button-plain"
+        disabled={busy}
+      >
         {busy ? "Scheduling…" : "Schedule"}
       </button>
     </form>
@@ -242,13 +246,12 @@ export function BlogPostScreen({
       )}
       {pendingRequest === null ? null : (
         <p className="composer-hint">
-          {pendingScheduleRequestAgentName ?? "An app"} asked to publish this
-          at{" "}
+          {pendingScheduleRequestAgentName ?? "An app"} asked to publish this at{" "}
           {formatLocalScheduleTime(
             pendingRequest.localDateTime,
             pendingRequest.ianaTimeZone,
           )}
-          . Use "Schedule this post" below to publish it then, or decline the
+          . Use “Schedule this post” below to publish it then, or decline the
           request on the posts list.
         </p>
       )}

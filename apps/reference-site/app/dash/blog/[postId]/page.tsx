@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { blogListHref } from "@/components/blog-links";
+import { blogPostName } from "@/components/blog-operations";
 import { BlogPostScreen } from "@/components/blog-post-screen";
 import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { DashboardPageHeader } from "@/components/dashboard-page-header";
@@ -70,7 +71,7 @@ export default async function DashboardBlogPostPage({
         label="Back to Blog"
       />
       <DashboardPageHeader
-        title={post.title === "" ? "Untitled post" : post.title}
+        title={blogPostName(post.title)}
         description="Change it, preview it privately, then publish or schedule it."
       />
       <BlogPostScreen

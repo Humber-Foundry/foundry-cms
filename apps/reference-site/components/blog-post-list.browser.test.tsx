@@ -594,6 +594,46 @@ describe("blog posts list browser acceptance", () => {
       .toBeInTheDocument();
   });
 
+  it("offers no row action while a change is on its way to the server", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
+        // A request that never answers holds the screen in the one state
+        // this test is about: a change sent, no result yet.
+        return new Promise<Response>(() => {});
+      },
+    );
+
+    renderWithPendingSchedule();
+
+    const menuName = "Actions for Tide notes";
+    await userEvent.click(page.getByRole("button", { name: menuName }));
+    await userEvent.click(
+      page.getByRole("menuitem", {
+        name: "Decline the app's publish request",
+      }),
+    );
+
+    // No second command can start on top of the first, so no row offers one.
+    await waitFor(
+      () =>
+        Array.from(
+          document.querySelectorAll<HTMLButtonElement>("button"),
+        ).find((button) => button.getAttribute("aria-label") === menuName) ===
+        undefined,
+    );
+  });
+
   it("declines the pending schedule request from its row menu", async () => {
     const submitted: Array<{ url: string; body: string }> = [];
     vi.stubGlobal(

@@ -1,3 +1,4 @@
+import { newBlogPostHref } from "@/components/blog-links";
 import { BlogPostList } from "@/components/blog-post-list";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { DashboardPageHeader } from "@/components/dashboard-page-header";
@@ -41,13 +42,15 @@ export default async function DashboardBlogPage({
   const needsFreshWorkspace =
     schemaRecovery !== undefined || dashboardWorkspace.contentStale;
 
+  // One screen, one description, whichever of the two things it shows.
+  const blogScreenDescription =
+    "Every post you have written. Open one to change it, preview it " +
+    "privately, then publish it.";
+
   if (needsFreshWorkspace) {
     return (
       <main className="dashboard-main" id="main">
-        <DashboardPageHeader
-          title="Blog"
-          description="Write posts, preview them privately, and publish when ready."
-        />
+        <DashboardPageHeader title="Blog" description={blogScreenDescription} />
         <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
@@ -59,13 +62,28 @@ export default async function DashboardBlogPage({
     );
   }
 
+  const posts = contentRevision.definition.blog.posts;
   const { summaries, archivedPosts, pendingScheduleRequestAgentNames } =
-    await loadBlogPostOperationalContext(
-      contentRevision.definition.blog.posts.map((post) => post.id),
-    );
+    await loadBlogPostOperationalContext(posts.map((post) => post.id));
 
   return (
     <main className="dashboard-main" id="main">
+      <DashboardPageHeader
+        title="Blog"
+        description={blogScreenDescription}
+        // The empty state offers the same control, so the screen never shows
+        // two "New post" buttons.
+        action={
+          posts.length === 0 ? undefined : (
+            <a
+              className="dash-button dash-button-primary"
+              href={newBlogPostHref(dashboardWorkspace.workspaceId)}
+            >
+              New post
+            </a>
+          )
+        }
+      />
       <BlogPostList
         revision={contentRevision}
         csrfToken={mutationToken}

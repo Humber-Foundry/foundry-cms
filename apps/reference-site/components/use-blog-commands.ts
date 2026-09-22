@@ -43,14 +43,16 @@ export function useBlogCommands({
    * Sends one post edit to the content-revisions route.
    *
    * A request whose result never arrived is kept as `pendingAttempt` and sent
-   * again unchanged, so a retry can never write the change twice.
+   * again unchanged, so a retry can never write the change twice. Only the
+   * same change reuses it: a different change builds its own attempt, or the
+   * first change would be written again under the second one's name.
    */
   async function sendRevisionCommand(body: unknown, operation: string) {
+    const written = JSON.stringify(body);
     const attempt =
-      pendingAttempt ?? {
-        body: JSON.stringify(body),
-        idempotencyKey: blogMutationKey(operation),
-      };
+      pendingAttempt !== null && pendingAttempt.body === written
+        ? pendingAttempt
+        : { body: written, idempotencyKey: blogMutationKey(operation) };
     setPendingAttempt(attempt);
     setBusy(true);
     setMessage("");
