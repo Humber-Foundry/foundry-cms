@@ -196,6 +196,19 @@ export function blogPostExecutionFailureNote(
     : "First publication failed; it is not live yet.";
 }
 
+/** What a screen says when a preview could not be opened. */
+export const previewNotOpenedMessage =
+  "The preview could not be opened. Try again.";
+
+/** What a screen says when a change's result never arrived. */
+export const changeNotConfirmedMessage =
+  "The change could not be confirmed. Check the post, then try again.";
+
+/** The one sentence the Blog screen reads under its name. */
+export const blogScreenDescription =
+  "Every post you have written. Open one to change it, preview it privately, " +
+  "then publish it.";
+
 export const scheduleNeedsApprovalMessage =
   "Scheduling needs a preview of this exact version. Preview this post, " +
   "then schedule it. Editing the post after that clears its schedule, so " +
@@ -332,7 +345,7 @@ export async function openArchiveWithdrawalPreview({
   if (!opened.response.ok || previewUrl === null) {
     return {
       outcome: "failed",
-      message: "The preview could not be opened. Try again.",
+      message: previewNotOpenedMessage,
       mutationToken: opened.mutationToken,
     };
   }

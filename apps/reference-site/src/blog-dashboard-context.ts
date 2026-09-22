@@ -20,15 +20,15 @@ import { loadHumanAccessEnvironment } from "./human-access-environment";
  * The posts list and one post's own screen both need this (#230), so the read
  * lives here rather than in either route.
  */
-export type BlogPostStanding = Readonly<{
+export type BlogPostSummaries = Readonly<{
   summaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
   pendingScheduleRequestAgentNames: ReadonlyMap<BlogPostId, string>;
 }>;
 
-export type BlogPostOperationalContext = BlogPostStanding &
+export type BlogPostOperationalContext = BlogPostSummaries &
   Readonly<{ archivedPosts: ReadonlyArray<ArchivedBlogPostSummary> }>;
 
-const noBlogPostStanding: BlogPostStanding = {
+const noBlogPostSummaries: BlogPostSummaries = {
   summaries: new Map(),
   pendingScheduleRequestAgentNames: new Map(),
 };
@@ -44,9 +44,9 @@ const noBlogPostStanding: BlogPostStanding = {
  * not configured (for example, local development without a database), so a
  * missing schedule/archive backend never blocks the ordinary post list.
  */
-export async function loadBlogPostStanding(
+export async function loadBlogPostSummaries(
   postIds: ReadonlyArray<BlogPostId>,
-): Promise<BlogPostStanding> {
+): Promise<BlogPostSummaries> {
   try {
     const environment = await loadHumanAccessEnvironment();
     const siteId = installedSiteDefinition.site.id;
@@ -71,29 +71,29 @@ export async function loadBlogPostStanding(
       ),
     };
   } catch {
-    return noBlogPostStanding;
+    return noBlogPostSummaries;
   }
 }
 
 /**
  * The same read, plus every archived post. Only the posts list draws archived
- * posts, so one post's own screen uses `loadBlogPostStanding` and never asks
+ * posts, so one post's own screen uses `loadBlogPostSummaries` and never asks
  * the store for a list it would throw away.
  */
 export async function loadBlogPostOperationalContext(
   postIds: ReadonlyArray<BlogPostId>,
 ): Promise<BlogPostOperationalContext> {
-  const standing = await loadBlogPostStanding(postIds);
+  const summaries = await loadBlogPostSummaries(postIds);
   try {
     const environment = await loadHumanAccessEnvironment();
     const application = await loadBlogPostOperationsApplication(environment);
     return {
-      ...standing,
+      ...summaries,
       archivedPosts: await application.queries.listArchivedPosts(
         installedSiteDefinition.site.id,
       ),
     };
   } catch {
-    return { ...standing, archivedPosts: [] };
+    return { ...summaries, archivedPosts: [] };
   }
 }

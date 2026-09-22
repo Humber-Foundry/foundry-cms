@@ -6,7 +6,7 @@ import { BlogPostScreen } from "@/components/blog-post-screen";
 import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { verifiedPublicBlogPostIds } from "@/components/published-blog-posts";
-import { loadBlogPostStanding } from "@/src/blog-dashboard-context";
+import { loadBlogPostSummaries } from "@/src/blog-dashboard-context";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -62,7 +62,7 @@ export default async function DashboardBlogPostPage({
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
   const { summaries, pendingScheduleRequestAgentNames } =
-    await loadBlogPostStanding([post.id]);
+    await loadBlogPostSummaries([post.id]);
 
   return (
     <main className="dashboard-main" id="main">

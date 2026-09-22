@@ -509,7 +509,7 @@ describe("blog posts list browser acceptance", () => {
       )
       .toBeInTheDocument();
     const publishLink = document.querySelector<HTMLAnchorElement>(
-      'a[href="/dash/pages"]',
+      `a[href="/dash/pages?workspace=${encodeURIComponent(workspaceId)}"]`,
     );
     expect(publishLink?.textContent).toBe("Publish the site");
     // The button sits in its own row, never inside the sentence's <p>.

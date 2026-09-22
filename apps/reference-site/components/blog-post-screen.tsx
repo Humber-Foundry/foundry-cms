@@ -18,6 +18,7 @@ import {
   blogPostScheduleStanding,
   blogPostStanding,
   formatLocalScheduleTime,
+  previewNotOpenedMessage,
   scheduleNeedsApprovalMessage,
 } from "./blog-operations";
 import { BlogPostComposer } from "./blog-post-composer";
@@ -124,6 +125,7 @@ export function BlogPostScreen({
   async function openPostPreview() {
     const popup = window.open("", "_blank");
     if (popup !== null) popup.opener = null;
+    commands.setBusy(true);
     commands.setMessage("");
     try {
       const result = await sendContentRevisionAttempt({
@@ -156,7 +158,9 @@ export function BlogPostScreen({
       }
     } catch {
       popup?.close();
-      commands.setMessage("The preview could not be opened. Try again.");
+      commands.setMessage(previewNotOpenedMessage);
+    } finally {
+      commands.setBusy(false);
     }
   }
 
@@ -200,7 +204,15 @@ export function BlogPostScreen({
       return;
     }
     commands.setMessage("");
-    const approvalId = await approveCurrentRevisionForScheduling();
+    // The approval is its own request. Hold the screen while it is open, or
+    // a second press sends a second approval nothing collapses.
+    commands.setBusy(true);
+    let approvalId: string | null;
+    try {
+      approvalId = await approveCurrentRevisionForScheduling();
+    } finally {
+      commands.setBusy(false);
+    }
     if (approvalId === null) {
       commands.setMessage(scheduleNeedsApprovalMessage);
       return;

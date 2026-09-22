@@ -11,6 +11,7 @@ import {
   blogMutationKey,
   blogOperationErrorCode,
   blogOperationErrorMessage,
+  changeNotConfirmedMessage,
 } from "./blog-operations";
 
 /**
@@ -114,9 +115,7 @@ export function useBlogCommands({
       }
       window.location.assign(returnTo);
     } catch {
-      setMessage(
-        "The change could not be confirmed. Check the post, then try again.",
-      );
+      setMessage(changeNotConfirmedMessage);
     } finally {
       setBusy(false);
     }
@@ -124,6 +123,13 @@ export function useBlogCommands({
 
   return {
     busy,
+    /**
+     * For a step that does not go through this hook — opening a preview, or
+     * the approval a schedule needs first. Hold the screen while the request
+     * is open, or a second press sends a second write under a new key, and
+     * nothing collapses the two.
+     */
+    setBusy,
     message,
     setMessage,
     mutationToken,
