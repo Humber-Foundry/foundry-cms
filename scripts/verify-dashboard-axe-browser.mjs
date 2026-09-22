@@ -81,6 +81,7 @@ const destinations = [
   ["Design", "/dash/design"],
   ["Messages", "/dash/forms"],
   ["Newsletter", "/dash/campaigns"],
+  ["New email", "/dash/campaigns/new"],
   ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
@@ -133,6 +134,42 @@ async function checkDestination(page, origin, name, href) {
       `  ${name}: ${results.violations.length} lower-impact axe finding(s), not failing this check.\n`,
     );
   }
+}
+
+/**
+ * Opens one saved email's screen and runs the same axe check there.
+ *
+ * The preview card and the four sending steps used to render on
+ * /dash/campaigns, which this sweep visits. Since #237 they are on one email's
+ * own screen, which needs an email to open, so this writes one through the
+ * writing box the first time and opens it from the list after that.
+ */
+async function checkCampaignScreen(page, origin) {
+  await page.goto(`${origin}/dash/campaigns`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  if ((await page.locator(".dash-row").count()) === 0) {
+    await page.getByRole("button", { name: "New email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns\/new/u, { timeout: 20_000 });
+    const composer = page.locator("form.composer");
+    await composer.waitFor({ state: "visible", timeout: 20_000 });
+    await composer.locator('input[name="subject"]').fill("News from the harbour");
+    await composer
+      .locator('textarea[name="previewText"]')
+      .fill("What changed at the harbour this month.");
+    await composer.locator('input[name="callToActionLabel"]').fill("Read more");
+    await composer
+      .locator('input[name="callToActionHref"]')
+      .fill("https://example.com/read");
+    await composer
+      .locator(".rich-text-editor [contenteditable]")
+      .fill("The new pontoon is finished and the winter berths are open.");
+    await page.getByRole("button", { name: "Save email" }).click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/campaigns(\?|$)/u, { timeout: 30_000 });
+  }
+  const row = page.locator(".dash-row").first();
+  await row.waitFor({ timeout: 20_000 });
+  const href = await row.locator("a.dash-row-link").getAttribute("href");
+  await checkDestination(page, origin, "One email", href);
 }
 
 async function main() {
@@ -200,6 +237,7 @@ async function main() {
     for (const [name, href] of destinations) {
       await checkDestination(page, origin, name, href);
     }
+    await checkCampaignScreen(page, origin);
     await context.close();
 
     process.stdout.write(
