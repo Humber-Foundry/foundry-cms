@@ -1,0 +1,485 @@
+"use client";
+
+import { useState } from "react";
+
+import type {
+  ArchivedBlogPostSummary,
+  BlogPostOperationalSummary,
+  ContentRevision,
+} from "@humber-foundry/application";
+import type { BlogPostId } from "@humber-foundry/site-definition";
+
+import { blogListHref, blogPostHref, newBlogPostHref } from "./blog-links";
+import {
+  blogHasPendingSitePublish,
+  blogPostExecutionFailureNote,
+  blogPostScheduleStanding,
+  blogPostStanding,
+  confirmArchiveWithdrawal,
+  formatLocalScheduleTime,
+  openArchiveWithdrawalPreview,
+  type ArchiveWithdrawalLocation,
+} from "./blog-operations";
+import { PublishingConnectionStatus } from "./connection-status";
+import {
+  DashboardActionMenu,
+  type DashboardAction,
+} from "./dashboard-action-menu";
+import { DashboardEmptyState } from "./dashboard-empty-state";
+import { DashboardList, DashboardListRow } from "./dashboard-list";
+import { DashboardPageHeader } from "./dashboard-page-header";
+import { DashboardStateLabel } from "./dashboard-state-label";
+import { formatDashboardMoment } from "../src/dashboard-time";
+import { useBlogCommands } from "./use-blog-commands";
+
+/**
+ * Every post this site holds, newest work first.
+ *
+ * This is where Blog opens, even on a site with no posts (#230). Before, the
+ * writing box opened by itself on an empty site and hid the list, the "New
+ * post" control and the per-post preview, so a site owner never saw that they
+ * were there. Writing one post now lives on its own screen; this one lists
+ * what exists and offers the way in.
+ *
+ * Every row action goes through the row's "…" menu. Which actions a row
+ * carries depends on where that post stands — a post with no schedule has
+ * nothing to cancel — so the menus are not all the same length. A control the
+ * owner cannot use is left out rather than shown turned off.
+ */
+export function BlogPostList({
+  revision,
+  csrfToken,
+  verifiedPublicPostIds,
+  postSummaries,
+  archivedPosts,
+  pendingScheduleRequestAgentNames,
+}: {
+  revision: ContentRevision;
+  csrfToken: string;
+  verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
+  postSummaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
+  archivedPosts: ReadonlyArray<ArchivedBlogPostSummary>;
+  /**
+   * The app's own name for each post with a pending schedule request,
+   * keyed by post id. A post missing from this map still shows the request
+   * with the plain word "An app" — see CONTEXT.md "App / Connected app".
+   */
+  pendingScheduleRequestAgentNames: ReadonlyMap<BlogPostId, string>;
+}) {
+  const commands = useBlogCommands({
+    csrfToken,
+    returnTo: blogListHref(revision.workspaceId),
+  });
+  // The exact withdrawal revision (a separate workspace from `revision`,
+  // one per stalled archive) this browser session has opened a preview
+  // for, keyed by post ID. Confirming a stalled archive asserts the same
+  // "a human inspected the preview" claim scheduling does, so it is only
+  // enabled once this session actually opened that withdrawal's preview.
+  const [withdrawalPreviews, setWithdrawalPreviews] = useState<
+    ReadonlyMap<string, ArchiveWithdrawalLocation>
+  >(new Map());
+
+  const posts = revision.definition.blog.posts;
+  const verifiedPublicPosts = new Set(verifiedPublicPostIds);
+  const sitePublishPending = blogHasPendingSitePublish(
+    posts,
+    verifiedPublicPosts,
+  );
+  const draftSaved = formatDashboardMoment(revision.createdAt);
+
+  /**
+   * Opens the exact preview of a stalled archive's withdrawal revision —
+   * the site without this post — in a new tab, so a person can actually
+   * look at it before confirming. Records the previewed withdrawal so
+   * "Confirm and continue archiving" only enables for this exact one.
+   */
+  async function previewArchiveWithdrawal(archived: ArchivedBlogPostSummary) {
+    if (archived.archiveRequestId === null) return;
+    const popup = window.open("", "_blank");
+    if (popup !== null) popup.opener = null;
+    commands.setMessage("");
+    try {
+      const result = await openArchiveWithdrawalPreview({
+        postId: archived.postId,
+        archiveRequestId: archived.archiveRequestId,
+        mutationToken: commands.mutationToken,
+      });
+      commands.setMutationToken(result.mutationToken);
+      if (result.outcome === "failed") {
+        popup?.close();
+        commands.setMessage(result.message);
+        return;
+      }
+      setWithdrawalPreviews((previous) => {
+        const next = new Map(previous);
+        next.set(archived.postId, result.withdrawal);
+        return next;
+      });
+      if (popup === null) {
+        window.open(result.previewUrl, "_blank", "noopener,noreferrer");
+      } else {
+        popup.location.href = result.previewUrl;
+      }
+    } catch {
+      popup?.close();
+      commands.setMessage("The preview could not be opened. Try again.");
+    }
+  }
+
+  /**
+   * Confirms and continues a stalled archive's withdrawal. Only meaningful
+   * once this session has previewed that exact withdrawal — the button
+   * that calls this is disabled until then. Loads the list again on success,
+   * exactly like every other command here, so the archived posts always show
+   * the server's current state.
+   */
+  async function confirmContinueArchive(archived: ArchivedBlogPostSummary) {
+    if (archived.archiveRequestId === null) return;
+    const withdrawal = withdrawalPreviews.get(archived.postId);
+    if (withdrawal === undefined) return;
+    commands.setMessage("");
+    try {
+      const result = await confirmArchiveWithdrawal({
+        postId: archived.postId,
+        archiveRequestId: archived.archiveRequestId,
+        withdrawal,
+        mutationToken: commands.mutationToken,
+      });
+      commands.setMutationToken(result.mutationToken);
+      if (result.outcome === "failed") {
+        commands.setMessage(result.message);
+        return;
+      }
+      window.location.assign(blogListHref(revision.workspaceId));
+    } catch {
+      commands.setMessage(
+        "The change could not be confirmed. Check the post, then try again.",
+      );
+    }
+  }
+
+  const newPostButton = (
+    <a
+      className="dash-button dash-button-primary"
+      href={newBlogPostHref(revision.workspaceId)}
+    >
+      New post
+    </a>
+  );
+
+  return (
+    <>
+      <DashboardPageHeader
+        title="Blog"
+        description="Every post you have written. Open one to change it, preview it privately, then publish it."
+        // The empty state below offers the same control, so the screen never
+        // shows two "New post" buttons.
+        action={posts.length === 0 ? undefined : newPostButton}
+      />
+      <section aria-label="Posts">
+        {sitePublishPending ? (
+          <>
+            <p className="composer-hint">
+              A post here is marked for the next site publish and is not live
+              until then.
+            </p>
+            <div className="panel-actions">
+              <a href="/dash/pages" className="dash-button dash-button-primary">
+                Publish the site
+              </a>
+            </div>
+          </>
+        ) : null}
+        <PublishingConnectionStatus />
+        {posts.length === 0 ? (
+          <DashboardEmptyState title="No posts yet" action={newPostButton}>
+            Write your first post. It stays a private draft until you publish
+            it.
+          </DashboardEmptyState>
+        ) : (
+          <>
+            <DashboardList label="Your posts">
+              {posts.map((post) => {
+                const standing = blogPostStanding(post, verifiedPublicPosts);
+                const summary = postSummaries.get(post.id);
+                const scheduleStanding = blogPostScheduleStanding(summary);
+                const executionFailure = blogPostExecutionFailureNote(summary);
+                const pendingRequest = summary?.pendingScheduleProposal ?? null;
+                const pendingRequestAgentName =
+                  pendingScheduleRequestAgentNames.get(post.id) ?? "An app";
+                const actions: DashboardAction[] = [];
+                if (pendingRequest !== null) {
+                  actions.push({
+                    id: "decline",
+                    label: "Decline the app's publish request",
+                    onSelect: () => {
+                      void commands.sendBlogOperation(
+                        {
+                          operation: "decline_schedule_proposal",
+                          postId: post.id,
+                          proposalId: pendingRequest.id,
+                        },
+                        "decline-blog-post-schedule-proposal",
+                      );
+                    },
+                  });
+                }
+                if (standing.operation !== null) {
+                  const operation = standing.operation;
+                  actions.push({
+                    id: operation,
+                    label: standing.actionLabel!,
+                    onSelect: () => {
+                      void commands.sendRevisionCommand(
+                        {
+                          operation,
+                          workspaceId: revision.workspaceId,
+                          schemaVersion: revision.definition.schemaVersion,
+                          baseRevision: revision.revision,
+                          postId: post.id,
+                        },
+                        operation,
+                      );
+                    },
+                  });
+                }
+                if (summary?.activeSchedule != null) {
+                  const scheduleId = summary.activeSchedule.id;
+                  actions.push({
+                    id: "cancel-schedule",
+                    label: "Cancel schedule",
+                    onSelect: () => {
+                      void commands.sendBlogOperation(
+                        {
+                          operation: "cancel_schedule",
+                          postId: post.id,
+                          scheduleId,
+                        },
+                        "cancel-blog-post-schedule",
+                      );
+                    },
+                  });
+                }
+                if (
+                  executionFailure !== null &&
+                  summary?.latestExecution != null
+                ) {
+                  const executionId = summary.latestExecution.executionId;
+                  actions.push({
+                    id: "retry",
+                    label: "Try publishing again",
+                    onSelect: () => {
+                      void commands.sendBlogOperation(
+                        {
+                          operation: "retry_execution",
+                          postId: post.id,
+                          executionId,
+                        },
+                        "retry-blog-post-execution",
+                      );
+                    },
+                  });
+                }
+                if (summary !== undefined) {
+                  const postRevisionId = summary.postRevisionId;
+                  actions.push({
+                    id: "archive",
+                    label: "Archive",
+                    tone: "destructive",
+                    onSelect: () => {
+                      const liveNotice = standing.label === "On your site"
+                        ? " This post is on the site now; archiving takes it off the site first."
+                        : "";
+                      if (
+                        !window.confirm(
+                          `Archive "${post.title}"?${liveNotice} It moves to Archived posts and can be restored as a draft later.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      void commands.sendBlogOperation(
+                        {
+                          operation: "archive",
+                          postId: post.id,
+                          selectedPostRevisionId: postRevisionId,
+                        },
+                        "archive-blog-post",
+                      );
+                    },
+                  });
+                }
+                const noteParts = [
+                  scheduleStanding.line ?? `Draft saved ${draftSaved}`,
+                  executionFailure,
+                  pendingRequest === null
+                    ? null
+                    : `${pendingRequestAgentName} asked to publish this at ${formatLocalScheduleTime(
+                        pendingRequest.localDateTime,
+                        pendingRequest.ianaTimeZone,
+                      )}`,
+                ].filter((part): part is string => part !== null);
+                return (
+                  <DashboardListRow
+                    key={post.id}
+                    href={blogPostHref(post.id, revision.workspaceId)}
+                    title={post.title}
+                    note={noteParts.join(" · ")}
+                    state={
+                      <DashboardStateLabel tone={standing.tone}>
+                        {standing.label}
+                      </DashboardStateLabel>
+                    }
+                    actions={
+                      actions.length === 0 ? undefined : (
+                        <DashboardActionMenu
+                          label={`Actions for ${post.title}`}
+                          actions={actions}
+                        />
+                      )
+                    }
+                  />
+                );
+              })}
+            </DashboardList>
+            {/*
+              The CMS holds one save time for the whole draft, not one per
+              post: a save writes every post together. Pages says the same of
+              its own rows (#229). Saying so here keeps the date on each row
+              from reading as that post's own.
+            */}
+            <p className="dash-list-note">
+              You last saved this draft on {draftSaved}. A save writes every
+              post together, so the CMS holds no separate time for one post.
+            </p>
+          </>
+        )}
+        {archivedPosts.length === 0 ? null : (
+          <section aria-labelledby="archived-blog-posts-heading">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2 id="archived-blog-posts-heading">Archived posts</h2>
+                <p>
+                  Archived posts are off the site. Restore one to bring it back
+                  as a new draft.
+                </p>
+              </div>
+            </div>
+            <ul className="post-list">
+              {archivedPosts.map((archived) => (
+                <li key={archived.postId}>
+                  <div className="post-list-summary">
+                    <strong>
+                      {archived.title === "" ? "Untitled post" : archived.title}
+                    </strong>
+                    <span>
+                      {archived.collectionState === "archiving"
+                        ? "Archiving — coming off the site"
+                        : "Archived"}
+                    </span>
+                  </div>
+                  {archived.collectionState === "archiving" ? (
+                    <p className="composer-hint">
+                      Archive pending; the post remains live until this
+                      finishes. This can take a few minutes. Preview the site
+                      without this post, then confirm to finish taking it off
+                      the site.
+                    </p>
+                  ) : null}
+                  {archived.collectionState === "archiving" &&
+                  withdrawalPreviews.get(archived.postId) === undefined ? (
+                    <p className="composer-hint">
+                      Preview the site without this post before you can
+                      confirm. This shows what visitors will see once the
+                      post is fully off the site.
+                    </p>
+                  ) : null}
+                  <div className="post-list-actions">
+                    {archived.collectionState === "archiving" &&
+                    archived.archiveRequestId !== null ? (
+                      <>
+                        <button
+                          type="button"
+                          className="dash-button dash-button-plain"
+                          disabled={commands.busy}
+                          onClick={() => {
+                            void previewArchiveWithdrawal(archived);
+                          }}
+                        >
+                          Preview the site without this post ↗
+                        </button>
+                        <button
+                          type="button"
+                          className="dash-button dash-button-plain"
+                          disabled={
+                            commands.busy ||
+                            withdrawalPreviews.get(archived.postId) ===
+                              undefined
+                          }
+                          onClick={() => {
+                            void confirmContinueArchive(archived);
+                          }}
+                        >
+                          Confirm and continue archiving
+                        </button>
+                        <button
+                          type="button"
+                          className="dash-button dash-button-plain"
+                          disabled={commands.busy}
+                          onClick={() => {
+                            void commands.sendBlogOperation(
+                              {
+                                operation: "recover_archive_withdrawal_access",
+                                postId: archived.postId,
+                                archiveRequestId: archived.archiveRequestId,
+                              },
+                              "recover-archive-withdrawal-access",
+                            );
+                          }}
+                        >
+                          Recover access
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="dash-button dash-button-plain"
+                      disabled={
+                        commands.busy ||
+                        archived.collectionState !== "archived"
+                      }
+                      onClick={() => {
+                        void commands.sendBlogOperation(
+                          {
+                            operation: "restore",
+                            postId: archived.postId,
+                            selectedPostRevisionId: archived.postRevisionId,
+                          },
+                          "restore-blog-post",
+                        );
+                      }}
+                    >
+                      Restore as draft
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {commands.pendingAttempt === null ? null : (
+          <button
+            type="button"
+            className="dash-button dash-button-plain"
+            disabled={commands.busy}
+            onClick={() => commands.retryPendingAttempt()}
+          >
+            Retry the last change
+          </button>
+        )}
+        {commands.message === "" ? null : (
+          <p role="alert">{commands.message}</p>
+        )}
+      </section>
+    </>
+  );
+}

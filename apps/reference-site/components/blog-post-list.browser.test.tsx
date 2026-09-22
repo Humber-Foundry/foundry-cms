@@ -19,7 +19,7 @@ import {
   type BlogPost,
 } from "@humber-foundry/site-definition";
 
-import { BlogPostControls } from "./blog-post-controls";
+import { BlogPostList } from "./blog-post-list";
 
 const workspaceId = createContentWorkspaceId("workspace_blog_dashboard");
 
@@ -134,7 +134,7 @@ function confirmButton(): HTMLButtonElement | undefined {
   ).find((button) => button.textContent === "Confirm and continue archiving");
 }
 
-describe("blog post controls browser acceptance", () => {
+describe("blog posts list browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
   afterEach(() => {
@@ -149,10 +149,9 @@ describe("blog post controls browser acceptance", () => {
     root = createRoot(host);
     flushSync(() => {
       root!.render(
-        createElement(BlogPostControls, {
+        createElement(BlogPostList, {
           revision,
           csrfToken: "csrf-token",
-          siteImages: [],
           verifiedPublicPostIds: [],
           postSummaries: new Map(),
           archivedPosts,
@@ -457,7 +456,7 @@ describe("blog post controls browser acceptance", () => {
     root = createRoot(host);
     flushSync(() => {
       root!.render(
-        createElement(BlogPostControls, {
+        createElement(BlogPostList, {
           revision: {
             ...revision,
             definition: {
@@ -469,7 +468,6 @@ describe("blog post controls browser acceptance", () => {
             },
           },
           csrfToken: "csrf-token",
-          siteImages: [],
           verifiedPublicPostIds: [],
           postSummaries: new Map([[pendingPostId, pendingScheduleSummary()]]),
           archivedPosts: [],
@@ -516,6 +514,8 @@ describe("blog post controls browser acceptance", () => {
     // The button sits in its own row, never inside the sentence's <p>.
     expect(publishLink?.closest("p")).toBeNull();
 
+    // The request still marks its post in the list (#219), now on the row's
+    // own supporting line.
     await expect
       .element(
         page.getByText(
@@ -523,20 +523,77 @@ describe("blog post controls browser acceptance", () => {
         ),
       )
       .toBeInTheDocument();
-    const declineButton = Array.from(
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for Tide notes" }),
+    );
+    const declineItem = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent === "Decline");
-    expect(declineButton).toBeDefined();
-    // The Decline button sits in the post's action row next to Edit and
-    // Preview, never inside the sentence's <p>.
-    expect(declineButton!.closest("p")).toBeNull();
-    expect(declineButton!.closest(".post-list-actions")).not.toBeNull();
-    // No paragraph anywhere in the Blog list carries a button as a child —
-    // the owner's rule for every screen this ticket covers.
-    expect(document.querySelectorAll("p button")).toHaveLength(0);
+    ).find(
+      (button) => button.textContent === "Decline the app's publish request",
+    );
+    expect(declineItem).toBeDefined();
+    // The Decline item sits in the row's action menu, never inside a sentence.
+    expect(declineItem!.closest("p")).toBeNull();
+    expect(declineItem!.closest(".dash-action-menu")).not.toBeNull();
+    // No paragraph this list writes carries a button as a child — the
+    // owner's rule for every screen this ticket covers. The shared
+    // "publishing is connected" sentence holds its own help button; that is
+    // `ConnectionStatus`'s own shape, not one of this list's controls.
+    const nestedButtons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("p button"),
+    ).filter((button) => button.closest("p.connection-status") === null);
+    expect(nestedButtons).toHaveLength(0);
   });
 
-  it("declines the pending schedule request from its action-row button", async () => {
+  it("shows the empty state and its New post link on a site with no posts", async () => {
+    render([]);
+
+    await expect
+      .element(page.getByText("No posts yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Write your first post. It stays a private draft until you publish it.",
+        ),
+      )
+      .toBeInTheDocument();
+    // The writing box is its own screen now, so none of its boxes is here.
+    expect(document.querySelector('input[name="title"]')).toBeNull();
+    const newPostLinks = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("a"),
+    ).filter((link) => link.textContent === "New post");
+    expect(newPostLinks).toHaveLength(1);
+    expect(newPostLinks[0]!.getAttribute("href")).toBe(
+      `/dash/blog/new?workspace=${encodeURIComponent(workspaceId)}`,
+    );
+  });
+
+  it("shows one row per post, with its state and date, that opens that post", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({}));
+
+    renderWithPendingSchedule();
+
+    const row = document.querySelector<HTMLAnchorElement>("a.dash-row-link");
+    expect(row?.getAttribute("href")).toBe(
+      `/dash/blog/${pendingPostId}?workspace=${encodeURIComponent(workspaceId)}`,
+    );
+    expect(
+      row?.querySelector(".dash-row-title")?.textContent,
+    ).toBe("Tide notes");
+    expect(row?.querySelector(".dash-row-note")?.textContent).toContain(
+      "Draft saved",
+    );
+    expect(
+      document.querySelector(".dash-row-state")?.textContent,
+    ).toBe("Goes live when you next publish the site");
+    // The one save time the CMS holds is named for what it is.
+    await expect
+      .element(page.getByText(/You last saved this draft on/u))
+      .toBeInTheDocument();
+  });
+
+  it("declines the pending schedule request from its row menu", async () => {
     const submitted: Array<{ url: string; body: string }> = [];
     vi.stubGlobal(
       "fetch",
@@ -564,7 +621,14 @@ describe("blog post controls browser acceptance", () => {
 
     renderWithPendingSchedule();
 
-    await userEvent.click(page.getByRole("button", { name: "Decline" }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for Tide notes" }),
+    );
+    await userEvent.click(
+      page.getByRole("menuitem", {
+        name: "Decline the app's publish request",
+      }),
+    );
 
     await waitFor(() => submitted.length > 0);
     expect(submitted[0]!.url).toBe("/api/foundry-cms/blog-operations");

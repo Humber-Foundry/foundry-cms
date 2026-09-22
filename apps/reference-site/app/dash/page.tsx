@@ -1,3 +1,4 @@
+import { blogPostHref } from "@/components/blog-links";
 import { campaignHref } from "@/components/campaign-links";
 import { formatLocalScheduleTime } from "@/components/schedule-time-format";
 import { AttentionList } from "@/components/attention-list";
@@ -205,9 +206,12 @@ export default async function DashboardOverviewPage({
               })),
               ...pendingScheduleRequests.map((request) => ({
                 key: `schedule-${request.postId}`,
-                href: `/dash/blog?workspace=${encodeURIComponent(
+                // One post has its own screen since #230, so the item opens
+                // that post rather than an anchor on the list.
+                href: blogPostHref(
+                  request.postId,
                   dashboardWorkspace.workspaceId,
-                )}#blog-post-${encodeURIComponent(request.postId)}`,
+                ),
                 label: `${request.agentName} asked to publish "${request.postTitle}" at ${request.requestedTime}`,
               })),
               ...pendingCampaignRequests.map((request) => ({

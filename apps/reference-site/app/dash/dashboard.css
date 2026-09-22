@@ -1368,6 +1368,34 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Blog screens ------------------------------------------------------------
+ *
+ * Blog opens on the posts list, and one post is its own screen (#230). */
+
+/* The sentence under a list that explains what the list's rows say. */
+.dash-list-note {
+  margin: var(--dash-space-4) 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Where one post stands, and the preview of this exact draft, on one line.
+ * They wrap onto separate lines on a phone, where the row is too narrow to
+ * keep 1rem between the words and the button. */
+.dash-post-standing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dash-space-2) var(--dash-space-4);
+  margin-bottom: var(--dash-space-4);
+}
+
+/* The schedule form, or its "needs a preview first" note, sits between where
+ * the post stands and the writing box. */
+.dash-post-schedule {
+  margin-block: var(--dash-space-4);
+}
+
 .campaign-from-post {
   display: flex;
   flex-wrap: wrap;

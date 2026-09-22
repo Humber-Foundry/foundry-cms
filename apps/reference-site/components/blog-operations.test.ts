@@ -15,7 +15,7 @@ import {
   confirmArchiveWithdrawal,
   formatLocalScheduleTime,
   openArchiveWithdrawalPreview,
-} from "./blog-post-controls";
+} from "./blog-operations";
 
 describe("blog post lifecycle controls", () => {
   const postId = createBlogPostId(

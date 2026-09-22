@@ -169,9 +169,10 @@ async function main() {
       await new Promise((settle) => setTimeout(settle, 200));
     }
 
-    // Reload the blog composer. Its picker's site photos come from the saved
-    // draft, so the built-in image the page now uses is offered here.
-    await page.goto(`${origin}/dash/blog?workspace=${workspace}`);
+    // Open the writing box for a new post, on its own screen (#230). Its
+    // picker's site photos come from the saved draft, so the built-in image
+    // the page now uses is offered here.
+    await page.goto(`${origin}/dash/blog/new?workspace=${workspace}`);
     const composer = page.locator("form.composer");
     await composer.waitFor({ state: "visible" });
     await composer
