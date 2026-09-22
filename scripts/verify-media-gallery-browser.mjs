@@ -2,10 +2,11 @@
  * Live acceptance for the photo library.
  *
  * It runs the real dashboard, uploads a real photo through the real media
- * route, and checks the gallery tile, the picker and deletion against what
- * the server actually served. The component tests stub `fetch`; this one
- * does not, so it is the evidence that upload, pick and delete work
- * end to end.
+ * route, and checks the gallery tile, the "used nowhere" line and deletion
+ * against what the server actually served. It also checks that Photos holds
+ * no way to place a photo — that is the page editor's job, and MCP
+ * `foundry.media.place`'s. The component tests stub `fetch`; this one does
+ * not, so it is the evidence that upload, view and delete work end to end.
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
@@ -194,8 +195,6 @@ async function main() {
 
     // The gallery must show it as a tile, and that tile must load a resized
     // variant, not the original.
-    // The picker dialog sits inside the library section and renders the same
-    // gallery, so the page's own grid is the direct child list.
     const libraryTile = (fileName) =>
       page.locator("section.media-library > ul.media-gallery .media-gallery-tile", {
         hasText: fileName,
@@ -247,89 +246,32 @@ async function main() {
       }
     }
 
-    // Pick the photo through the shared picker and put it on the page.
-    await page
-      .getByRole("button", { name: "Choose or upload a photo…" })
-      .first()
-      .click();
-    const dialog = page.locator("dialog.media-picker");
-    await dialog.waitFor({ state: "visible" });
-    await dialog
-      .locator(".media-gallery-tile", { hasText: "jetty.png" })
-      .click();
-    const placed = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === "/api/foundry-cms/media" &&
-        response.status() === 201,
-    );
-    await page.getByRole("button", { name: "Use this photo here" }).click();
-    const placement = await (await placed).json();
-    if (placement.occurrence?.assetId !== asset.assetId) {
-      throw new Error(
-        `media_gallery_placement_wrong_asset:${JSON.stringify(placement.occurrence)}`,
-      );
+    // Photos is a library only. It offers no way to place a photo: that
+    // happens in the page editor, at the photo itself, and through MCP
+    // `foundry.media.place`. See issue #232 and ADR-0043.
+    for (const gone of [
+      "Where photos appear",
+      "Use the selected photo here",
+      "Choose or upload a photo",
+    ]) {
+      if ((await page.getByText(gone).count()) > 0) {
+        throw new Error(`media_gallery_placement_still_shown:${gone}`);
+      }
     }
-    await page
-      .locator("section.media-library > ul.media-gallery .media-gallery-badge", {
-        hasText: "On the page",
-      })
-      .first()
-      .waitFor();
-
-    // Upload a photo from inside the picker and pick it in the same step.
-    await page
-      .getByRole("button", { name: "Choose or upload a photo…" })
-      .nth(1)
-      .click();
-    await dialog.waitFor({ state: "visible" });
-    await drawPhoto(page, "quay.png", 1200, 800);
-    const pickerUploaded = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === "/api/foundry-cms/media" &&
-        response.status() === 201,
-    );
-    await dialog.locator('input[type="file"]').setInputFiles(
-      await page.evaluate(() => window.__foundryPhoto).then((photo) => ({
-        name: photo.name,
-        mimeType: "image/png",
-        buffer: Buffer.from(photo.bytes),
-      })),
-    );
-    const quay = await (await pickerUploaded).json();
-    // The picker must select it only once a capability that covers it has
-    // arrived, so waiting for the pressed tile also proves the new grant.
-    await dialog
-      .locator('.media-gallery-tile[aria-pressed="true"]', {
-        hasText: "quay.png",
-      })
-      .waitFor();
-    const quayPlaced = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === "/api/foundry-cms/media" &&
-        response.status() === 201,
-    );
-    await page.getByRole("button", { name: "Use this photo here" }).click();
-    const quayPlacement = await (await quayPlaced).json();
-    if (quayPlacement.occurrence?.assetId !== quay.assetId) {
-      throw new Error(
-        `media_gallery_picker_upload_not_placed:${JSON.stringify(quayPlacement.occurrence)}`,
-      );
+    if ((await page.locator("dialog.media-picker").count()) > 0) {
+      throw new Error("media_gallery_picker_still_on_photos");
     }
-    await libraryTile("quay.png").waitFor({ state: "visible" });
 
-    // A photo on the page cannot be deleted.
+    // A freshly uploaded photo is used nowhere, and the library says so.
     await tile.click();
-    const deleteButton = page.getByRole("button", {
-      name: "Delete selected photo",
-    });
-    if (await deleteButton.isEnabled()) {
-      throw new Error("media_gallery_delete_guard_missing");
+    const detail = page.locator(".media-photo-detail");
+    await detail.waitFor({ state: "visible" });
+    const detailText = await detail.textContent();
+    if (!detailText.includes("Not used yet")) {
+      throw new Error(`media_gallery_unused_not_stated:${detailText}`);
     }
 
-    // A photo that is not on the page can be.
+    // A photo used nowhere can be deleted.
     const spareBytes = await drawPhoto(page, "spare.png", 900, 900);
     if (spareBytes <= 0) throw new Error("media_gallery_spare_not_drawn");
     const spareUploaded = page.waitForResponse(
@@ -350,6 +292,9 @@ async function main() {
     const spareTile = libraryTile("spare.png");
     await spareTile.waitFor({ state: "visible" });
     await spareTile.click();
+    const deleteButton = page.getByRole("button", {
+      name: "Delete selected photo",
+    });
     const deleted = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -366,8 +311,8 @@ async function main() {
     process.stdout.write(
       `Photo library browser acceptance passed at ${origin}: ` +
         `uploaded, served a ${thumbnailBytes}-byte thumbnail for a ` +
-        `${sourceBytes}-byte photo, picked it, uploaded and picked another ` +
-        `inside the picker, and deleted an unused one.\n`,
+        `${sourceBytes}-byte photo, showed it as used nowhere, offered no ` +
+        `way to place it, and deleted an unused one.\n`,
     );
   } finally {
     await browser?.close();

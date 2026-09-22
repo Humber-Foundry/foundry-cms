@@ -1,7 +1,5 @@
 import { mediaImageSrc } from "@humber-foundry/site-definition";
 
-import type { MediaOccurrenceState } from "./media-manager-state";
-
 /**
  * The values one photo tile shows, and the media-route addresses it loads.
  * These sit apart from the components so they can be tested without a
@@ -24,19 +22,36 @@ export function photoSizeLabel(byteLength: number): string {
 }
 
 /**
- * The names of the places on the page that show this photo, in order and
- * without repeats.
+ * What a screen says about where one photo is used.
+ *
+ * `named` carries one line per use, such as "About — Top of the page".
+ * `unnamed` means the site uses the photo in a way no line names, so the
+ * screen says so without inventing a place. `unused` means nothing uses it.
  */
-export function photoUsageNames(
-  occurrences: ReadonlyArray<MediaOccurrenceState>,
+export type PhotoUsage = Readonly<{
+  state: "named" | "unnamed" | "unused";
+  lines: ReadonlyArray<string>;
+}>;
+
+export function photoUsage(
   assetId: string,
-  placeName: (occurrenceId: string) => string,
-): ReadonlyArray<string> {
-  const names = new Set<string>();
-  for (const occurrence of occurrences) {
-    if (occurrence.assetId === assetId) names.add(placeName(occurrence.occurrenceId));
+  usage?: ReadonlyMap<string, ReadonlyArray<string>>,
+  usedAssetIds?: ReadonlySet<string>,
+): PhotoUsage {
+  const lines = usage?.get(assetId) ?? [];
+  if (lines.length > 0) return { state: "named", lines };
+  if (usedAssetIds?.has(assetId) === true) {
+    return { state: "unnamed", lines: [] };
   }
-  return [...names].sort();
+  return { state: "unused", lines: [] };
+}
+
+/** What a photo tile shows about where the photo is used. */
+export function photoUsageBadges(usage: PhotoUsage): ReadonlyArray<string> {
+  if (usage.state === "named") {
+    return usage.lines.map((line) => `Used on: ${line}`);
+  }
+  return usage.state === "unnamed" ? ["Used on your site"] : ["Not used yet"];
 }
 
 /**

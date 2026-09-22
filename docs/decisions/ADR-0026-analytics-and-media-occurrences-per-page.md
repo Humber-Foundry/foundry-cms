@@ -1,7 +1,14 @@
 # ADR-0026: A view and a media occurrence belong to the page that has them
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-09-21
 - **Date:** 2026-09-19
+
+> **Amended 2026-09-21 by
+> [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md).**
+> `components/media-manager.tsx` no longer places a photo and no longer reads
+> `renderedMediaOccurrenceIds`. Where this record says that screen drives the
+> list, read: the media route's rendered-occurrence check drives it. Photos
+> names a place for any page's occurrence id, by the slot at the end of the id.
 
 ## Context
 
