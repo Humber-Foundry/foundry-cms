@@ -1170,6 +1170,7 @@
  * in the accent colour; a missing one reads in the full ink used for prose,
  * because it names a setting the owner still has to install. */
 .connection-status {
+  overflow-wrap: anywhere;
   margin: 0.5rem 0 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
@@ -1414,6 +1415,97 @@
   font-size: var(--dash-text-small);
   font-weight: 600;
   cursor: pointer;
+}
+
+/* The heading of the preview and the two width choices sit on one line on a
+ * computer and stack on a phone, so neither ever crowds the other. */
+.email-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dash-space-3);
+  margin-bottom: var(--dash-space-4);
+}
+
+.email-preview-head h2 {
+  margin: 0;
+  font-size: var(--dash-h2);
+}
+
+.email-preview-widths {
+  display: flex;
+  gap: var(--dash-space-2);
+}
+
+.email-preview-width[aria-pressed="true"] {
+  border-color: var(--dash-accent);
+  background: var(--dash-accent);
+  color: var(--dash-surface);
+}
+
+/* The frame is drawn at the exact width of a real inbox, never scaled, so the
+ * lines break where they will break when the email arrives. On a narrow
+ * screen the computer width is wider than the dashboard, so this box scrolls
+ * sideways rather than squeezing the email into a shape no reader sees. */
+.email-preview-frame {
+  display: flex;
+  overflow-x: auto;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: var(--dash-space-3);
+  background: var(--dash-canvas);
+  /* `safe` keeps the left edge of the email reachable when it is wider than
+   * this box. Plain centring would push the start of every line out of the
+   * scrollable area, so the first words could not be read at all. */
+  justify-content: center;
+  justify-content: safe center;
+}
+
+.email-preview-page {
+  flex: 0 0 auto;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+/* What the owner reads before an email goes to the whole list. */
+.send-review {
+  display: grid;
+  gap: var(--dash-space-3);
+  margin: var(--dash-space-3) 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: var(--dash-space-4);
+  background: var(--dash-canvas);
+}
+
+.send-review-count {
+  margin: 0;
+  color: var(--dash-ink);
+  font-weight: 700;
+}
+
+.send-review-facts {
+  display: grid;
+  gap: var(--dash-space-3);
+  margin: 0;
+}
+
+.send-review-fact {
+  display: grid;
+  gap: var(--dash-space-1);
+}
+
+.send-review-fact dt {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.send-review-fact dd {
+  margin: 0;
+  font-size: var(--dash-text-small);
+  overflow-wrap: anywhere;
 }
 
 .email-preview-message {

@@ -256,6 +256,21 @@ this check makes no network call. See ADR-0021.
 fingerprint and explicit test recipients. An on-screen preview is not a test
 delivery.
 
+**Email preview** — The rendered email HTML drawn in the dashboard inside a
+sandboxed frame, at the width the person chooses. It is the exact artifact the
+delivery provider is sent, not a second drawing of the same content, so the
+Content ID beside it fingerprints what the frame shows. The frame runs nothing
+and loads nothing from off the site. See ADR-0046.
+
+**Send review** — What a person reads before an email goes to the whole list:
+the recipient count, the subject, the sending name and address, the reply
+address, the footer holding the postal address, and the unsubscribe address.
+Every value is read from the one campaign revision that would be sent. The
+approve, send and schedule controls stay shut until the person confirms they
+read it, and that confirmation clears whenever the email changes. It is not an
+approval: a bulk-send authorization is still the Owner's separate act on one
+exact fingerprint. See ADR-0046.
+
 **Bulk-send authorization** — An Owner's approval of the exact campaign
 fingerprint and successful test delivery. It is the only approval that can
 support an active campaign schedule or immediate bulk send.
@@ -581,6 +596,7 @@ editing page.
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)
 - [Page-component image fields reference gallery photos](docs/decisions/ADR-0012-page-image-field-media-reference.md)
 - [Campaign images — header, share and inline images](docs/decisions/ADR-0014-campaign-images.md)
+- [The email preview draws the bytes that will be sent, and a review is read before a send](docs/decisions/ADR-0046-email-preview-draws-the-sent-bytes-and-a-review-precedes-a-send.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [A newsletter signup is a pending request, not a subscriber](docs/decisions/ADR-0031-newsletter-signup-pending-request.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)

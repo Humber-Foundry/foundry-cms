@@ -46,3 +46,4 @@
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
 | [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md) | A page component paints only from design tokens, and two tests fail when one does not | Accepted | 2026-09-21 |
 | [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md) | Photos is a library, and a photo is placed where it is seen | Accepted | 2026-09-21 |
+| [ADR-0046](ADR-0046-email-preview-draws-the-sent-bytes-and-a-review-precedes-a-send.md) | The email preview draws the bytes that will be sent, and a review is read before a send | Accepted | 2026-09-22 |

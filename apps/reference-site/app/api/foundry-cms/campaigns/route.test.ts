@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   readDeliveryHealth: vi.fn(),
   campaignBulkState: vi.fn(),
   listTestRecipients: vi.fn(),
+  getRevision: vi.fn(),
+  readSenderIdentity: vi.fn(),
   pendingScheduleRequest: vi.fn(),
   listPendingScheduleRequests: vi.fn(),
   declineScheduleRequest: vi.fn(),
@@ -67,10 +69,26 @@ const identity = {
   email: "editor@example.com",
   nonce: "nonce",
 };
+/**
+ * The revision the review before a send is read from. Only the fields that
+ * review shows are named here; the route reads no others.
+ */
+const sentRevision = {
+  id: "30000000-0000-4000-8000-000000000001",
+  subject: "September news",
+  senderIdentityId: "sender-primary",
+  complianceFooter: {
+    version: "v1",
+    content: "Example News · 1 Harbour Road · Contact: https://example.org/",
+    unsubscribePlaceholder:
+      "https://example.org/newsletter/stop?token={{foundry.unsubscribe.token}}",
+  },
+};
 const application = {
   queries: {
     listCampaigns: mocks.listCampaigns,
     render: mocks.render,
+    getRevision: mocks.getRevision,
   },
   commands: {
     createStandalone: mocks.createStandalone,
@@ -141,6 +159,7 @@ describe("campaign endpoint", () => {
       senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
       listTestRecipients: mocks.listTestRecipients,
+      readSenderIdentity: mocks.readSenderIdentity,
     });
     mocks.readDeliveryReadiness.mockResolvedValue({
       ...connectedDelivery,
@@ -164,6 +183,11 @@ describe("campaign endpoint", () => {
     mocks.listTestRecipients.mockResolvedValue({
       ids: ["membership-owner"],
       yours: null,
+    });
+    mocks.getRevision.mockResolvedValue(sentRevision);
+    mocks.readSenderIdentity.mockReturnValue({
+      name: "Example News",
+      email: "news@example.com",
     });
     mocks.readiness.mockResolvedValue({
       state: "evaluation_only",
@@ -213,6 +237,7 @@ describe("campaign endpoint", () => {
     mocks.render.mockResolvedValue({
       campaignId: "20000000-0000-4000-8000-000000000001",
       campaignFingerprint: "fingerprint-one",
+      eligibleSubscriberCount: 412,
     });
     mocks.currentEvidence.mockResolvedValue({
       executionId: "40000000-0000-4000-8000-000000000001",
@@ -254,7 +279,30 @@ describe("campaign endpoint", () => {
       ids: ["membership-owner"],
       yours: "membership-owner",
     });
-    expect(JSON.stringify(body)).not.toContain("@");
+    // The review before a send is read from the one revision the rendered
+    // bytes came from, so it can never describe a different email.
+    expect(mocks.getRevision).toHaveBeenCalledWith({
+      actor: identity,
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      revisionNumber: undefined,
+    });
+    expect(body.sendSummary).toEqual({
+      campaignRevisionId: sentRevision.id,
+      recipientCount: 412,
+      subject: "September news",
+      senderName: "Example News",
+      senderAddress: "news@example.com",
+      replyAddress: "news@example.com",
+      footer: sentRevision.complianceFooter.content,
+      unsubscribeAddress:
+        sentRevision.complianceFooter.unsubscribePlaceholder,
+    });
+    // The site's own sending address is the only address that leaves the
+    // server. A test recipient's address is a person's own mailbox and never
+    // does, so nothing else in the answer carries one.
+    expect(
+      JSON.stringify(body).replaceAll("news@example.com", ""),
+    ).not.toContain("@");
     expect(mocks.campaignBulkState).toHaveBeenCalledWith({
       actor: identity,
       campaignId: "20000000-0000-4000-8000-000000000001",
@@ -926,6 +974,7 @@ describe("campaign delivery readiness", () => {
       senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
       listTestRecipients: mocks.listTestRecipients,
+      readSenderIdentity: mocks.readSenderIdentity,
     });
     mocks.listCampaigns.mockResolvedValue([]);
     const response = await GET(

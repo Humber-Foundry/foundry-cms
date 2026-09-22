@@ -60,6 +60,7 @@ import {
 } from "./human-access-configuration";
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import {
+  campaignDeliverySettingNames,
   campaignDeliverySetupGuide,
   listMissingCampaignDeliverySettings,
   type CampaignDeliveryReadiness,
@@ -381,6 +382,19 @@ export async function loadCampaignRequestContext(
   listTestRecipients(): Promise<
     Readonly<{ ids: ReadonlyArray<string>; yours: string | null }>
   >;
+  /**
+   * Who an email under one sender identity comes from: the sending name and
+   * address a reader sees in their inbox.
+   *
+   * This is the installation's own sending identity, which every recipient
+   * already reads, so a screen may show it. It is never a subscriber's
+   * address, and this never reads a provider key. It answers null when this
+   * installation holds no sender under that id, which is what local
+   * development does.
+   */
+  readSenderIdentity(
+    senderIdentityId: string,
+  ): Readonly<{ name: string; email: string }> | null;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -466,7 +480,11 @@ export async function loadCampaignRequestContext(
   let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
   let delivery: CampaignDeliveryReadiness = Object.freeze({
     state: "local_development" as const,
-    missingSettings: Object.freeze([]),
+    // Local development holds none of the delivery settings and uses stub
+    // adapters, so every one of them is absent. Naming them all lets the
+    // Newsletter steps say exactly why no test can go out here, instead of
+    // reporting a bare failure that reads like a fault.
+    missingSettings: campaignDeliverySettingNames,
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,
   });
@@ -689,6 +707,12 @@ export async function loadCampaignRequestContext(
     delivery,
     senderDetails,
     readDeliveryHealth: () => testAdapter.health(),
+    readSenderIdentity: (senderIdentityId) => {
+      const sender = bulkSenders[senderIdentityId];
+      return sender === undefined
+        ? null
+        : Object.freeze({ name: sender.name, email: sender.email });
+    },
     bulkDelivery,
     scheduleProposals,
     listTestRecipients: async () => {

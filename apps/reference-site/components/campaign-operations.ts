@@ -79,6 +79,43 @@ type CampaignTestReadiness = Awaited<
 >;
 
 /**
+ * What a person has to read before an email goes to the whole list: who it
+ * goes to, what it says it is, who it comes from, and the two addresses at
+ * the bottom of it.
+ *
+ * Every value is read from the one campaign revision the rendered bytes came
+ * from, so the review can never describe a different email from the one that
+ * would go out. `campaignRevisionId` is that revision, and the screen shows
+ * the review only while the revision it is holding is the same one.
+ *
+ * `senderName`, `senderAddress` and `replyAddress` are the installation's own
+ * sending identity — the name and address every recipient already reads in
+ * their inbox. They are never a subscriber's address. They are null while this
+ * installation holds no sender under the revision's sender identity, which is
+ * what local development does.
+ */
+export type CampaignSendSummary = Readonly<{
+  campaignRevisionId: string;
+  recipientCount: number;
+  subject: string;
+  senderName: string | null;
+  senderAddress: string | null;
+  replyAddress: string | null;
+  /**
+   * The whole footer line stored on the revision. It holds the legal name, the
+   * postal address and the contact address, joined the way the installation's
+   * settings build them.
+   */
+  footer: string;
+  /**
+   * The unsubscribe address with its one-off token marker still in it, exactly
+   * as the revision stores it. `unsubscribeAddressShown` takes the marker out
+   * for the screen.
+   */
+  unsubscribeAddress: string;
+}>;
+
+/**
  * Everything the server reports about one campaign's progress towards a send.
  *
  * The screen states a step from these values and nothing else. It never
@@ -95,6 +132,8 @@ export type CampaignSendReport = Readonly<{
     ids: ReadonlyArray<string>;
     yours: string | null;
   }>;
+  /** What the review before a send shows. */
+  sendSummary: CampaignSendSummary;
 }>;
 
 /**
@@ -219,6 +258,56 @@ export function refusalMessage(code: string): string {
 }
 
 /**
+ * Plain words for why the email provider did not take a test.
+ *
+ * A test can be refused after the server has accepted the request, so this is
+ * a separate list from the refusals above. Every sentence says what happened
+ * and what to do, because a bare code reads as a fault in the dashboard when
+ * the answer is usually somewhere else.
+ */
+const testFailureSentences: Readonly<Record<string, string>> = {
+  provider_unavailable:
+    "The email provider could not be reached, so no test went out.",
+  provider_rate_limited:
+    "The email provider is taking too many requests right now. Wait a few " +
+    "minutes, then send the test again.",
+  provider_sender_unmapped:
+    "This site's sending address is not set up with the email provider yet.",
+  provider_test_rejected: "The email provider refused the test.",
+  provider_test_definitively_not_delivered:
+    "The email provider tried and could not deliver the test.",
+  provider_test_daily_recipient_limit:
+    "This address has had all the tests the email provider allows today. " +
+    "Try again tomorrow.",
+  provider_campaign_create_rejected:
+    "The email provider would not take this email.",
+  provider_campaign_not_found:
+    "The email provider no longer holds this email. Send the test again.",
+  provider_campaign_fingerprint_mismatch:
+    "The email changed while the test was going out. Send a new test.",
+  campaign_revision_changed:
+    "The email changed while the test was going out. Send a new test.",
+  foundry_send_proof_invalid:
+    "The test could not be proved to belong to this site, so it was stopped.",
+  test_recipient_binding_changed:
+    "The verified test address for this site changed, so the test was " +
+    "stopped.",
+  test_recipient_forbidden:
+    "There is no verified test address on file for you.",
+};
+
+/**
+ * One undelivered test, written the way the step reports it: the plain
+ * sentence, then the provider's own code so whoever has to fix it has the
+ * exact reason.
+ */
+export function testFailureMessage(code: string): string {
+  const sentence =
+    testFailureSentences[code] ?? "The test has not been delivered yet.";
+  return code === "" ? sentence : `${sentence} Reason: ${code}.`;
+}
+
+/**
  * The address the dashboard preview draws for one campaign image. A campaign
  * stores each image as an absolute address so the sent email can load it. A
  * gallery photo's address is the site's own `/api/media/<assetId>` route made
@@ -242,6 +331,99 @@ export function previewEmailContent(
         : block,
     ),
   };
+}
+
+/**
+ * What the frame that draws the email may load.
+ *
+ * `default-src 'none'` stops the frame reaching any address at all: no script,
+ * no style sheet, no font, no other frame, no tracking picture from somebody
+ * else's server. `img-src 'self'` then allows back exactly one thing, a
+ * picture this site serves, because showing the email with its pictures is the
+ * point of the preview. `style-src 'unsafe-inline'` covers a style written on
+ * a tag, which several mail clients need; a style attribute is not code, and
+ * nothing may run in the frame either way.
+ *
+ * Email text is written by whoever wrote the campaign, so the frame must never
+ * become a way to fetch something.
+ */
+export const campaignPreviewContentSecurityPolicy =
+  "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'";
+
+/**
+ * The two lines put at the top of the preview document's head.
+ *
+ * The policy above, and a base target that sends every link in the email to a
+ * new browsing context. The frame is sandboxed without `allow-popups`, so a
+ * new context is refused and a press on a link does nothing. That is what
+ * keeps a press inside the preview from navigating the frame away to the
+ * address the link names.
+ */
+const campaignPreviewHead =
+  `<meta http-equiv="Content-Security-Policy" content="${campaignPreviewContentSecurityPolicy}">` +
+  '<base target="_blank">';
+
+/** Matches the `src` of one `<img>` tag in the renderer's own output. */
+const renderedImageSource = /(<img\b[^>]*?\bsrc=")([^"]*)(")/giu;
+
+/**
+ * The exact bytes the campaign renderer produces, made safe to draw inside the
+ * dashboard.
+ *
+ * Two changes are made, and no others:
+ *
+ * 1. The head gains the content security policy and the base target above, so
+ *    the frame can load nothing off this site and can run nothing.
+ * 2. Every gallery picture is drawn by its same-origin `/api/media/<assetId>`
+ *    path, the same rule `campaignPreviewSrc` applies everywhere else in the
+ *    dashboard. A campaign stores each picture as an absolute address so the
+ *    sent email can load it; that address names the site's public origin,
+ *    which the dashboard may not be running on. A picture from anywhere else
+ *    is left exactly as written, and the policy above then refuses it.
+ *
+ * Nothing is removed, reworded or reordered, so what the frame draws is the
+ * email the delivery provider will send. The Content ID beside the frame is
+ * the fingerprint of those exact bytes.
+ */
+export function campaignPreviewDocument(html: string): string {
+  const sameOriginPictures = html.replace(
+    renderedImageSource,
+    (whole, opening: string, address: string, closing: string) => {
+      // The renderer escapes every address it writes, so an ampersand reads as
+      // `&amp;` here. Read the address back before asking whether it names a
+      // gallery photo; a photo path carries no character that escaping
+      // changes, so the replacement needs no escaping of its own.
+      const assetId = mediaAssetIdFromImageAddress(
+        address.replaceAll("&amp;", "&"),
+      );
+      return assetId === null
+        ? whole
+        : `${opening}${mediaImageSrc(assetId)}${closing}`;
+    },
+  );
+  const head = sameOriginPictures.indexOf("<head>");
+  return head === -1
+    ? `${campaignPreviewHead}${sameOriginPictures}`
+    : sameOriginPictures.slice(0, head + "<head>".length) +
+      campaignPreviewHead +
+      sameOriginPictures.slice(head + "<head>".length);
+}
+
+/**
+ * The unsubscribe address as a person can read it.
+ *
+ * Every email carries this address with that one reader's own token added to
+ * it, so the stored address holds a marker where the token goes. The marker is
+ * a machine's word, so the review shows the address without it.
+ */
+export function unsubscribeAddressShown(address: string): string {
+  try {
+    const parsed = new URL(address);
+    parsed.searchParams.delete("token");
+    return parsed.toString();
+  } catch {
+    return address;
+  }
 }
 
 /**

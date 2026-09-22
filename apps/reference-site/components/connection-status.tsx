@@ -74,7 +74,9 @@ export const senderDetailsNotSetSentence =
 const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
   email: {
     setupLinkLabel: "How to connect email",
-    localDevelopmentSentence: "Email is off in local development.",
+    localDevelopmentSentence:
+      "Email is off in local development, because this site holds no email " +
+      "provider credentials.",
     connectedSentence: "Email is connected.",
     notConnectedSentence: "Email is not connected yet.",
     connectedMeaning:
@@ -132,9 +134,25 @@ export function ConnectionStatus({
 
   const copy = connectionCopy[kind];
 
+  // Local development holds none of the settings a connected site holds. The
+  // names go behind the disclosure rather than on the line, because nobody
+  // has to fix anything here: the sentence is the whole answer for the owner,
+  // and the names are for whoever connects a real site.
   if (readiness.state === "local_development") {
     return (
-      <p className="connection-status">{copy.localDevelopmentSentence}</p>
+      <p className="connection-status">
+        {copy.localDevelopmentSentence}
+        {readiness.missingSettings.length === 0 ? null : (
+          <>
+            {" "}
+            <HelpTip label={settingNamesLabel}>
+              {`A connected site holds them as ${readiness.missingSettings.join(
+                ", ",
+              )}.`}
+            </HelpTip>
+          </>
+        )}
+      </p>
     );
   }
 

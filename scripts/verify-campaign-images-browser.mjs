@@ -320,11 +320,16 @@ async function main() {
     await page.waitForURL(/\/dash\/campaigns\/[0-9a-f-]{36}\?workspace=/u);
     const preview = page.locator("section.email-preview");
     await preview.waitFor({ state: "visible" });
-    await preview
-      .locator(`.campaign-header-image img[src="${headerRef}"]`)
+    // Since #238 the preview draws the renderer's own email bytes inside a
+    // sandboxed frame, so the photos are read inside that frame. Each address
+    // is the site's own `/api/media/<assetId>` path, which is how the frame
+    // loads a photo without reaching off this site.
+    const emailFrame = page.frameLocator("section.email-preview iframe");
+    await emailFrame
+      .locator(`img[src="${headerRef}"]`)
       .waitFor({ state: "visible" });
-    await preview
-      .locator(`.rich-text-image img[src="${inlineRef}"]`)
+    await emailFrame
+      .locator(`img[src="${inlineRef}"]`)
       .first()
       .waitFor({ state: "visible" });
 
