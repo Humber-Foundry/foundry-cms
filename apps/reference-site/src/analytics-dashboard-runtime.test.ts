@@ -14,6 +14,7 @@ import {
   defaultReportingRange,
   defaultReportingTimeZone,
   loadAnalyticsDashboard,
+  resolveReportingPeriodDays,
 } from "./analytics-dashboard-runtime";
 import { installedSiteDefinition } from "../foundry/site-definition";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
@@ -65,6 +66,7 @@ function contextThatSucceeds(): typeof createAnalyticsDashboardContext {
         comparison: null,
         sources: [],
       }),
+      traffic: async () => ({ ...emptyEnvelope, days: [], sources: [] }),
       content: async () => ({ ...emptyEnvelope, items: [] }),
       forms: async () => ({ ...emptyEnvelope, items: [] }),
       audience: async () => ({ ...emptyEnvelope, metrics: [] }),
@@ -81,16 +83,70 @@ function contextThatSucceeds(): typeof createAnalyticsDashboardContext {
 }
 
 describe("the default reporting range", () => {
-  it("covers twenty-eight local days ending today", () => {
+  it("covers seven local days ending today", () => {
     const range = defaultReportingRange(
       "2026-07-03T12:00:00.000Z",
       defaultReportingTimeZone,
     );
 
     expect(range).toEqual({
-      fromLocalDate: "2026-06-06",
+      fromLocalDate: "2026-06-27",
       toLocalDate: "2026-07-03",
     });
+  });
+
+  it("covers thirty local days when thirty days are asked for", () => {
+    const range = defaultReportingRange(
+      "2026-07-03T12:00:00.000Z",
+      defaultReportingTimeZone,
+      30,
+    );
+
+    expect(range).toEqual({
+      fromLocalDate: "2026-06-04",
+      toLocalDate: "2026-07-03",
+    });
+  });
+
+  it("answers anything but 7 or 30 with the shorter period", () => {
+    expect(resolveReportingPeriodDays("30")).toBe(30);
+    expect(resolveReportingPeriodDays("7")).toBe(7);
+    expect(resolveReportingPeriodDays("365")).toBe(7);
+    expect(resolveReportingPeriodDays("all the days")).toBe(7);
+    expect(resolveReportingPeriodDays(undefined)).toBe(7);
+  });
+});
+
+describe("the sample figures a developer sees locally", () => {
+  /** Runs one load with `NODE_ENV` set, and puts it back afterwards. */
+  async function loadWithNodeEnv(nodeEnv: string) {
+    const previous = process.env.NODE_ENV;
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    try {
+      return await loadAnalyticsDashboard(
+        authorizedContext(),
+        () => "2026-07-03T00:00:00.000Z",
+        contextThatFailsWith(
+          new AnalyticsDashboardError("analytics_not_configured"),
+        ),
+      );
+    } finally {
+      vi.stubEnv("NODE_ENV", previous ?? "test");
+    }
+  }
+
+  it("shows labelled sample figures in local development", async () => {
+    const data = await loadWithNodeEnv("development");
+
+    expect(data?.sample).toBe(true);
+    expect(data?.traffic.days).toHaveLength(7);
+    expect(data?.overview.comparison).not.toBeNull();
+  });
+
+  it("shows no sample figures outside local development", async () => {
+    for (const nodeEnv of ["production", "test", "staging"]) {
+      expect(await loadWithNodeEnv(nodeEnv)).toBeNull();
+    }
   });
 });
 

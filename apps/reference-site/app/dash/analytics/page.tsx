@@ -1,5 +1,8 @@
 import { AnalyticsDashboard } from "@/components/analytics-dashboard";
-import { loadAnalyticsDashboard } from "@/src/analytics-dashboard-runtime";
+import {
+  loadAnalyticsDashboard,
+  resolveReportingPeriodDays,
+} from "@/src/analytics-dashboard-runtime";
 import { requireAuthorizedDashboardAccess } from "@/src/dashboard-page-context";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +13,22 @@ export const dynamic = "force-dynamic";
  * numbers, and a measurement that is unavailable says so instead of showing a
  * zero.
  */
-export default async function DashboardAnalyticsPage() {
+export default async function DashboardAnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | ReadonlyArray<string>>>;
+}) {
   const access = await requireAuthorizedDashboardAccess();
-  const analytics = await loadAnalyticsDashboard(access);
+  const requested = (await searchParams).days;
+  const periodDays = resolveReportingPeriodDays(
+    Array.isArray(requested) ? requested[0] : (requested as string | undefined),
+  );
+  const analytics = await loadAnalyticsDashboard(
+    access,
+    undefined,
+    undefined,
+    periodDays,
+  );
 
   return (
     <main className="dashboard-main" id="main">

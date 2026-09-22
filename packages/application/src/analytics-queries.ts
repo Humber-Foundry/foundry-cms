@@ -14,6 +14,7 @@ import {
   addUtcDays,
   analyticsCompositeKey,
   analyticsMetricDefinition,
+  analyticsMetricSources,
   analyticsMetrics,
   analyticsSchemaVersion,
   analyticsSourceExpectedLagSeconds,
@@ -25,6 +26,7 @@ import {
   subtractUtcMonths,
   summableSeries,
   unavailableValue,
+  utcDayStart,
   type AnalyticsFreshness,
   type AnalyticsGranularity,
   type AnalyticsMetricDefinition,
@@ -222,6 +224,14 @@ export type AnalyticsReferrerRow = Readonly<{
   comparabilitySignature: string;
 }>;
 
+/** One day of the traffic chart. */
+export type AnalyticsTrafficDay = Readonly<{
+  /** UTC midnight that starts the day. */
+  bucketStartUtc: string;
+  pageViews: AnalyticsValue;
+  visits: AnalyticsValue;
+}>;
+
 export type AnalyticsSourceHealth = AnalyticsSourceState &
   Readonly<{ freshness: AnalyticsFreshness | "unknown" }>;
 
@@ -268,14 +278,28 @@ function latestInstant(instants: ReadonlyArray<string>): string {
   );
 }
 
+/** The source state of a source allowed to measure this metric. */
+function owningSourceState(
+  definition: AnalyticsMetricDefinition,
+  scope: ReadingScope,
+): AnalyticsSourceState | undefined {
+  const owners = analyticsMetricSources(definition);
+  return (
+    scope.sourceStates.find(
+      (candidate) =>
+        owners.includes(candidate.source) &&
+        candidate.status === "unavailable",
+    ) ??
+    scope.sourceStates.find((candidate) => owners.includes(candidate.source))
+  );
+}
+
 function absentReason(
   definition: AnalyticsMetricDefinition,
   scope: ReadingScope,
 ): AnalyticsUnavailableReason {
   if (scope.outsideRetention) return "outside_retention";
-  const state = scope.sourceStates.find(
-    (candidate) => candidate.source === definition.source,
-  );
+  const state = owningSourceState(definition, scope);
   return state?.status === "unavailable" ? "source_unavailable" : "not_measured";
 }
 
@@ -288,9 +312,7 @@ function unavailableReading(
   }>,
   reason: AnalyticsUnavailableReason = absentReason(definition, scope),
 ): AnalyticsReading {
-  const state = scope.sourceStates.find(
-    (candidate) => candidate.source === definition.source,
-  );
+  const state = owningSourceState(definition, scope);
   return Object.freeze({
     metricKey: definition.metricKey,
     definition: definition.definition,
@@ -299,7 +321,8 @@ function unavailableReading(
     aggregation: definition.aggregation,
     subjectType: subject.subjectType ?? definition.subjectTypes[0],
     subjectId: subject.subjectId,
-    source: definition.source,
+    // The source named here is the one whose state explains the absence.
+    source: state?.source ?? definition.source,
     sourceName: state?.sourceName ?? null,
     sourceMetric: null,
     definitionVersion: null,
@@ -498,6 +521,11 @@ const overviewMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
   "subscriber.active",
   "subscriber.net_growth",
   "campaign.delivered",
+]);
+
+const trafficMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
+  "web.page_views",
+  "web.visits",
 ]);
 
 const audienceMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
@@ -845,6 +873,69 @@ export function createAnalyticsQueryApplication<Actor>({
         };
       }),
 
+      /**
+       * Page views and arrivals for each day in the range, for the chart.
+       *
+       * A day the read model holds no measurement for is reported as
+       * unavailable rather than as a zero, and a day measured by two unlike
+       * sources is reported as unavailable too, because their numbers may
+       * never be added.
+       */
+      traffic: withCache("traffic", async ({
+        actor,
+        range: request,
+      }: {
+        actor: Actor;
+        range: AnalyticsRangeRequest;
+      }) => {
+        const { scope, range, sourceStates, observedNow } = await openScope(
+          actor,
+          request,
+          trafficMetrics,
+        );
+
+        function dayValue(
+          metricKey: AnalyticsMetricKey,
+          bucketStartUtc: string,
+        ): AnalyticsValue {
+          const groups = groupBySignature(
+            totalsOnly(
+              scope.facts.filter(
+                (fact) =>
+                  fact.metricKey === metricKey &&
+                  fact.bucketStartUtc === bucketStartUtc,
+              ),
+            ),
+          );
+          if (groups.length !== 1) return unavailableValue("not_measured");
+          return buildReading(groups[0], scope, null).value;
+        }
+
+        const days: AnalyticsTrafficDay[] = [];
+        // Facts are stored in UTC day buckets, so the chart walks UTC days
+        // from the first whole day the range covers.
+        let bucketStartUtc = utcDayStart(range.startUtc);
+        if (Date.parse(bucketStartUtc) < Date.parse(range.startUtc)) {
+          bucketStartUtc = addUtcDays(bucketStartUtc, 1);
+        }
+        while (Date.parse(bucketStartUtc) < Date.parse(range.endUtc)) {
+          days.push(
+            Object.freeze({
+              bucketStartUtc,
+              pageViews: dayValue("web.page_views", bucketStartUtc),
+              visits: dayValue("web.visits", bucketStartUtc),
+            }),
+          );
+          bucketStartUtc = addUtcDays(bucketStartUtc, 1);
+        }
+
+        return {
+          ...envelope(range),
+          days,
+          sources: sourceHealth(sourceStates, observedNow),
+        };
+      }),
+
       content: withCache("content", async ({
         actor,
         range: request,
@@ -1110,6 +1201,7 @@ type ViewOf<Name extends keyof AnalyticsQueryApplication["queries"]> = Awaited<
 >;
 
 export type AnalyticsOverviewView = ViewOf<"overview">;
+export type AnalyticsTrafficView = ViewOf<"traffic">;
 export type AnalyticsContentView = ViewOf<"content">;
 export type AnalyticsFormsView = ViewOf<"forms">;
 export type AnalyticsAudienceView = ViewOf<"audience">;

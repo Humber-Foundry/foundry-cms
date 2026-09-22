@@ -4,6 +4,10 @@ import {
   type AnalyticsFactMeasurement,
 } from "@humber-foundry/application";
 
+import { normalizeReferrer } from "./analytics-referrer";
+
+export { normalizeReferrer };
+
 /**
  * Cloudflare Web Analytics is the traffic authority. Foundry imports only the
  * host, published path, normalized referrer host and Web Vitals aggregates it
@@ -74,45 +78,6 @@ export type PublishedRouteHistoryEntry = Readonly<{
   fromUtc: string;
   toUtc: string | null;
 }>;
-
-const referrerChannels: ReadonlyArray<
-  Readonly<{ channel: string; hosts: ReadonlyArray<string> }>
-> = Object.freeze([
-  {
-    channel: "search",
-    hosts: ["google.", "bing.", "duckduckgo.", "search.", "ecosia."],
-  },
-  {
-    channel: "social",
-    hosts: [
-      "facebook.",
-      "instagram.",
-      "linkedin.",
-      "mastodon.",
-      "reddit.",
-      "bsky.",
-      "x.com",
-      "t.co",
-    ],
-  },
-]);
-
-/** Reduces a referrer to a bare host, or to a channel when there is none. */
-export function normalizeReferrer(
-  refererHost: string,
-): Readonly<{ key: string; value: string }> {
-  const host = refererHost.trim().toLowerCase();
-  if (host === "" || host === "(none)" || host === "direct") {
-    return { key: "referrer_channel", value: "direct" };
-  }
-  const channel = referrerChannels.find((entry) =>
-    entry.hosts.some((candidate) => host.startsWith(candidate)),
-  );
-  if (channel !== undefined) {
-    return { key: "referrer_channel", value: channel.channel };
-  }
-  return { key: "referrer_host", value: host };
-}
 
 /** Drops the query string and fragment a published path never needs. */
 export function normalizePublishedPath(requestPath: string): string {

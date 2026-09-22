@@ -2,6 +2,7 @@ import type {
   AnalyticsDerivedRatio,
   AnalyticsReading,
   AnalyticsSourceHealth,
+  AnalyticsTrafficDay,
   AnalyticsValue,
 } from "@humber-foundry/application";
 
@@ -9,88 +10,286 @@ import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime"
 import { HelpTip } from "./help-tip";
 
 /**
- * Presents the aggregate projection. Every number arrives with its source,
- * definition and completeness.
+ * The Visitors screen.
  *
- * This view computes no measurement of its own. It renders an absent
- * measurement as unavailable, a small breakdown row as suppressed, and two
- * providers' counts side by side, each with its own label.
+ * Every number comes from the aggregate read model. This view works nothing
+ * out for itself apart from the change against the period before, which it
+ * takes from two readings the read model produced. A measurement that is
+ * missing says which part of the site could not report it, instead of
+ * blanking the screen.
  */
 
-const qualityLabels: Readonly<Record<string, string>> = {
-  exact: "Exact",
-  derived_exact: "Derived from exact counts",
-  estimated: "Estimated",
-  partial_population: "Partial population",
-  best_effort: "Best effort",
-  provider_reported: "Provider reported",
-  directional: "Directional",
-  unreliable: "Unreliable",
+/** Plain names for the systems that produce a number. */
+const sourceNames: Readonly<Record<string, string>> = {
+  analytics_engine: "your site's own counter",
+  cloudflare_web: "the traffic service",
+  d1: "your site's records",
+  provider: "the email service",
 };
 
-const freshnessLabels: Readonly<Record<string, string>> = {
+const qualityNotes: Readonly<Record<string, string>> = {
+  exact: "Counted exactly",
+  derived_exact: "Worked out from exact counts",
+  estimated: "A close estimate",
+  partial_population: "From some browsers only",
+  best_effort: "Best effort, some may be missed",
+  provider_reported: "Reported by the email service",
+  directional: "A guide, not an exact figure",
+  unreliable: "Not reliable",
+};
+
+const freshnessNotes: Readonly<Record<string, string>> = {
   fresh: "Up to date",
-  in_progress: "In progress",
-  delayed: "Delayed",
-  stale: "Stale",
-  unknown: "Never collected",
+  in_progress: "Today is still being counted",
+  delayed: "Running behind",
+  stale: "Out of date",
+  unknown: "Nothing counted yet",
 };
 
-const unavailableLabels: Readonly<Record<string, string>> = {
-  not_measured: "Not measured",
-  provider_omitted: "Provider did not report this",
-  source_unavailable: "Source unavailable",
-  outside_retention: "Outside the retained window",
-  not_supported: "Provider does not support this",
-};
-
-const sourceStatusLabels: Readonly<Record<string, string>> = {
+const sourceStatusNames: Readonly<Record<string, string>> = {
   healthy: "Working normally",
   delayed: "Running behind",
-  partial: "Reporting partly",
+  partial: "Reporting part of the picture",
   unavailable: "Not reporting",
 };
 
-const metricLabels: Readonly<Record<string, string>> = {
-  "web.visits": "Referral-based visits",
+const metricNames: Readonly<Record<string, string>> = {
+  "web.visits": "Visits",
   "web.page_views": "Page views",
-  "form.submissions_accepted": "Accepted form submissions",
-  "form.submissions_blocked": "Blocked submissions",
-  "form.notifications_delivered": "Notifications delivered",
-  "form.notifications_failed": "Notifications failed",
-  "subscriber.active": "Active subscribers",
-  "subscriber.confirmed": "Confirmed",
-  "subscriber.unsubscribed": "Unsubscribed",
-  "subscriber.hard_bounced": "Hard bounced",
-  "subscriber.complained": "Complaints",
-  "subscriber.net_growth": "Net growth",
+  "form.submissions_accepted": "Messages received",
+  "form.submissions_blocked": "Blocked by the spam check",
+  "form.notifications_delivered": "Alerts sent to you",
+  "form.notifications_failed": "Alerts that failed",
+  "subscriber.active": "People on your list",
+  "subscriber.confirmed": "Joined",
+  "subscriber.unsubscribed": "Left",
+  "subscriber.hard_bounced": "Addresses that do not work",
+  "subscriber.complained": "Marked as spam",
+  "subscriber.net_growth": "Change in list size",
   "campaign.sent": "Sent",
   "campaign.delivered": "Delivered",
-  "campaign.soft_bounced": "Soft bounced",
-  "campaign.hard_bounced": "Hard bounced",
-  "campaign.complained": "Complaints",
-  "campaign.unsubscribed": "Unsubscribed",
-  "campaign.unique_clicks_reported": "Unique clicks",
-  "campaign.unique_opens_reported": "Unique opens",
-  "form.conversion_rate": "Estimated conversion",
-  "web.vitals.lcp_p75": "LCP (75th percentile)",
-  "web.vitals.inp_p75": "INP (75th percentile)",
-  "web.vitals.cls_p75": "CLS (75th percentile)",
+  "campaign.soft_bounced": "Held up",
+  "campaign.hard_bounced": "Could not be delivered",
+  "campaign.complained": "Marked as spam",
+  "campaign.unsubscribed": "Left the list",
+  "campaign.unique_clicks_reported": "Clicked a link",
+  "campaign.unique_opens_reported": "Opened",
+  "form.conversion_rate": "Messages for every form seen",
+  "web.vitals.lcp_p75": "Time to show the main content",
+  "web.vitals.inp_p75": "Time to answer a tap",
+  "web.vitals.cls_p75": "Movement while the page loads",
 };
 
-function metricLabel(metricKey: string) {
-  return metricLabels[metricKey] ?? metricKey;
+function metricName(metricKey: string) {
+  return metricNames[metricKey] ?? metricKey;
+}
+
+function sourceName(source: string | null | undefined) {
+  if (source === null || source === undefined) return "your site";
+  return sourceNames[source] ?? "your site";
+}
+
+/** Says, in plain words, why a number is missing and who should have it. */
+function absenceSentence(value: AnalyticsValue, source: string | null) {
+  if (value.state !== "unavailable") return "";
+  const who = sourceName(source);
+  switch (value.reason) {
+    case "source_unavailable":
+      return `Not shown, because ${who} is not reporting.`;
+    case "provider_omitted":
+      return `Not shown, because ${who} did not report it.`;
+    case "not_supported":
+      return `Not shown, because ${who} does not report it.`;
+    case "outside_retention":
+      return "Not shown, because this period is older than the figures kept.";
+    default:
+      return "Nothing has been counted for this period yet.";
+  }
+}
+
+function formatNumber(value: number) {
+  return value.toLocaleString("en-CA");
 }
 
 function formatValue(value: AnalyticsValue, unit: string) {
   if (value.state === "suppressed") return value.label;
-  if (value.state === "unavailable") {
-    return unavailableLabels[value.reason] ?? "Unavailable";
-  }
+  if (value.state === "unavailable") return "No figure";
   if (unit === "ratio") return `${(value.value * 100).toFixed(1)}%`;
   if (unit === "milliseconds") return `${Math.round(value.value)} ms`;
   if (unit === "score") return value.value.toFixed(2);
-  return value.value.toLocaleString("en-CA");
+  return formatNumber(value.value);
+}
+
+const dayLabelFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+});
+
+function dayLabel(bucketStartUtc: string) {
+  return dayLabelFormat.format(new Date(Date.parse(bucketStartUtc)));
+}
+
+function readingValue(reading: AnalyticsReading | undefined) {
+  if (reading === undefined) return null;
+  return reading.value.state === "available" ? reading.value.value : null;
+}
+
+/** "Up 12% on the 7 days before", and the plain cases around it. */
+function changeSentence(
+  current: number | null,
+  previous: number | null,
+  periodDays: number,
+) {
+  const before = `on the ${periodDays} days before`;
+  if (current === null || previous === null) {
+    return `No figure for the ${periodDays} days before.`;
+  }
+  if (previous === 0) {
+    return current === 0
+      ? `No change ${before}.`
+      : `Up from none ${before}.`;
+  }
+  const change = Math.round(((current - previous) / previous) * 100);
+  if (change === 0) return `No change ${before}.`;
+  return change > 0
+    ? `Up ${change}% ${before}.`
+    : `Down ${Math.abs(change)}% ${before}.`;
+}
+
+function HeadlineNumber({
+  reading,
+  previous,
+  periodDays,
+  help,
+}: {
+  reading: AnalyticsReading | undefined;
+  previous: AnalyticsReading | undefined;
+  periodDays: number;
+  help: string;
+}) {
+  if (reading === undefined) return null;
+  const unavailable = reading.value.state === "unavailable";
+  return (
+    <div className="analytics-headline">
+      <p className="analytics-headline-label">
+        {metricName(reading.metricKey)}
+        <HelpTip label={`What is ${metricName(reading.metricKey)}?`}>
+          {help}
+        </HelpTip>
+      </p>
+      <p
+        className={
+          unavailable
+            ? "analytics-headline-value analytics-value-unavailable"
+            : "analytics-headline-value"
+        }
+      >
+        {formatValue(reading.value, reading.unit)}
+      </p>
+      <p className="analytics-headline-note">
+        {unavailable
+          ? absenceSentence(reading.value, reading.source)
+          : changeSentence(
+              readingValue(reading),
+              readingValue(previous),
+              periodDays,
+            )}
+      </p>
+    </div>
+  );
+}
+
+const chartBarWidth = 5;
+const chartBarGap = 5;
+/**
+ * The chart is four times as wide as it is tall, in the stylesheet and in the
+ * drawing. Matching them keeps the scale even, so a bar's rounded top is not
+ * stretched sideways.
+ */
+const chartAspect = 4;
+
+/**
+ * Page views each day, drawn as plain SVG. There is no charting library: the
+ * shape is a row of bars, and the tallest day sets the scale.
+ */
+function PageViewChart({
+  days,
+  periodDays,
+}: {
+  days: ReadonlyArray<AnalyticsTrafficDay>;
+  periodDays: number;
+}) {
+  const counted = days.filter((day) => day.pageViews.state === "available");
+  if (counted.length === 0) {
+    return (
+      <p className="analytics-empty">
+        No day in the last {periodDays} days has been counted yet.
+      </p>
+    );
+  }
+  const highest = counted.reduce((best, day) =>
+    (day.pageViews as { value: number }).value >
+    (best.pageViews as { value: number }).value
+      ? day
+      : best,
+  );
+  const highestValue = Math.max(
+    1,
+    (highest.pageViews as { value: number }).value,
+  );
+  const step = chartBarWidth + chartBarGap;
+  const width = days.length * step - chartBarGap;
+  const chartHeight = width / chartAspect;
+
+  return (
+    <>
+      <svg
+        className="analytics-chart"
+        viewBox={`0 0 ${width} ${chartHeight}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Page views each day for the last ${periodDays} days. The busiest day was ${dayLabel(
+          highest.bucketStartUtc,
+        )} with ${formatNumber(highestValue)} page views.`}
+      >
+        {days.map((day, index) => {
+          const value =
+            day.pageViews.state === "available" ? day.pageViews.value : null;
+          const height =
+            value === null
+              ? 0
+              : Math.max(1, (value / highestValue) * chartHeight);
+          return (
+            <rect
+              key={day.bucketStartUtc}
+              x={index * step}
+              y={chartHeight - height}
+              width={chartBarWidth}
+              height={height}
+              rx={1}
+              className={
+                value === null
+                  ? "analytics-chart-bar analytics-chart-bar-uncounted"
+                  : "analytics-chart-bar"
+              }
+            />
+          );
+        })}
+      </svg>
+      <p className="analytics-chart-scale">
+        <span>{dayLabel(days[0].bucketStartUtc)}</span>
+        <span>{dayLabel(days[days.length - 1].bucketStartUtc)}</span>
+      </p>
+      <p className="analytics-chart-note">
+        Busiest day: {dayLabel(highest.bucketStartUtc)},{" "}
+        {formatNumber(highestValue)} page views.
+        {counted.length < days.length
+          ? ` ${days.length - counted.length} of these days have not been counted yet.`
+          : ""}
+      </p>
+    </>
+  );
 }
 
 function ReadingCell({
@@ -102,46 +301,23 @@ function ReadingCell({
   const unavailable = reading.value.state === "unavailable";
   return (
     <div className="analytics-metric">
-      <dt>{metricLabel(reading.metricKey)}</dt>
+      <dt>{metricName(reading.metricKey)}</dt>
       <dd className={unavailable ? "analytics-value-unavailable" : undefined}>
         {formatValue(reading.value, reading.unit)}
       </dd>
       <p className="analytics-metric-meta">
-        <span className={`analytics-quality quality-${reading.quality}`}>
-          {qualityLabels[reading.quality] ?? reading.quality}
-        </span>
-        {isDerived ? null : (
-          <>
-            {" · "}
-            <span>
-              {reading.sourceName ?? "no source"}
-              {reading.sourceMetric === null
+        {unavailable
+          ? absenceSentence(
+              reading.value,
+              isDerived ? null : reading.source,
+            )
+          : `${qualityNotes[reading.quality] ?? "Counted"}${
+              isDerived
                 ? ""
-                : ` · ${reading.sourceMetric}`}
-              {reading.definitionVersion === null
-                ? ""
-                : ` · definition v${reading.definitionVersion}`}
-            </span>
-            {" · "}
-            <span>
-              {freshnessLabels[reading.freshness] ?? reading.freshness}
-            </span>
-          </>
-        )}
+                : ` · ${freshnessNotes[reading.freshness] ?? "Up to date"}`
+            }.`}
       </p>
       <p className="analytics-metric-definition">{reading.definition}</p>
-      {isDerived ? null : (
-        <p className="analytics-metric-definition">
-          {reading.observedAt === null
-            ? "No observation recorded yet."
-            : `Observed ${reading.observedAt}; complete through ${reading.completeThrough}.`}
-          {reading.unavailableBuckets > 0
-            ? ` ${reading.unavailableBuckets} of ${
-                reading.measuredBuckets + reading.unavailableBuckets
-              } buckets were not measured.`
-            : ""}
-        </p>
-      )}
     </div>
   );
 }
@@ -154,17 +330,20 @@ function SourceHealthTable({
   if (sources.length === 0) {
     return (
       <p className="analytics-empty">
-        No source has reported yet. Every measurement below is unavailable.
+        Nothing has reported yet, so no number above has a source.
       </p>
     );
   }
   return (
-    <div className="inventory-table" role="table" aria-label="Source health">
+    <div
+      className="inventory-table"
+      role="table"
+      aria-label="Where these numbers come from"
+    >
       <div className="inventory-row inventory-head" role="row">
-        <span role="columnheader">Source</span>
-        <span role="columnheader">Status</span>
-        <span role="columnheader">Complete through</span>
-        <span role="columnheader">Last success</span>
+        <span role="columnheader">Where the number comes from</span>
+        <span role="columnheader">How it is doing</span>
+        <span role="columnheader">Counted up to</span>
       </div>
       {sources.map((source) => (
         <div
@@ -172,21 +351,40 @@ function SourceHealthTable({
           role="row"
           key={`${source.source}:${source.sourceName}`}
         >
-          <strong role="cell">
-            {source.sourceName} · {source.source}
-          </strong>
+          <strong role="cell">{sourceName(source.source)}</strong>
           <span role="cell" className="state-label">
-            {sourceStatusLabels[source.status] ?? source.status}
-            {source.errorCode === null ? "" : ` (${source.errorCode})`}
-            {source.nextRetryAt === null
-              ? ""
-              : ` · retry ${source.nextRetryAt}`}
+            {sourceStatusNames[source.status] ?? source.status}
           </span>
-          <span role="cell">{source.completeThrough ?? "Never"}</span>
-          <span role="cell">{source.lastSuccessAt ?? "Never"}</span>
+          <span role="cell">
+            {source.completeThrough === null
+              ? "Nothing yet"
+              : dayLabel(source.completeThrough)}
+          </span>
         </div>
       ))}
     </div>
+  );
+}
+
+function PeriodSwitch({ periodDays }: { periodDays: number }) {
+  const periods = [7, 30];
+  return (
+    <nav className="analytics-period" aria-label="How far back to look">
+      {periods.map((days) => (
+        <a
+          key={days}
+          href={`/dash/analytics?days=${days}`}
+          className={
+            days === periodDays
+              ? "analytics-period-option analytics-period-chosen"
+              : "analytics-period-option"
+          }
+          aria-current={days === periodDays ? "page" : undefined}
+        >
+          Last {days} days
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -200,10 +398,10 @@ export function AnalyticsDashboard({
       <section aria-labelledby="analytics-heading">
         <div className="dashboard-section-heading">
           <div>
-            <h2 id="analytics-heading">Analytics</h2>
+            <h2 id="analytics-heading">Your numbers</h2>
             <p>
-              The aggregate read model is unavailable, so no measurement is
-              shown here.
+              Your visitor numbers cannot be read at the moment, so none are
+              shown here. Nothing has been lost; the counting carries on.
             </p>
           </div>
         </div>
@@ -211,105 +409,117 @@ export function AnalyticsDashboard({
     );
   }
 
-  const { overview, content, contentTitles, forms, audience, campaigns, health } =
-    analytics;
-  // Two web sources reporting one referrer arrive as two rows. The source
-  // name tells them apart, and is shown only when there is more than one.
-  const referrerSourceNames = new Set(
-    overview.referrers.map((row) => row.sourceName),
-  );
+  const {
+    periodDays,
+    sample,
+    overview,
+    traffic,
+    content,
+    contentTitles,
+    contentPaths,
+    forms,
+    audience,
+    campaigns,
+    health,
+  } = analytics;
+
+  const metricFor = (metricKey: string) =>
+    overview.metrics.find((entry) => entry.metricKey === metricKey);
+  const previousFor = (metricKey: string) =>
+    overview.comparison?.metrics.find(
+      (entry) => entry.metricKey === metricKey,
+    );
+
+  const topPages = content.items
+    .map((item) => ({
+      subjectId: item.subjectId,
+      reading: item.readings[0],
+    }))
+    .filter((item) => item.reading !== undefined);
 
   return (
-    <section aria-labelledby="analytics-heading" className="analytics">
-      <div className="dashboard-section-heading">
-        <div>
-          <h2 id="analytics-heading">Analytics</h2>
-          <p>
-            {overview.range.fromLocalDate} to {overview.range.toLocalDate} in{" "}
-            {overview.range.timeZone} ({overview.range.startUtc} to{" "}
-            {overview.range.endUtc} UTC), read from {overview.range.granularity}
-            {" facts"}.
-            {overview.range.containsIncompleteBucket
-              ? " The most recent bucket is still in progress."
-              : ""}
-            {overview.range.clampedToRetention
-              ? " Part of this range is older than the retained window."
-              : ""}
-          </p>
-        </div>
+    <section className="analytics" aria-label="Visitor numbers">
+      <PeriodSwitch periodDays={periodDays} />
+
+      {sample ? (
+        <p className="analytics-sample-note" role="note">
+          These are made-up sample figures for local development. A published
+          site shows only its own counted numbers.
+        </p>
+      ) : null}
+
+      <div className="analytics-headlines">
+        <HeadlineNumber
+          reading={metricFor("web.visits")}
+          previous={previousFor("web.visits")}
+          periodDays={periodDays}
+          help="A visit is one arrival from somewhere else, such as a search result or a link. Your site sets no cookies, so it cannot count how many different people these visits are."
+        />
+        <HeadlineNumber
+          reading={metricFor("web.page_views")}
+          previous={previousFor("web.page_views")}
+          periodDays={periodDays}
+          help="One page view is one page of your site opened. A reader who opens three pages counts as three page views."
+        />
       </div>
 
-      <h3>Overview</h3>
-      <dl className="analytics-grid">
-        {overview.metrics.map((reading) => (
-          <ReadingCell
-            key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
-            reading={reading}
-          />
-        ))}
-      </dl>
+      <h2>Page views each day</h2>
+      <PageViewChart days={traffic.days} periodDays={periodDays} />
 
-      {overview.referrers.length === 0 ? null : (
-        <>
-          <h3>Where visits came from</h3>
-          <div
-            className="inventory-table"
-            role="table"
-            aria-label="Referrers"
-          >
-            <div className="inventory-row inventory-head" role="row">
-              <span role="columnheader">Referrer</span>
-              <span role="columnheader">Page views</span>
-            </div>
-            {overview.referrers.map((row) => (
-              <div
-                className="inventory-row"
-                role="row"
-                key={`${row.dimensionKey}:${row.dimensionValue}:${row.comparabilitySignature}`}
-              >
-                <strong role="cell">
-                  {row.dimensionValue}
-                  {referrerSourceNames.size > 1 ? (
-                    <span className="analytics-note"> {row.sourceName}</span>
-                  ) : null}
-                </strong>
-                <span role="cell">{formatValue(row.value, "count")}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <h3>Content</h3>
-      {content.items.length === 0 ? (
+      <h2>Your most read pages</h2>
+      {topPages.length === 0 ? (
         <p className="analytics-empty">
-          No content measurement has been projected for this range.
+          No page has been counted in the last {periodDays} days.
         </p>
       ) : (
-        content.items.map((item) => (
-          <div className="analytics-subject" key={item.subjectId}>
-            <h4>{contentTitles[item.subjectId] ?? item.subjectId}</h4>
-            <dl className="analytics-grid">
-              {[...item.readings, ...item.vitals].map((reading) => (
-                <ReadingCell
-                  key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
-                  reading={reading}
-                />
-              ))}
-            </dl>
-          </div>
-        ))
+        <ol className="analytics-rank">
+          {topPages.map((item) => (
+            <li className="analytics-rank-row" key={item.subjectId}>
+              <span className="analytics-rank-name">
+                {contentTitles[item.subjectId] ?? item.subjectId}
+                <span className="analytics-rank-path">
+                  {contentPaths[item.subjectId] ?? ""}
+                </span>
+              </span>
+              <span className="analytics-rank-value">
+                {formatValue(item.reading.value, "count")}
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
 
-      <h3>Forms</h3>
+      <h2>Where your visits came from</h2>
+      {overview.referrers.length === 0 ? (
+        <p className="analytics-empty">
+          Nothing has been counted about where visits came from in the last{" "}
+          {periodDays} days.
+        </p>
+      ) : (
+        <ol className="analytics-rank">
+          {overview.referrers.map((row) => (
+            <li
+              className="analytics-rank-row"
+              key={`${row.dimensionKey}:${row.dimensionValue}:${row.comparabilitySignature}`}
+            >
+              <span className="analytics-rank-name">{row.dimensionValue}</span>
+              <span className="analytics-rank-value">
+                {formatValue(row.value, "count")}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <h2>Messages</h2>
       {forms.items.length === 0 ? (
         <p className="analytics-empty">
-          No form measurement has been projected for this range.
+          No message has been counted in the last {periodDays} days.
         </p>
       ) : (
         forms.items.map((item) => (
           <div className="analytics-subject" key={item.subjectId}>
-            <h4>{item.subjectId}</h4>
+            <h3>{item.subjectId}</h3>
             <dl className="analytics-grid">
               <ReadingCell reading={item.accepted} />
               <ReadingCell reading={item.blocked} />
@@ -322,30 +532,37 @@ export function AnalyticsDashboard({
         ))
       )}
 
-      <h3>Audience</h3>
-      <dl className="analytics-grid">
-        {audience.metrics.map((reading) => (
-          <ReadingCell
-            key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
-            reading={reading}
-          />
-        ))}
-      </dl>
+      <h2>Your mailing list</h2>
+      {audience.metrics.length === 0 ? (
+        <p className="analytics-empty">
+          Nothing has been counted about your mailing list in the last{" "}
+          {periodDays} days.
+        </p>
+      ) : (
+        <dl className="analytics-grid">
+          {audience.metrics.map((reading) => (
+            <ReadingCell
+              key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
+              reading={reading}
+            />
+          ))}
+        </dl>
+      )}
 
-      <h3>Campaigns</h3>
+      <h2>Newsletters you sent</h2>
       {campaigns.items.length === 0 ? (
         <p className="analytics-empty">
-          No campaign measurement has been projected for this range.
+          No newsletter was sent in the last {periodDays} days.
         </p>
       ) : (
         campaigns.items.map((item) => (
           <div className="analytics-subject" key={item.subjectId}>
-            <h4>{item.subjectId}</h4>
+            <h3>{item.subjectId}</h3>
             {item.providerChanged ? (
               <p className="analytics-warning" role="note">
-                More than one delivery provider reported this campaign. Their
-                definitions differ, so the series are shown separately and are
-                never added together.
+                More than one email service reported this newsletter. They
+                count differently, so the figures are shown apart and are never
+                added together.
               </p>
             ) : null}
             <dl className="analytics-grid">
@@ -358,11 +575,11 @@ export function AnalyticsDashboard({
             </dl>
             {item.collapsedEngagement.length === 0 ? null : (
               <details className="analytics-collapsed">
-                <summary>Reported engagement signals</summary>
+                <summary>Opens and clicks</summary>
                 <p className="analytics-metric-definition">
-                  Privacy proxies, security scanners and link protection can
-                  all trigger these. They are not evidence that a person read
-                  or acted on the message.
+                  Privacy tools, security scanners and link checkers all set
+                  these off. They are not proof that a person read the message
+                  or acted on it.
                 </p>
                 <dl className="analytics-grid">
                   {item.collapsedEngagement.map((reading) => (
@@ -378,33 +595,31 @@ export function AnalyticsDashboard({
         ))
       )}
 
-      <h3>
-        Data health
-        <HelpTip label="What is Data health?">
-          Whether each provider that feeds your numbers is reporting
-          normally. A provider running behind or not reporting does not
-          change numbers already shown — it only means the newest ones are
-          still on the way.
+      <h2>
+        Where these numbers come from
+        <HelpTip label="Where do these numbers come from?">
+          Each part of your site that counts something reports whether it is
+          working. One part running behind does not change a number already
+          shown — it only means the newest figures are still on the way.
         </HelpTip>
-      </h3>
+      </h2>
       <SourceHealthTable sources={health.sources} />
       {health.disagreements.length === 0 ? null : (
         <div className="analytics-warning" role="note">
           <p>
-            Two sources measured the same outcome differently. Both are shown;
-            neither replaces the other.
+            Two parts of your site counted the same thing differently. Both are
+            shown, and neither replaces the other.
           </p>
           <ul>
             {health.disagreements.map((disagreement) => (
               <li key={disagreement.outcome}>
-                <strong>{disagreement.outcome}</strong>:{" "}
                 {disagreement.readings
                   .map(
                     (reading) =>
-                      `${reading.sourceName ?? reading.source} reported ${formatValue(
+                      `${sourceName(reading.source)} counted ${formatValue(
                         reading.value,
                         "count",
-                      )} (${qualityLabels[reading.quality] ?? reading.quality})`,
+                      )}`,
                   )
                   .join("; ")}
               </li>
@@ -413,14 +628,9 @@ export function AnalyticsDashboard({
         </div>
       )}
       <p className="analytics-metric-definition">
-        Aggregate facts are retained for {health.retention.aggregateFactMonths}{" "}
-        months and hourly facts for {health.retention.hourlyFactDays} days.
-        Cloudflare Web Analytics exposes{" "}
-        {health.retention.cloudflareWebAnalyticsMonths} months and Analytics
-        Engine {health.retention.analyticsEngineMonths} months at source.
-        {health.earliestFactInstant === null
-          ? " No fact has been projected yet."
-          : ` The earliest projected fact is ${health.earliestFactInstant}.`}
+        Your numbers are kept for {health.retention.aggregateFactMonths}{" "}
+        months. Nobody is followed from page to page, and no cookie is set to
+        count anything here.
       </p>
     </section>
   );

@@ -45,6 +45,10 @@ import {
   runScheduledAnalyticsProjection,
   type AnalyticsProjectionEnvironment,
 } from "./src/analytics-projection-runtime";
+import {
+  withWebTrafficCounting,
+  type WebTrafficEnvironment,
+} from "./src/web-traffic-collector";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -130,9 +134,21 @@ const dashboardFetch = createDashboardIdentityBoundary<
     openNextWorker.fetch(request, environment, context),
 });
 
+/**
+ * Serves the page, then counts it. A public page view is one anonymous point:
+ * the page, the referring host and an arrival marker. No cookie is set, no
+ * address is read, and the answer is never changed. See ADR-0047.
+ */
+const publicFetch = withWebTrafficCounting<
+  McpProductionEnvironment & WebTrafficEnvironment,
+  ExecutionContext
+>((request, environment, context) =>
+  dashboardFetch(request, environment, context),
+);
+
 async function fetch(
   request: Request,
-  environment: McpProductionEnvironment,
+  environment: McpProductionEnvironment & WebTrafficEnvironment,
   context: ExecutionContext,
 ) {
   if (isMcpProductionRequest(request)) {
@@ -154,7 +170,7 @@ async function fetch(
       );
     }
   }
-  return dashboardFetch(request, environment, context);
+  return publicFetch(request, environment, context);
 }
 
 export default {

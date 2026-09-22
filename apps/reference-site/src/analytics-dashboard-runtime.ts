@@ -11,15 +11,18 @@ import {
   type AnalyticsHealthView,
   type AnalyticsOverviewView,
   type AnalyticsRangeRequest,
+  type AnalyticsTrafficView,
   type ExternalHumanIdentity,
 } from "@humber-foundry/application";
 import {
   pageDisplayTitle,
+  pagePath,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 
+import { sampleAnalyticsDashboard } from "./analytics-sample-data";
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import { dashboardTimeZone } from "./dashboard-time";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
@@ -32,6 +35,20 @@ import type { HumanAccessRequestContext } from "./human-access-runtime";
  */
 
 export const defaultReportingTimeZone = dashboardTimeZone;
+
+/** The two periods the Visitors screen offers. */
+export const reportingPeriodDays = Object.freeze([7, 30] as const);
+
+export type ReportingPeriodDays = (typeof reportingPeriodDays)[number];
+
+export function resolveReportingPeriodDays(
+  requested: string | number | undefined,
+): ReportingPeriodDays {
+  const days = Number(requested);
+  return reportingPeriodDays.includes(days as ReportingPeriodDays)
+    ? (days as ReportingPeriodDays)
+    : 7;
+}
 
 export type AnalyticsDashboardErrorCode =
   | "analytics_not_authorized"
@@ -64,23 +81,26 @@ function isContractFailure(error: unknown): boolean {
   return error instanceof Error && contractErrorNames.has(error.name);
 }
 
+function localDate(instantMs: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instantMs));
+}
+
+/** The reporting range that ends today and covers `days` local days. */
 export function defaultReportingRange(
   now: string,
   timeZone: string = defaultReportingTimeZone,
+  days: ReportingPeriodDays = 7,
 ): AnalyticsRangeRequest {
-  const localToday = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(Date.parse(now)));
-  const fromLocalDate = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(Date.parse(now) - 27 * 86_400_000));
-  return { fromLocalDate, toLocalDate: localToday };
+  const nowMs = Date.parse(now);
+  return {
+    fromLocalDate: localDate(nowMs - (days - 1) * 86_400_000, timeZone),
+    toLocalDate: localDate(nowMs, timeZone),
+  };
 }
 
 /**
@@ -123,7 +143,16 @@ export async function createAnalyticsDashboardContext(
 }
 
 export type AnalyticsDashboardData = Readonly<{
+  /** How many days this reading covers. */
+  periodDays: ReportingPeriodDays;
+  /**
+   * True only for the made-up figures a developer sees on their own machine.
+   * The screen says so on every sample number. It is never true in a
+   * deployed site.
+   */
+  sample: boolean;
   overview: AnalyticsOverviewView;
+  traffic: AnalyticsTrafficView;
   content: AnalyticsContentView;
   /**
    * The page or blog post title an owner reads for one content subject id.
@@ -132,6 +161,8 @@ export type AnalyticsDashboardData = Readonly<{
    * the id is shown as a last resort.
    */
   contentTitles: Readonly<Record<string, string>>;
+  /** The web address of each content subject, for the top pages list. */
+  contentPaths: Readonly<Record<string, string>>;
   forms: AnalyticsFormsView;
   audience: AnalyticsAudienceView;
   campaigns: AnalyticsCampaignsView;
@@ -152,19 +183,55 @@ function contentTitlesFor(
   return titles;
 }
 
+/** The web address of every page and post the site currently has. */
+function contentPathsFor(
+  definition: SiteDefinition,
+): Readonly<Record<string, string>> {
+  const paths: Record<string, string> = {};
+  for (const page of definition.pages) {
+    paths[page.id] = pagePath(page);
+  }
+  for (const post of definition.blog.posts) {
+    paths[post.id] = `/blog/${post.slug}`;
+  }
+  return paths;
+}
+
+/**
+ * Sample figures are for local development only.
+ *
+ * `next dev` has no D1 binding, so the read model cannot answer and the screen
+ * would be empty on a developer's machine. A built site always reports its
+ * own measurements or says a source is unavailable; it never shows these.
+ */
+function localDevelopmentSampleAllowed(): boolean {
+  return process.env.NODE_ENV === "development";
+}
+
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
   now: () => string = () => new Date().toISOString(),
   createContext = createAnalyticsDashboardContext,
+  periodDays: ReportingPeriodDays = 7,
 ): Promise<AnalyticsDashboardData | null> {
   if (humanContext.state !== "authorized") return null;
   const actor = humanContext.identity;
-  const range = defaultReportingRange(now());
+  const observedNow = now();
+  const range = defaultReportingRange(
+    observedNow,
+    defaultReportingTimeZone,
+    periodDays,
+  );
   try {
     const application = await createContext(humanContext, now);
-    const [overview, content, forms, audience, campaigns, health] =
+    const [overview, traffic, content, forms, audience, campaigns, health] =
       await Promise.all([
-        application.queries.overview({ actor, range }),
+        application.queries.overview({
+          actor,
+          range,
+          comparison: "previous_period",
+        }),
+        application.queries.traffic({ actor, range }),
         application.queries.content({ actor, range, limit: 10 }),
         application.queries.forms({ actor, range }),
         application.queries.audience({ actor, range }),
@@ -172,9 +239,13 @@ export async function loadAnalyticsDashboard(
         application.queries.health({ actor, range }),
       ]);
     return {
+      periodDays,
+      sample: false,
       overview,
+      traffic,
       content,
       contentTitles: contentTitlesFor(installedSiteDefinition),
+      contentPaths: contentPathsFor(installedSiteDefinition),
       forms,
       audience,
       campaigns,
@@ -182,9 +253,19 @@ export async function loadAnalyticsDashboard(
     };
   } catch (error) {
     if (isContractFailure(error)) throw error;
+    if (localDevelopmentSampleAllowed()) {
+      return sampleAnalyticsDashboard({
+        now: observedNow,
+        periodDays,
+        timeZone: defaultReportingTimeZone,
+        siteId: installedSiteDefinition.site.id,
+        contentTitles: contentTitlesFor(installedSiteDefinition),
+        contentPaths: contentPathsFor(installedSiteDefinition),
+      });
+    }
     // A site that has no analytics tables yet still renders the rest of the
-    // dashboard. Its analytics section states that the read model is
-    // unavailable, and shows no numbers.
+    // dashboard. Its analytics section states that the numbers cannot be
+    // read, and shows no numbers.
     console.error("analytics_dashboard_unavailable", {
       failure: error instanceof Error ? error.name : "unknown",
     });

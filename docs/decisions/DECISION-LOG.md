@@ -44,3 +44,4 @@
 | [ADR-0037](ADR-0037-mcp-photo-tools.md) | An agent adds a photo by sending its bytes, and places it through the media library's own commands | Accepted | 2026-09-20 |
 | [ADR-0038](ADR-0038-blog-schedule-request-visibility-and-decline.md) | The dashboard shows an app's schedule request, and a person's decline is its own immutable record | Accepted | 2026-09-20 |
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
+| [ADR-0047](ADR-0047-web-traffic-counted-in-the-worker.md) | Web traffic is counted in the Worker request path, with no beacon and no cookie | Accepted | 2026-09-21 |
