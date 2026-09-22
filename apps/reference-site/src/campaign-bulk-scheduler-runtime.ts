@@ -13,6 +13,7 @@ import {
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { createCampaignBulkAudience } from "./campaign-bulk-audience";
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
+import { environmentWithStoredSenderDetails } from "./stored-sender-details";
 import {
   createActiveOwnerCheck,
   createCampaignBulkSourceReader,
@@ -34,9 +35,16 @@ type DurableCampaignBulkEnvironment = HumanAccessEnvironment & {
 };
 
 export async function createDurableCampaignBulkDeliveryApplication(
-  environment: DurableCampaignBulkEnvironment,
+  installationEnvironment: DurableCampaignBulkEnvironment,
 ) {
   const siteId = installedSiteDefinition.site.id;
+  // The Owner may have saved the sender details in Settings. A stored value
+  // wins over the environment variable of the same name, so the footer the
+  // worker stamps on a send matches the one the dashboard showed (ADR-0048).
+  const environment = await environmentWithStoredSenderDetails(
+    installationEnvironment,
+    siteId,
+  );
   const campaignStore = createD1CampaignStore(environment.FOUNDRY_DB);
   const testStore = createD1CampaignTestDeliveryStore(environment.FOUNDRY_DB);
   const subscriberStore = createD1SubscriberLedgerStore(environment.FOUNDRY_DB);
@@ -117,7 +125,12 @@ export async function runScheduledCampaignBulkDeliveries(
   // Nothing may be scheduled or sent while the installation has not set the
   // sender details and compliance footer, so the worker says so and stops rather
   // than claiming work it would have to refuse one operation at a time.
-  const channelConfiguration = resolveCampaignChannel(environment).channel;
+  const channelConfiguration = resolveCampaignChannel(
+    await environmentWithStoredSenderDetails(
+      environment,
+      installedSiteDefinition.site.id,
+    ),
+  ).channel;
   if (channelConfiguration.state !== "configured") {
     throw new Error(channelConfiguration.reason);
   }

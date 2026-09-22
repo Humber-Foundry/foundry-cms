@@ -26,6 +26,7 @@ import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-deliver
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
+import { environmentWithStoredSenderDetails } from "./stored-sender-details";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
@@ -119,7 +120,12 @@ async function loadInstallationParts(
   // scheduled worker report. Reading it first also keeps a malformed
   // unsubscribe address from raising a bare URL error out of the address
   // parser instead of this named reason.
-  const channelConfiguration = resolveCampaignChannel(environment).channel;
+  // A sender detail the Owner saved in Settings wins over the environment
+  // variable of the same name, so an app reads the same footer the dashboard
+  // shows (ADR-0048).
+  const channelConfiguration = resolveCampaignChannel(
+    await environmentWithStoredSenderDetails(environment, siteId),
+  ).channel;
   if (channelConfiguration.state !== "configured") {
     throw new Error(channelConfiguration.reason);
   }

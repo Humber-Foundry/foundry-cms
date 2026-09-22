@@ -1,15 +1,12 @@
 import { Fragment } from "react";
 
-import { notFound } from "next/navigation";
-
 import { mcpSupportedScopes } from "@humber-foundry/application";
 
 import { CopyAddressButton } from "@/components/copy-address-button";
+import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
-import {
-  loadMutationToken,
-  requireAuthorizedDashboardAccess,
-} from "@/src/dashboard-page-context";
+import { loadMutationToken } from "@/src/dashboard-page-context";
+import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
 import { mcpAgentCapabilityDescriptions, mcpAgentNeverDoes } from "@/src/mcp-agent-capabilities";
 import { mcpScopeDisplay } from "@/src/mcp-connection-display";
 import {
@@ -70,10 +67,7 @@ function ClientSteps({ instructions }: { instructions: McpClientInstructions }) 
  * This screen never shows a token, a client secret or a personal address.
  */
 export default async function ConnectAgentPage() {
-  const access = await requireAuthorizedDashboardAccess();
-  if (access.membership.role !== "owner") {
-    notFound();
-  }
+  await requireAuthorizedSettingsAccess();
 
   const mutationToken = await loadMutationToken();
   const mcpConnections = await loadMcpConnectionsForDashboard();
@@ -81,6 +75,13 @@ export default async function ConnectAgentPage() {
 
   return (
     <main className="dashboard-main" id="main">
+      {/* This screen is reached from Settings' Connected agents tab, so it
+          names that tab rather than Settings as a whole (#240). #227 adds the
+          rest of the dashboard's back links. */}
+      <DashboardBackLink
+        href="/dash/settings/agents"
+        label="Back to Connected agents"
+      />
       <div className="page-heading">
         <div>
           <h1>Connect an AI agent</h1>

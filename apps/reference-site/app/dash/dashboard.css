@@ -205,7 +205,8 @@
  * own border and keeps only a plain gap. A card (`.panel`, like the editor
  * card above) keeps its own border on every side instead — see the
  * exclusion note above. */
-.page-heading + section:not(.content-editor):not(.panel) {
+.page-heading + section:not(.content-editor):not(.panel),
+.dash-tabs + section:not(.content-editor):not(.panel) {
   margin-top: var(--dash-gap);
   padding-top: 0;
   border-top: 0;
@@ -364,6 +365,44 @@
 .dash-back-link:hover,
 .dash-back-link:focus-visible {
   text-decoration: underline;
+}
+
+/* Tabs --------------------------------------------------------------------
+ *
+ * The sections of one screen, each at its own address. A row of links that
+ * wraps, not a grid: four labels of different lengths never fill complete rows
+ * at every width, and a row that wraps still reads as a list.
+ *
+ * The open tab is marked by colour and by the line under it, and carries
+ * `aria-current="page"`, so a screen reader announces it too. */
+.dash-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dash-space-2) var(--dash-space-4);
+  margin-bottom: var(--dash-space-6);
+  border-bottom: 1px solid var(--dash-line);
+}
+
+.dash-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+  padding: 0 var(--dash-space-1);
+  border-bottom: 2px solid transparent;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dash-tab:hover,
+.dash-tab:focus-visible {
+  color: var(--dash-ink);
+}
+
+.dash-tab[aria-current="page"] {
+  border-bottom-color: var(--dash-accent);
+  color: var(--dash-accent);
 }
 
 /* List and rows -----------------------------------------------------------
@@ -1689,16 +1728,28 @@
   font-size: var(--dash-text-small);
 }
 
-/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean, each
- * behind its own help tip (#150). A row of short labels, not a grid, since
- * five items never fill complete rows at every width. */
-.access-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  margin: 0 0 1rem;
+/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean is written
+ * into the rows themselves now, as plain sentences, in place of the legend of
+ * five help tips that used to sit above the table (#240). The base rule above
+ * capitalises every word, which is right for the single word "owner" and wrong
+ * for a sentence, so these two cells set it back. */
+.member-access-table .inventory-row strong small,
+.member-access-state small {
+  display: block;
+  margin-top: var(--dash-space-1);
   color: var(--ink-soft);
   font-size: var(--dash-text-small);
+  font-weight: 500;
+  text-transform: none;
+}
+
+/* "Invite someone", under the table it adds a row to. The same size as the
+ * body text around it, in the accent colour, so this section still reads with
+ * two type sizes and colour carrying the hierarchy. */
+.dashboard .access-invite-heading {
+  margin: var(--dash-space-6) 0 var(--dash-space-3);
+  color: var(--dash-accent);
+  font-size: var(--dash-text);
 }
 
 .access-sync-retry-controls {
@@ -1706,6 +1757,66 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* Sender details ----------------------------------------------------------
+ *
+ * The five values that go at the bottom of every email, edited in place on
+ * Settings' Email tab (#240). One field per line: each holds a full name, a
+ * postal address or a web address, so two side by side would only make both
+ * too narrow to read what is in them. */
+.sender-details-form {
+  display: grid;
+  gap: var(--dash-space-4);
+  max-width: 34rem;
+  margin-top: var(--dash-space-4);
+}
+
+.sender-details-source {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.sender-details-field {
+  display: grid;
+  gap: var(--dash-space-2);
+}
+
+/* The field's name and its one line of help are the same small size, as the
+ * invite form's labels already are. The value the owner typed is the body
+ * size, so a field reads as two sizes and no more. */
+.sender-details-field-name {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.sender-details-field input,
+.sender-details-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--dash-control-height);
+  padding: var(--dash-space-3);
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  background: var(--dash-field-bg);
+  color: var(--dash-ink);
+}
+
+.sender-details-field input[aria-invalid="true"],
+.sender-details-field textarea[aria-invalid="true"] {
+  border-color: var(--dash-warn-ink);
+}
+
+.sender-details-field small {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.sender-details-field input[aria-invalid="true"] ~ small,
+.sender-details-field textarea[aria-invalid="true"] ~ small {
+  color: var(--dash-warn-ink);
 }
 
 @media (max-width: 720px) {
