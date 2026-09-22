@@ -56,8 +56,8 @@ export function CampaignScreen({
   const [message, setMessage] = useState("");
   /**
    * Why the last test did not go out, or "" while there is nothing to say.
-   * It is drawn on the test step itself, because a refusal belongs beside
-   * the control that was pressed, not at the foot of the screen.
+   * It is drawn on the test step itself, beside the control that was
+   * pressed.
    */
   const [testProblem, setTestProblem] = useState("");
   const [busy, setBusy] = useState(false);

@@ -446,6 +446,12 @@ describe("one campaign's screen, browser acceptance", () => {
     });
     expect(step.getAttribute("data-state")).toBe("now");
     expect(buttonNamed(host, "Send me a test")).toBeDefined();
+    // The step is the one place that says it.
+    const saidAt = Array.from(host.querySelectorAll('[role="status"]')).filter(
+      (element) => element.textContent?.includes("too many requests"),
+    );
+    expect(saidAt).toHaveLength(1);
+    expect(step.contains(saidAt[0]!)).toBe(true);
   });
 
   it("makes the owner read the same review before it will approve", async () => {
