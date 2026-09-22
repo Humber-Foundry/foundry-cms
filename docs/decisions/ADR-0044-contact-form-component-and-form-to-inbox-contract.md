@@ -61,12 +61,21 @@ the block is scaffolded, not through the editor.
 
 **The form's own fields are fixed, and the words around them are the owner's.**
 The heading, the sentence under it and the button label are editable. The three
-fields come from the declared form, and the inbox reads them by the roles that
-declaration gives them (`sender`, `replyAddress`, `preview`). An owner who
-could add a field would produce messages the inbox cannot summarize.
+fields — a name, an address to reply to, and a message — are the fields of a
+contact form, and the inbox reads them by the roles the declaration gives them
+(`sender`, `replyAddress`, `preview`). An owner who could add a field would
+produce messages the inbox cannot summarize.
+
+This block therefore fits a form of that shape. A `formId` that names a form
+with different field ids is refused by the server, and the visitor is told the
+message could not be sent. Drawing a form from any declared field list is a
+larger change and is not made here.
 
 **The block asks before it draws a field.** `GET /api/forms/<formId>/submissions`
-answers `available`, `schemaVersion` and `turnstileSiteKey`, and nothing else.
+answers `available`, `schemaVersion`, `turnstileAction` and `turnstileSiteKey`,
+and nothing else. The action name comes from the server because the server
+refuses a message whose check reports any other action: a block that carried
+its own action name would work only for a form named `contact`.
 This mirrors the newsletter signup form (ADR-0031's public status rule): a field
 that looks ready and then refuses every message is worse than a plain sentence
 saying the form is not ready. The answer names no setting and carries no secret,
@@ -85,7 +94,10 @@ without one. Messages prints that name. No screen has to show a form id.
 **Messages lists the forms the site has.** "Forms on your site" reads the
 declared forms and walks the **draft** definition's pages for `contactForm`
 blocks, so a block the owner has just placed is listed before the site is
-published. Each row names the form, links to every page it appears on, and says
+published. Messages names no workspace in its address: it reads whichever draft
+the person is editing. Taking a `?workspace=` value would let a stale link
+redirect and throw away the inbox cursor the screen already carries in
+`?older=`. Each row names the form, links to every page it appears on, and says
 how many messages it has brought in. A declared form on no page is listed and
 says so, because that is the reason an inbox stays empty.
 

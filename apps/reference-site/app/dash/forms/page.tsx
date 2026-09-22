@@ -15,7 +15,6 @@ import {
 import {
   loadDashboardWorkspace,
   loadMutationToken,
-  readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
 import { siteFormsOverview } from "@/src/site-forms-overview";
@@ -57,19 +56,20 @@ export default async function DashboardFormsPage({
 }) {
   const access = await requireAuthorizedDashboardAccess();
   const mutationToken = await loadMutationToken();
-  const { workspace, staleRecovery } =
-    await readWorkspaceSearchParams(searchParams);
   const { inbox, suspectedSpam, notificationHealth } =
     await loadPublicFormInbox(
       access,
       readInboxCursor((await searchParams).older),
     );
   // The draft, not the published site, so a form block the owner has just
-  // placed is listed here before the site is published.
+  // placed is listed here before the site is published. Messages is not an
+  // editing destination, so it names no workspace: it reads whichever draft
+  // this person is editing. Naming one would let a stale `?workspace=` link
+  // redirect and throw away the inbox cursor in `?older=`.
   const dashboardWorkspace = await loadDashboardWorkspace(
-    workspace,
+    undefined,
     "/dash/forms",
-    staleRecovery,
+    undefined,
   );
   const forms = siteFormsOverview(
     dashboardWorkspace.contentRevision.definition,

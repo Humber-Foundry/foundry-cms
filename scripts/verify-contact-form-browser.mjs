@@ -110,6 +110,7 @@ async function standInForTheDeployment(page) {
         body: JSON.stringify({
           available: true,
           schemaVersion: "1.0.0",
+          turnstileAction: "contact",
           turnstileSiteKey: "0xSTANDIN",
         }),
       });

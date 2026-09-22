@@ -6,10 +6,11 @@ import { isHttpsUrl, isPresent } from "./settings-presence";
  * What a public form block on the site is allowed to know before a visitor
  * types anything.
  *
- * A visitor is told whether the form works and, when it does, the form's
- * schema version and the public Turnstile site key the widget needs. Every
- * other configuration detail stays on the server: how a site is configured is
- * none of a visitor's business.
+ * A visitor is told whether the form works and, when it does, the three
+ * values the block needs to send a message the server will accept: the form's
+ * schema version, the automated-traffic check's action name, and the public
+ * Turnstile site key the widget needs. Every other configuration detail stays
+ * on the server: how a site is configured is none of a visitor's business.
  *
  * The form asks this before it shows a field, the same way the newsletter
  * signup form does. A field that looks ready and then refuses every message is
@@ -18,6 +19,11 @@ import { isHttpsUrl, isPresent } from "./settings-presence";
 export type PublicFormPublicStatus = Readonly<{
   available: boolean;
   schemaVersion: string | null;
+  /**
+   * The action name the widget must claim. The server refuses a message whose
+   * check reports any other action, so the block cannot guess this.
+   */
+  turnstileAction: string | null;
   turnstileSiteKey: string | null;
 }>;
 
@@ -50,6 +56,7 @@ export function publicFormPublicStatus(
   return Object.freeze({
     available,
     schemaVersion: available ? form!.schemaVersion : null,
+    turnstileAction: available ? form!.turnstileAction : null,
     turnstileSiteKey: available
       ? (environment.FOUNDRY_TURNSTILE_SITE_KEY?.trim() ?? null)
       : null,

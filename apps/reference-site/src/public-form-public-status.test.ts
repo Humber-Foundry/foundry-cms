@@ -18,6 +18,7 @@ describe("what a public form block is told before a visitor types", () => {
     expect(publicFormPublicStatus(contact, complete)).toEqual({
       available: true,
       schemaVersion: "1.0.0",
+      turnstileAction: "contact",
       turnstileSiteKey: "0xSITEKEY",
     });
   });
@@ -26,6 +27,7 @@ describe("what a public form block is told before a visitor types", () => {
     expect(publicFormPublicStatus(undefined, complete)).toEqual({
       available: false,
       schemaVersion: null,
+      turnstileAction: null,
       turnstileSiteKey: null,
     });
   });
@@ -42,6 +44,7 @@ describe("what a public form block is told before a visitor types", () => {
     expect(publicFormPublicStatus(contact, partial)).toEqual({
       available: false,
       schemaVersion: null,
+      turnstileAction: null,
       turnstileSiteKey: null,
     });
   });

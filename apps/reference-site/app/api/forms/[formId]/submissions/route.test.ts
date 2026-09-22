@@ -145,6 +145,7 @@ describe("what a form block is told before a visitor types", () => {
     runtimeMocks.status.mockResolvedValue({
       available: true,
       schemaVersion: "1.0.0",
+      turnstileAction: "contact",
       turnstileSiteKey: "0xSITEKEY",
     });
 
@@ -159,6 +160,7 @@ describe("what a form block is told before a visitor types", () => {
     await expect(response.json()).resolves.toEqual({
       available: true,
       schemaVersion: "1.0.0",
+      turnstileAction: "contact",
       turnstileSiteKey: "0xSITEKEY",
     });
   });
@@ -167,6 +169,7 @@ describe("what a form block is told before a visitor types", () => {
     runtimeMocks.status.mockResolvedValue({
       available: false,
       schemaVersion: null,
+      turnstileAction: null,
       turnstileSiteKey: null,
     });
 
@@ -181,6 +184,7 @@ describe("what a form block is told before a visitor types", () => {
     expect(JSON.parse(body)).toEqual({
       available: false,
       schemaVersion: null,
+      turnstileAction: null,
       turnstileSiteKey: null,
     });
   });

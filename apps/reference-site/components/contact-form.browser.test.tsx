@@ -22,6 +22,7 @@ const props = {
 const workingStatus = {
   available: true,
   schemaVersion: "1.0.0",
+  turnstileAction: "contact",
   turnstileSiteKey: "0xSITEKEY",
 };
 
@@ -126,6 +127,7 @@ describe("the public contact form", () => {
     answerStatus({
       available: false,
       schemaVersion: null,
+      turnstileAction: null,
       turnstileSiteKey: null,
     });
     render();
@@ -168,6 +170,22 @@ describe("the public contact form", () => {
     }
     expect(document.querySelector("button")!.textContent).toBe("Send message");
     expect(document.querySelector("h2")!.id).toBe("section_contact_form_title");
+  });
+
+  it("asks the check to claim the action the server named", async () => {
+    // The server refuses a message whose check reports any other action, so
+    // the block must not carry an action name of its own.
+    const drawWidget = vi.fn().mockReturnValue("widget-1");
+    window.turnstile = { render: drawWidget, reset: vi.fn() };
+    answerStatus({ ...workingStatus, turnstileAction: "enquiries" });
+    render();
+    await readyForm();
+    await waitFor(() => (drawWidget.mock.calls.length > 0 ? true : undefined));
+    expect(drawWidget.mock.calls[0]![1]).toMatchObject({
+      action: "enquiries",
+      sitekey: "0xSITEKEY",
+      size: "flexible",
+    });
   });
 
   it("sends what the visitor wrote to the form's own address", async () => {

@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import { loadTurnstile } from "./turnstile";
+
 /**
  * The public contact form.
  *
@@ -19,21 +21,25 @@ import { useEffect, useId, useRef, useState } from "react";
  * sends nothing at all. See ADR-0044.
  */
 
+/**
+ * What the server said this form needs before it can send: the site key the
+ * widget draws with, the action name the check must claim, and the form's
+ * schema version. The server refuses a message that claims any other action,
+ * so none of these is guessed here.
+ */
+type FormContract = Readonly<{
+  siteKey: string;
+  turnstileAction: string;
+  schemaVersion: string;
+}>;
+
 type Status =
   | { state: "loading" }
   | { state: "unavailable" }
-  | { state: "ready"; siteKey: string; schemaVersion: string }
-  | { state: "sending"; siteKey: string; schemaVersion: string }
+  | ({ state: "ready" } & FormContract)
+  | ({ state: "sending" } & FormContract)
   | { state: "done" }
-  | {
-      state: "error";
-      siteKey: string;
-      schemaVersion: string;
-      message: string;
-    };
-
-const turnstileScript =
-  "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  | ({ state: "error"; message: string } & FormContract);
 
 export type ContactFormProps = Readonly<{
   /** The declared public form this block sends to. */
@@ -46,27 +52,6 @@ export type ContactFormProps = Readonly<{
   /** True inside the dashboard editor, where the form must not send anything. */
   previewOnly?: boolean;
 }>;
-
-function loadTurnstile(): Promise<void> {
-  if (window.turnstile !== undefined) return Promise.resolve();
-  const existing = document.querySelector<HTMLScriptElement>(
-    `script[src="${turnstileScript}"]`,
-  );
-  if (existing !== null) {
-    return new Promise((resolve, reject) => {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("turnstile")));
-    });
-  }
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = turnstileScript;
-    script.async = true;
-    script.addEventListener("load", () => resolve());
-    script.addEventListener("error", () => reject(new Error("turnstile")));
-    document.head.append(script);
-  });
-}
 
 export function ContactForm({
   formId,
@@ -82,7 +67,7 @@ export function ContactForm({
   const statusId = useId();
   const [status, setStatus] = useState<Status>(
     previewOnly
-      ? { state: "ready", siteKey: "", schemaVersion: "" }
+      ? { state: "ready", siteKey: "", turnstileAction: "", schemaVersion: "" }
       : { state: "loading" },
   );
   const [name, setName] = useState("");
@@ -105,12 +90,14 @@ export function ContactForm({
         const value = (await response.json()) as {
           available?: boolean;
           schemaVersion?: string | null;
+          turnstileAction?: string | null;
           turnstileSiteKey?: string | null;
         };
         if (cancelled) return;
         if (
           value.available !== true ||
           !value.turnstileSiteKey ||
+          !value.turnstileAction ||
           !value.schemaVersion
         ) {
           setStatus({ state: "unavailable" });
@@ -119,6 +106,7 @@ export function ContactForm({
         setStatus({
           state: "ready",
           siteKey: value.turnstileSiteKey,
+          turnstileAction: value.turnstileAction,
           schemaVersion: value.schemaVersion,
         });
       } catch {
@@ -131,6 +119,8 @@ export function ContactForm({
   }, [endpoint, previewOnly]);
 
   const siteKey = "siteKey" in status ? status.siteKey : "";
+  const turnstileAction =
+    "turnstileAction" in status ? status.turnstileAction : "";
 
   useEffect(() => {
     if (previewOnly || siteKey === "" || challenge.current === null) return;
@@ -142,7 +132,7 @@ export function ContactForm({
         if (cancelled || challenge.current === null) return;
         widgetId.current = window.turnstile?.render(challenge.current, {
           sitekey: siteKey,
-          action: "contact",
+          action: turnstileAction,
           // Flexible sizing fills the widget's container, so the check stays
           // as wide as the fields above it.
           size: "flexible",
@@ -160,32 +150,35 @@ export function ContactForm({
     return () => {
       cancelled = true;
     };
-  }, [previewOnly, siteKey]);
+  }, [previewOnly, siteKey, turnstileAction]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // A refused try must be tryable again. `error` keeps the site key and the
-    // schema version, so the form is still able to send.
+    // A refused try must be tryable again. `error` keeps everything the server
+    // said, so the form is still able to send.
     if (previewOnly || (status.state !== "ready" && status.state !== "error")) {
       return;
     }
-    const { schemaVersion } = status;
+    const contract: FormContract = {
+      siteKey,
+      turnstileAction,
+      schemaVersion: status.schemaVersion,
+    };
     if (token.current === "") {
       setStatus({
         state: "error",
-        siteKey,
-        schemaVersion,
+        ...contract,
         message: "Please finish the check above, then try again.",
       });
       return;
     }
-    setStatus({ state: "sending", siteKey, schemaVersion });
+    setStatus({ state: "sending", ...contract });
     try {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          schemaVersion,
+          schemaVersion: contract.schemaVersion,
           submissionId: crypto.randomUUID(),
           // A blank address is left out rather than sent empty, so a stored
           // message never carries an address nobody typed.
@@ -206,20 +199,20 @@ export function ContactForm({
       token.current = "";
       setStatus({
         state: "error",
-        siteKey,
-        schemaVersion,
+        ...contract,
         message:
           response.status === 429
             ? "Too many tries just now. Please wait a minute and try again."
-            : "We could not send your message. Please try again.",
+            : response.status === 503
+              ? "This form cannot take messages just now. Your words are still here — please try again later."
+              : "We could not send your message. Please try again.",
       });
     } catch {
       window.turnstile?.reset(widgetId.current);
       token.current = "";
       setStatus({
         state: "error",
-        siteKey,
-        schemaVersion,
+        ...contract,
         message: "We could not reach the server. Please try again.",
       });
     }
