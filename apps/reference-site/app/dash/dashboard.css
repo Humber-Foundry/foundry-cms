@@ -706,17 +706,25 @@
   min-width: 0;
 }
 
-/* The address is a control of its own — it opens the live site — so it is a
- * full-height tap target rather than a word on a line. */
+/* The one link to the live site. It carries the site's own address with it,
+ * so the owner reads the address rather than a second word for "the site".
+ * It is a control, so it is a full-height tap target. */
 .dash-site-card-address {
   display: inline-flex;
+  flex-wrap: wrap;
   min-height: var(--dash-control-height);
   align-items: center;
+  gap: var(--dash-space-2);
   max-width: 100%;
-  overflow-wrap: anywhere;
   color: var(--dash-accent);
   font-size: var(--dash-text-small);
   font-weight: 600;
+}
+
+.dash-site-card-host {
+  overflow-wrap: anywhere;
+  color: var(--dash-ink-soft);
+  font-weight: 400;
 }
 
 .dash-site-card-state,
@@ -736,21 +744,24 @@
  * fixed at four, so every row of the grid fills: four across on a wide
  * screen, two by two in between, one under another on a phone.
  *
- * Two text sizes in a card: the figure, and everything that describes it.
- * A number a source cannot supply draws its sentence in place of the figure,
- * never a zero. */
+ * Two text sizes in the whole section: the figure, and everything that
+ * describes it. There is no heading over the row, because a heading would
+ * be a third size and each card already names what it counts.
+ *
+ * A number a source cannot supply draws its sentence in place of the
+ * figure, never a zero. */
 
 .dash-numbers {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--dash-space-4);
-  margin: var(--dash-space-4) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .dash-numbers-sample {
-  margin: var(--dash-space-4) 0 0;
+  margin: 0 0 var(--dash-space-4);
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }

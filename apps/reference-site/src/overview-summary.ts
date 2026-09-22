@@ -4,6 +4,8 @@ import type {
   ContentPublicationStatus,
 } from "@humber-foundry/application";
 
+import { dashboardRoutes } from "@/components/dashboard-destinations";
+
 /**
  * What Overview shows, worked out from data other modules already load.
  *
@@ -43,6 +45,29 @@ function formatCount(value: number): string {
 }
 
 /**
+ * A key number a store answers with a plain count. `null` means the store
+ * could not answer on this request, and the card then carries `missingNote`
+ * in place of a figure.
+ */
+function countedNumber({
+  key,
+  label,
+  href,
+  count,
+  missingNote,
+}: {
+  key: string;
+  label: string;
+  href: string;
+  count: number | null;
+  missingNote: string;
+}): OverviewNumber {
+  return count === null
+    ? { key, label, href, value: null, note: missingNote }
+    : { key, label, href, value: formatCount(count), note: null };
+}
+
+/**
  * Visits over the reporting period, from the Visitors read model.
  *
  * Two parts of a site can each count visits, and their counts are different
@@ -57,7 +82,7 @@ export function visitsOverviewNumber(
   const shared = {
     key: "visits",
     label: `Visits in the last ${periodDays} days`,
-    href: `/dash/analytics?days=${periodDays}`,
+    href: `${dashboardRoutes.visitors}?days=${periodDays}`,
   };
   if (overview === null) {
     return {
@@ -106,19 +131,14 @@ export function visitsOverviewNumber(
 export function messagesOverviewNumber(
   unreadCount: number | null,
 ): OverviewNumber {
-  const shared = {
+  return countedNumber({
     key: "messages",
     label: "Messages you have not read",
-    href: "/dash/forms",
-  };
-  if (unreadCount === null) {
-    return {
-      ...shared,
-      value: null,
-      note: "Your message store could not be read just now, so there is no figure.",
-    };
-  }
-  return { ...shared, value: formatCount(unreadCount), note: null };
+    href: dashboardRoutes.messages,
+    count: unreadCount,
+    missingNote:
+      "Your message store could not be read just now, so there is no figure.",
+  });
 }
 
 /**
@@ -128,27 +148,27 @@ export function messagesOverviewNumber(
 export function subscribersOverviewNumber(
   confirmedCount: number | null,
 ): OverviewNumber {
-  const shared = {
+  return countedNumber({
     key: "subscribers",
     label: "People on your list",
-    href: "/dash/subscribers",
-  };
-  if (confirmedCount === null) {
-    return {
-      ...shared,
-      value: null,
-      note: "Your subscriber list could not be read just now, so there is no figure.",
-    };
-  }
-  return { ...shared, value: formatCount(confirmedCount), note: null };
+    href: dashboardRoutes.subscribers,
+    count: confirmedCount,
+    missingNote:
+      "Your subscriber list could not be read just now, so there is no figure.",
+  });
 }
 
-/** How many pages the live site serves. */
-export function pagesOverviewNumber(publishedPageCount: number): OverviewNumber {
+/**
+ * How many pages the live site serves. This is read from the published site
+ * itself, which the screen already holds, so it is always available.
+ */
+export function pagesOverviewNumber(
+  publishedPageCount: number,
+): OverviewNumber {
   return {
     key: "pages",
     label: "Pages on your site",
-    href: "/dash/pages",
+    href: dashboardRoutes.pages,
     value: formatCount(publishedPageCount),
     note: null,
   };
@@ -172,7 +192,7 @@ export type OverviewActivityItem = Readonly<{
  * activity only has to say whether the site went live.
  */
 function publishLabel(status: ContentPublicationStatus): string {
-  if (status === "verified-live") return "You published your site";
+  if (status === "verified-live") return "Your site was published";
   if (status === "failed" || status === "blocked") {
     return "A publish stopped before anything went live";
   }
@@ -184,11 +204,14 @@ export const overviewActivityLimit = 5;
 
 /**
  * The last few things that happened to the site: each publish attempt, and
- * the owner's own last save of the draft.
+ * the last save of the draft.
  *
  * The publishes come from the same records the Published history panel
  * reads. The save is one time for the whole draft, because a save writes
- * every page together.
+ * every page together, and the CMS keeps that one time rather than a list.
+ * So there is at most one save line, and it is written without naming a
+ * person: a workspace can be written by an owner, an editor or a connected
+ * app, and these records do not say which.
  */
 export function recentSiteActivity({
   publications,
@@ -222,7 +245,7 @@ export function recentSiteActivity({
             at: draftSavedAt,
             item: {
               key: "draft-saved",
-              label: "You saved changes to your draft",
+              label: "Your draft was saved",
               time: formatMoment(draftSavedAt),
               href: editorHref,
             },

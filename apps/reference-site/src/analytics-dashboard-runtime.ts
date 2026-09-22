@@ -199,6 +199,75 @@ function localDevelopmentSampleAllowed(): boolean {
   return process.env.NODE_ENV === "development";
 }
 
+/** How a caller asks for a reading of the aggregate read model. */
+type AnalyticsReadOptions = Readonly<{
+  now?: () => string;
+  createContext?: typeof createAnalyticsDashboardContext;
+  periodDays?: ReportingPeriodDays;
+}>;
+
+/**
+ * Reads the aggregate read model and applies the same three rules to every
+ * screen that reads it:
+ *
+ * - a caller who is not an authorized member gets nothing;
+ * - a breach of one of our own guards is thrown on, so the error boundary
+ *   shows it rather than hiding it as "no data";
+ * - a read that cannot be answered gives `null` in a deployed site, and the
+ *   made-up sample figures only on a developer's own machine.
+ *
+ * `read` runs the queries the screen needs. `fromSample` takes the same
+ * shape out of the sample dashboard, so a developer sees the same screen.
+ */
+async function readAnalytics<Result>(
+  humanContext: HumanAccessRequestContext,
+  { now = () => new Date().toISOString(), createContext = createAnalyticsDashboardContext, periodDays = reportingPeriodDays[0] }: AnalyticsReadOptions,
+  failureName: string,
+  read: (
+    application: Awaited<ReturnType<typeof createAnalyticsDashboardContext>>,
+    context: Readonly<{
+      actor: ExternalHumanIdentity;
+      range: AnalyticsRangeRequest;
+      periodDays: ReportingPeriodDays;
+    }>,
+  ) => Promise<Result>,
+  fromSample: (sample: AnalyticsDashboardData) => Result,
+): Promise<Result | null> {
+  if (humanContext.state !== "authorized") return null;
+  const actor = humanContext.identity;
+  const observedNow = now();
+  const range = defaultReportingRange(
+    observedNow,
+    defaultReportingTimeZone,
+    periodDays,
+  );
+  try {
+    const application = await createContext(humanContext, now);
+    return await read(application, { actor, range, periodDays });
+  } catch (error) {
+    if (isContractFailure(error)) throw error;
+    if (localDevelopmentSampleAllowed()) {
+      return fromSample(
+        sampleAnalyticsDashboard({
+          now: observedNow,
+          periodDays,
+          timeZone: defaultReportingTimeZone,
+          siteId: installedSiteDefinition.site.id,
+          contentTitles: contentTitlesFor(installedSiteDefinition),
+          contentPaths: contentPathsFor(installedSiteDefinition),
+        }),
+      );
+    }
+    // A site that has no analytics tables yet still renders the rest of the
+    // dashboard. The screen that asked states that the numbers cannot be
+    // read, and shows no numbers.
+    console.error(failureName, {
+      failure: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+}
+
 /** The headline part of the Visitors read model, on its own. */
 export type AnalyticsOverviewSummary = Readonly<{
   periodDays: ReportingPeriodDays;
@@ -219,119 +288,66 @@ export type AnalyticsOverviewSummary = Readonly<{
  */
 export async function loadAnalyticsOverview(
   humanContext: HumanAccessRequestContext,
-  {
-    now = () => new Date().toISOString(),
-    createContext = createAnalyticsDashboardContext,
-    periodDays = reportingPeriodDays[0],
-  }: {
-    now?: () => string;
-    createContext?: typeof createAnalyticsDashboardContext;
-    periodDays?: ReportingPeriodDays;
-  } = {},
+  options: AnalyticsReadOptions = {},
 ): Promise<AnalyticsOverviewSummary | null> {
-  if (humanContext.state !== "authorized") return null;
-  const actor = humanContext.identity;
-  const observedNow = now();
-  const range = defaultReportingRange(
-    observedNow,
-    defaultReportingTimeZone,
-    periodDays,
+  return readAnalytics<AnalyticsOverviewSummary>(
+    humanContext,
+    options,
+    "analytics_overview_unavailable",
+    async (application, { actor, range, periodDays }) => ({
+      periodDays,
+      sample: false,
+      overview: await application.queries.overview({
+        actor,
+        range,
+        comparison: "previous_period",
+      }),
+    }),
+    (sample) => ({
+      periodDays: sample.periodDays,
+      sample: true,
+      overview: sample.overview,
+    }),
   );
-  try {
-    const application = await createContext(humanContext, now);
-    const overview = await application.queries.overview({
-      actor,
-      range,
-      comparison: "previous_period",
-    });
-    return { periodDays, sample: false, overview };
-  } catch (error) {
-    if (isContractFailure(error)) throw error;
-    if (localDevelopmentSampleAllowed()) {
-      const sample = sampleAnalyticsDashboard({
-        now: observedNow,
-        periodDays,
-        timeZone: defaultReportingTimeZone,
-        siteId: installedSiteDefinition.site.id,
-        contentTitles: contentTitlesFor(installedSiteDefinition),
-        contentPaths: contentPathsFor(installedSiteDefinition),
-      });
-      return { periodDays, sample: true, overview: sample.overview };
-    }
-    console.error("analytics_overview_unavailable", {
-      failure: error instanceof Error ? error.name : "unknown",
-    });
-    return null;
-  }
 }
 
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
-  {
-    now = () => new Date().toISOString(),
-    createContext = createAnalyticsDashboardContext,
-    periodDays = reportingPeriodDays[0],
-  }: {
-    now?: () => string;
-    createContext?: typeof createAnalyticsDashboardContext;
-    periodDays?: ReportingPeriodDays;
-  } = {},
+  options: AnalyticsReadOptions = {},
 ): Promise<AnalyticsDashboardData | null> {
-  if (humanContext.state !== "authorized") return null;
-  const actor = humanContext.identity;
-  const observedNow = now();
-  const range = defaultReportingRange(
-    observedNow,
-    defaultReportingTimeZone,
-    periodDays,
-  );
-  try {
-    const application = await createContext(humanContext, now);
-    const [overview, traffic, content, forms, audience, campaigns, health] =
-      await Promise.all([
-        application.queries.overview({
-          actor,
-          range,
-          comparison: "previous_period",
-        }),
-        application.queries.traffic({ actor, range }),
-        application.queries.content({ actor, range, limit: 10 }),
-        application.queries.forms({ actor, range }),
-        application.queries.audience({ actor, range }),
-        application.queries.campaigns({ actor, range, limit: 10 }),
-        application.queries.health({ actor, range }),
-      ]);
-    return {
-      periodDays,
-      sample: false,
-      overview,
-      traffic,
-      content,
-      contentTitles: contentTitlesFor(installedSiteDefinition),
-      contentPaths: contentPathsFor(installedSiteDefinition),
-      forms,
-      audience,
-      campaigns,
-      health,
-    };
-  } catch (error) {
-    if (isContractFailure(error)) throw error;
-    if (localDevelopmentSampleAllowed()) {
-      return sampleAnalyticsDashboard({
-        now: observedNow,
+  return readAnalytics<AnalyticsDashboardData>(
+    humanContext,
+    options,
+    "analytics_dashboard_unavailable",
+    async (application, { actor, range, periodDays }) => {
+      const [overview, traffic, content, forms, audience, campaigns, health] =
+        await Promise.all([
+          application.queries.overview({
+            actor,
+            range,
+            comparison: "previous_period",
+          }),
+          application.queries.traffic({ actor, range }),
+          application.queries.content({ actor, range, limit: 10 }),
+          application.queries.forms({ actor, range }),
+          application.queries.audience({ actor, range }),
+          application.queries.campaigns({ actor, range, limit: 10 }),
+          application.queries.health({ actor, range }),
+        ]);
+      return {
         periodDays,
-        timeZone: defaultReportingTimeZone,
-        siteId: installedSiteDefinition.site.id,
+        sample: false,
+        overview,
+        traffic,
+        content,
         contentTitles: contentTitlesFor(installedSiteDefinition),
         contentPaths: contentPathsFor(installedSiteDefinition),
-      });
-    }
-    // A site that has no analytics tables yet still renders the rest of the
-    // dashboard. Its analytics section states that the numbers cannot be
-    // read, and shows no numbers.
-    console.error("analytics_dashboard_unavailable", {
-      failure: error instanceof Error ? error.name : "unknown",
-    });
-    return null;
-  }
+        forms,
+        audience,
+        campaigns,
+        health,
+      };
+    },
+    (sample) => sample,
+  );
 }

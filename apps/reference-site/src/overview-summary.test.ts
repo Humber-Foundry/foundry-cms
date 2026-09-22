@@ -175,7 +175,7 @@ describe("recentSiteActivity", () => {
     });
 
     expect(items).toHaveLength(overviewActivityLimit);
-    expect(items[0].label).toBe("You saved changes to your draft");
+    expect(items[0].label).toBe("Your draft was saved");
     expect(items[1].key).toBe("publication-p6");
     expect(items[0].time).toBe("on 2026-09-07T00:00:00.000Z");
     expect(items.every((item) => item.href === editorHref)).toBe(true);

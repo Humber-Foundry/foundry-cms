@@ -9,6 +9,26 @@
  * Every entry is a real route. The navigation never shows a name the owner
  * cannot open.
  */
+/**
+ * The route of each destination, by the job it does.
+ *
+ * Another module that links to a screen — Overview's key numbers, for one —
+ * reads the route from here instead of writing `/dash/...` again, so a route
+ * only ever changes in this file.
+ */
+export const dashboardRoutes = Object.freeze({
+  overview: "/dash",
+  pages: "/dash/pages",
+  blog: "/dash/blog",
+  photos: "/dash/media",
+  design: "/dash/design",
+  messages: "/dash/forms",
+  newsletter: "/dash/campaigns",
+  subscribers: "/dash/subscribers",
+  visitors: "/dash/analytics",
+  settings: "/dash/settings",
+} as const);
+
 export type DashboardDestination = Readonly<{
   href: string;
   label: string;
@@ -20,27 +40,27 @@ export type DashboardDestination = Readonly<{
 /** The jobs that change what a visitor sees. */
 export const siteDestinations: ReadonlyArray<DashboardDestination> = [
   {
-    href: "/dash",
+    href: dashboardRoutes.overview,
     label: "Overview",
     description: "What needs your attention today",
   },
   {
-    href: "/dash/pages",
+    href: dashboardRoutes.pages,
     label: "Pages",
     description: "Edit the words and sections on your site",
   },
   {
-    href: "/dash/blog",
+    href: dashboardRoutes.blog,
     label: "Blog",
     description: "Write, preview and publish posts",
   },
   {
-    href: "/dash/media",
+    href: dashboardRoutes.photos,
     label: "Photos",
     description: "Upload and replace pictures",
   },
   {
-    href: "/dash/design",
+    href: dashboardRoutes.design,
     label: "Design",
     description: "Pick a look, then fine-tune fonts, colours and spacing",
   },
@@ -49,22 +69,22 @@ export const siteDestinations: ReadonlyArray<DashboardDestination> = [
 /** The jobs about the people who read, contact or subscribe to the site. */
 export const audienceDestinations: ReadonlyArray<DashboardDestination> = [
   {
-    href: "/dash/forms",
+    href: dashboardRoutes.messages,
     label: "Messages",
     description: "Read what people sent through your forms",
   },
   {
-    href: "/dash/campaigns",
+    href: dashboardRoutes.newsletter,
     label: "Newsletter",
     description: "Write and send emails to your subscribers",
   },
   {
-    href: "/dash/subscribers",
+    href: dashboardRoutes.subscribers,
     label: "Subscribers",
     description: "See who is on your list, and export it",
   },
   {
-    href: "/dash/analytics",
+    href: dashboardRoutes.visitors,
     label: "Visitors",
     description: "See how the site is used",
   },
@@ -72,7 +92,7 @@ export const audienceDestinations: ReadonlyArray<DashboardDestination> = [
 
 /** Access, connected agents and installation detail. Owners only. */
 export const settingsDestination: DashboardDestination = {
-  href: "/dash/settings",
+  href: dashboardRoutes.settings,
   label: "Settings",
   description: "People, connected agents and site details",
   ownerOnly: true,

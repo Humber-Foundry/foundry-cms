@@ -43,9 +43,9 @@ import { homePage, type BlogPostId } from "@humber-foundry/site-definition";
 export const dynamic = "force-dynamic";
 
 /**
- * How far back the key numbers look. Visitors offers 7 days and 30 days;
- * Overview reports the longer one, so a quiet week still shows a figure, and
- * its link opens Visitors on the same period.
+ * How far back the key numbers look. Issue #228 asks for the last 30 days,
+ * which is also one of the two periods the Visitors screen offers, so the
+ * number's link opens Visitors on the same period.
  */
 const overviewPeriodDays = 30;
 
@@ -127,8 +127,8 @@ async function loadPendingBlogScheduleRequests(
 
 /**
  * The address a reader types, taken from the site's own canonical origin.
- * A blank or malformed origin gives no address, and the card then leaves
- * the link out rather than printing a broken one.
+ * A blank or malformed origin gives no address, and the card's View site
+ * link then names the site only, rather than printing a broken address.
  */
 function publicAddressOf(canonicalOrigin: string): string | null {
   try {
@@ -193,9 +193,12 @@ export default async function DashboardOverviewPage({
   const subscriberCounts = await loadSubscriberStateCounts(access).catch(
     () => null,
   );
+  // `null` means the publish records could not be read. An empty list means
+  // nothing has been published yet. Recent activity says something different
+  // for each, so the two answers are kept apart.
   const publications = await loadContentPublicationQueries()
     .then((queries) => queries.listHistory())
-    .catch(() => []);
+    .catch(() => null);
 
   const workspaceQuery = `workspace=${encodeURIComponent(
     dashboardWorkspace.workspaceId,
@@ -206,8 +209,15 @@ export default async function DashboardOverviewPage({
     homePage(contentRevision.definition).id,
   )}`;
   const publicAddress = publicAddressOf(definition.site.canonicalOrigin);
+  // 0 here is only ever used to decide whether to draw a message row. When
+  // the store could not answer, `messages` is null and the section says so
+  // instead of reporting that nothing is waiting.
   const unreadMessages = messages?.unreadCount ?? 0;
   const heldMessages = messages?.heldForReview ?? 0;
+  const otherAttentionItems =
+    previewsToReview.length +
+    pendingScheduleRequests.length +
+    pendingCampaignRequests.length;
 
   return (
     <main className="dashboard-main" id="main">
@@ -216,7 +226,7 @@ export default async function DashboardOverviewPage({
         // The dashboard and the live site are served by the same app, so the
         // site's own root is the address that always opens.
         publicHref="/"
-        publicAddress={publicAddress ?? definition.site.name}
+        publicAddress={publicAddress}
         editHref={editHref}
         hasDraftChanges={contentRevision.revision > 0}
         preview={
@@ -255,15 +265,21 @@ export default async function DashboardOverviewPage({
 
       <section aria-labelledby="attention">
         <h2 id="attention">Needs attention</h2>
-        {unreadMessages === 0 &&
-        heldMessages === 0 &&
-        previewsToReview.length === 0 &&
-        pendingScheduleRequests.length === 0 &&
-        pendingCampaignRequests.length === 0 ? (
+        {messages === null ? (
           <p className="empty-state">
-            Nothing is waiting for you. New messages, anything held as spam,
-            and drafts or schedule requests an app made for you appear here.
+            Your message store could not be read just now, so any new
+            messages and anything held as spam are missing from this list.
+            Open Messages to try again.
           </p>
+        ) : null}
+        {unreadMessages === 0 && heldMessages === 0 && otherAttentionItems === 0 ? (
+          messages === null ? null : (
+            <p className="empty-state">
+              Nothing is waiting for you. New messages, anything held as
+              spam, and drafts or schedule requests an app made for you
+              appear here.
+            </p>
+          )
         ) : (
           <AttentionList
             items={[
@@ -323,13 +339,17 @@ export default async function DashboardOverviewPage({
       </section>
 
       <OverviewActivity
-        items={recentSiteActivity({
-          publications,
-          draftSavedAt: contentRevision.createdAt,
-          draftRevision: contentRevision.revision,
-          editorHref: editHref,
-          formatMoment: formatDashboardMoment,
-        })}
+        items={
+          publications === null
+            ? null
+            : recentSiteActivity({
+                publications,
+                draftSavedAt: contentRevision.createdAt,
+                draftRevision: contentRevision.revision,
+                editorHref: editHref,
+                formatMoment: formatDashboardMoment,
+              })
+        }
       />
     </main>
   );

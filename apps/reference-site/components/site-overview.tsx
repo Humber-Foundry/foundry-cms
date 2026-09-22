@@ -21,8 +21,8 @@ import type {
  * name, the address a reader types, whether the draft holds unpublished
  * changes, and the one button that opens the page editor.
  *
- * The address is the link to the live site, so the owner reads their own
- * address rather than a word that repeats the header.
+ * One link opens the live site, and it carries the address with it, so the
+ * owner reads their own address instead of a second word for "the site".
  */
 export function SiteCard({
   siteName,
@@ -34,9 +34,13 @@ export function SiteCard({
 }: {
   /** The site's name, as the owner wrote it. */
   siteName: string;
-  /** The address a reader types, such as `example.com`. */
-  publicAddress: string;
-  /** Where the address link goes. */
+  /**
+   * The address a reader types, such as `example.com`. `null` when the site
+   * has no readable address; the link then names the site only, rather than
+   * printing something broken.
+   */
+  publicAddress: string | null;
+  /** Where the View site link goes. */
   publicHref: string;
   /** Opens the page editor on the home page, in this person's own draft. */
   editHref: string;
@@ -51,7 +55,10 @@ export function SiteCard({
       <div className="dash-site-card-detail">
         <h1 id="site-card-name">{siteName}</h1>
         <a className="dash-site-card-address" href={publicHref}>
-          {publicAddress}
+          View site
+          {publicAddress === null ? null : (
+            <span className="dash-site-card-host">{publicAddress}</span>
+          )}
         </a>
         <p className="dash-site-card-state">
           {hasDraftChanges ? (
@@ -79,6 +86,9 @@ export function SiteCard({
  *
  * A number a source cannot supply shows one sentence in its place, never a
  * zero. The count is fixed at four, so the row always fills.
+ *
+ * There is no heading over the row. Each card already names what it counts,
+ * and a heading would put a third text size in the section.
  */
 export function OverviewNumbers({
   numbers,
@@ -92,8 +102,7 @@ export function OverviewNumbers({
   sample: boolean;
 }) {
   return (
-    <section aria-labelledby="key-numbers">
-      <h2 id="key-numbers">Key numbers</h2>
+    <section aria-label="Key numbers">
       {sample ? (
         <p className="dash-numbers-sample" role="note">
           The visit figures below are made-up samples for local development.
@@ -122,16 +131,25 @@ export function OverviewNumbers({
 /**
  * The last few things that happened to the site, newest first. Each line
  * opens the page editor, where the full published history is kept.
+ *
+ * `items` is `null` when the publish records could not be read. The section
+ * then says so. An empty list means nothing has happened yet, which is a
+ * different answer and reads differently.
  */
 export function OverviewActivity({
   items,
 }: {
-  items: ReadonlyArray<OverviewActivityItem>;
+  items: ReadonlyArray<OverviewActivityItem> | null;
 }) {
   return (
     <section aria-labelledby="recent-activity">
       <h2 id="recent-activity">Recent activity</h2>
-      {items.length === 0 ? (
+      {items === null ? (
+        <p className="empty-state">
+          Your publish records could not be read just now, so this list is
+          not shown. Nothing has been lost.
+        </p>
+      ) : items.length === 0 ? (
         <DashboardEmptyState title="Nothing has happened yet">
           Edit your site and publish it. Every publish and every saved draft
           is listed here.

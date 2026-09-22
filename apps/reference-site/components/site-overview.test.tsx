@@ -26,6 +26,7 @@ describe("SiteCard", () => {
 
     expect(markup).toContain('<h1 id="site-card-name">Harbour Works</h1>');
     expect(markup).toContain('href="/"');
+    expect(markup).toContain("View site");
     expect(markup).toContain("harbourworks.example");
     expect(markup).toContain(
       'href="/dash/pages?workspace=w1&amp;page=page_home"',
@@ -33,6 +34,22 @@ describe("SiteCard", () => {
     expect(markup).toContain("Edit site");
     expect(markup).toContain("dash-button-primary");
     expect(markup).toContain('class="picture"');
+  });
+
+  it("names the site only when it has no readable address", () => {
+    const markup = renderToStaticMarkup(
+      <SiteCard
+        siteName="Harbour Works"
+        publicAddress={null}
+        publicHref="/"
+        editHref="/dash/pages"
+        hasDraftChanges={false}
+        preview={null}
+      />,
+    );
+
+    expect(markup).toContain("View site");
+    expect(markup).not.toContain("dash-site-card-host");
   });
 
   it("says whether the draft is published, in the owner's words", () => {
@@ -120,5 +137,12 @@ describe("OverviewActivity", () => {
 
     expect(markup).toContain("Nothing has happened yet");
     expect(markup).toContain("dash-empty");
+  });
+
+  it("says the records could not be read, rather than that nothing happened", () => {
+    const markup = renderToStaticMarkup(<OverviewActivity items={null} />);
+
+    expect(markup).toContain("publish records could not be read");
+    expect(markup).not.toContain("Nothing has happened yet");
   });
 });
