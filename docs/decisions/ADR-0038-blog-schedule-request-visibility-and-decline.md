@@ -83,10 +83,15 @@ one for exactly this ticket.
 
 ### 5. The Blog list links straight to the post
 
-Each post's `<li>` in the Blog list now carries `id="blog-post-<id>"`.
-Overview's item links to `/dash/blog?workspace=<id>#blog-post-<id>`, so
+Each post's `<li>` in the Blog list carried `id="blog-post-<id>"`, and
+Overview's item linked to `/dash/blog?workspace=<id>#blog-post-<id>`, so
 "open the request" and "answer it with the schedule controls" is one click,
 matching the issue's "The item links to the post's schedule controls" line.
+
+Since #230 one post has its own screen, so Overview's item links to
+`/dash/blog/<postId>?workspace=<id>` instead of an anchor on the list. The
+request still marks its post's row in the list, and the Decline is in that
+row's action menu.
 
 ## Alternatives considered
 
@@ -130,4 +135,6 @@ matching the issue's "The item links to the post's schedule controls" line.
   title, squeezing the title into a few narrow lines at 1440px. This ticket
   fixes that by grouping the title and every status line into one grid cell
   (`.post-list-info`), so the layout holds regardless of how many status
-  lines a post carries.
+  lines a post carries. Since #230 each active post is a `DashboardListRow`
+  instead of that `<li>` grid, and every status line is one supporting line
+  under the title.

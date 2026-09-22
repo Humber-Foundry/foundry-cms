@@ -236,10 +236,17 @@ async function main() {
       });
     });
 
-    // Go to the blog composer. The composer opens by itself when the blog is
-    // empty.
+    // Blog opens on the posts list, on a site with no posts too (#230). The
+    // empty state is what the owner sees, and "New post" is the way in to the
+    // writing box on its own screen.
     await page.goto(`${origin}/dash/blog?workspace=${workspace}`);
-    await page.getByRole("heading", { name: "Posts" }).waitFor();
+    await page.getByRole("heading", { name: "Blog" }).waitFor();
+    await page.getByText("No posts yet").waitFor({ state: "visible" });
+    if (await page.locator("form.composer").count()) {
+      throw new Error("blog_list_opened_in_the_writing_box");
+    }
+    await page.getByRole("link", { name: "New post" }).click();
+    await page.waitForURL(/\/dash\/blog\/new\?workspace=workspace_[a-f0-9]{24}$/u);
     const composer = page.locator("form.composer");
     await composer.waitFor({ state: "visible" });
 
@@ -282,13 +289,6 @@ async function main() {
       .click();
     await choosePhoto(page, "thumb.png");
 
-    // Mark this document so the reload below can be recognised. A saved post
-    // reloads Blog at the address it is already on, so the address alone
-    // cannot say whether the new document has arrived yet.
-    await page.evaluate(() => {
-      window.__foundryDocumentBeforeSave = true;
-    });
-
     // Save the draft. This is the one content-revision write that carries the
     // whole post.
     await composer.getByRole("button", { name: /^Save draft/u }).click();
@@ -311,22 +311,22 @@ async function main() {
       await new Promise((settle) => setTimeout(settle, 200));
     }
 
-    // A successful save reloads the blog list itself (window.location.assign),
-    // so wait for that reload rather than starting a second navigation that
-    // would race it. The reload lands on the address the page is already on,
-    // so wait for the marked document to be replaced: waiting on the address
-    // would return at once and leave the clicks below hitting a document that
-    // is on its way out. The post then lists with its Preview action.
-    await page.waitForFunction(
-      () => window.__foundryDocumentBeforeSave === undefined,
-      undefined,
-      { timeout: 30_000 },
-    );
+    // A saved draft returns to the posts list, with the new post on it. This
+    // is the ticket's own acceptance: open Blog on an empty site, write one
+    // post, save it, and find it in the list (#230).
     await page.waitForURL(
       /\/dash\/blog\?workspace=workspace_[a-f0-9]{24}$/u,
       { timeout: 30_000 },
     );
-    await page.getByRole("heading", { name: "Posts" }).waitFor();
+    await page.getByRole("heading", { name: "Blog" }).waitFor();
+    const postRow = page.locator("a.dash-row-link", {
+      hasText: "Harbour notes",
+    });
+    await postRow.waitFor({ state: "visible" });
+
+    // The per-post preview lives on that post's own screen.
+    await postRow.click();
+    await page.waitForURL(/\/dash\/blog\/[^/?]+\?workspace=workspace_[a-f0-9]{24}$/u);
     const previewButton = page.getByRole("button", { name: "Preview ↗" });
     await previewButton.first().waitFor({ state: "visible" });
 

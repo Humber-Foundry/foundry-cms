@@ -19,7 +19,7 @@ import {
   type BlogPost,
 } from "@humber-foundry/site-definition";
 
-import { BlogPostControls } from "./blog-post-controls";
+import { BlogPostList } from "./blog-post-list";
 
 const workspaceId = createContentWorkspaceId("workspace_blog_dashboard");
 
@@ -134,7 +134,7 @@ function confirmButton(): HTMLButtonElement | undefined {
   ).find((button) => button.textContent === "Confirm and continue archiving");
 }
 
-describe("blog post controls browser acceptance", () => {
+describe("blog posts list browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
   afterEach(() => {
@@ -149,10 +149,9 @@ describe("blog post controls browser acceptance", () => {
     root = createRoot(host);
     flushSync(() => {
       root!.render(
-        createElement(BlogPostControls, {
+        createElement(BlogPostList, {
           revision,
           csrfToken: "csrf-token",
-          siteImages: [],
           verifiedPublicPostIds: [],
           postSummaries: new Map(),
           archivedPosts,
@@ -187,11 +186,12 @@ describe("blog post controls browser acceptance", () => {
       .element(page.getByRole("button", { name: "Recover access" }))
       .toBeInTheDocument();
     expect(confirmButton()?.disabled).toBe(true);
-    // Restoring is only offered once a post has finished archiving.
+    // Restoring is only offered once a post has finished archiving, so the
+    // control is absent rather than shown turned off.
     const restore = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),
     ).find((button) => button.textContent === "Restore as draft");
-    expect(restore?.disabled).toBe(true);
+    expect(restore).toBeUndefined();
   });
 
   it("enables confirm only after the withdrawal preview was opened in this session", async () => {
@@ -457,7 +457,7 @@ describe("blog post controls browser acceptance", () => {
     root = createRoot(host);
     flushSync(() => {
       root!.render(
-        createElement(BlogPostControls, {
+        createElement(BlogPostList, {
           revision: {
             ...revision,
             definition: {
@@ -469,7 +469,6 @@ describe("blog post controls browser acceptance", () => {
             },
           },
           csrfToken: "csrf-token",
-          siteImages: [],
           verifiedPublicPostIds: [],
           postSummaries: new Map([[pendingPostId, pendingScheduleSummary()]]),
           archivedPosts: [],
@@ -510,12 +509,14 @@ describe("blog post controls browser acceptance", () => {
       )
       .toBeInTheDocument();
     const publishLink = document.querySelector<HTMLAnchorElement>(
-      'a[href="/dash/pages"]',
+      `a[href="/dash/pages?workspace=${encodeURIComponent(workspaceId)}"]`,
     );
     expect(publishLink?.textContent).toBe("Publish the site");
     // The button sits in its own row, never inside the sentence's <p>.
     expect(publishLink?.closest("p")).toBeNull();
 
+    // The request still marks its post in the list (#219), now on the row's
+    // own supporting line.
     await expect
       .element(
         page.getByText(
@@ -523,20 +524,167 @@ describe("blog post controls browser acceptance", () => {
         ),
       )
       .toBeInTheDocument();
-    const declineButton = Array.from(
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for Tide notes" }),
+    );
+    const declineItem = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent === "Decline");
-    expect(declineButton).toBeDefined();
-    // The Decline button sits in the post's action row next to Edit and
-    // Preview, never inside the sentence's <p>.
-    expect(declineButton!.closest("p")).toBeNull();
-    expect(declineButton!.closest(".post-list-actions")).not.toBeNull();
-    // No paragraph anywhere in the Blog list carries a button as a child —
-    // the owner's rule for every screen this ticket covers.
-    expect(document.querySelectorAll("p button")).toHaveLength(0);
+    ).find(
+      (button) => button.textContent === "Decline the app's publish request",
+    );
+    expect(declineItem).toBeDefined();
+    // The Decline item sits in the row's action menu, never inside a sentence.
+    expect(declineItem!.closest("p")).toBeNull();
+    expect(declineItem!.closest(".dash-action-menu")).not.toBeNull();
+    // No paragraph this list writes carries a button as a child — the
+    // owner's rule for every screen this ticket covers. The shared
+    // "publishing is connected" sentence holds its own help button; that is
+    // `ConnectionStatus`'s own shape, not one of this list's controls.
+    const nestedButtons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("p button"),
+    ).filter((button) => button.closest("p.connection-status") === null);
+    expect(nestedButtons).toHaveLength(0);
   });
 
-  it("declines the pending schedule request from its action-row button", async () => {
+  it("shows the empty state and its New post link on a site with no posts", async () => {
+    render([]);
+
+    await expect
+      .element(page.getByText("No posts yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Write your first post to start your blog.",
+        ),
+      )
+      .toBeInTheDocument();
+    // The writing box is its own screen now, so none of its boxes is here.
+    expect(document.querySelector('input[name="title"]')).toBeNull();
+    const newPostLinks = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("a"),
+    ).filter((link) => link.textContent === "New post");
+    expect(newPostLinks).toHaveLength(1);
+    expect(newPostLinks[0]!.getAttribute("href")).toBe(
+      `/dash/blog/new?workspace=${encodeURIComponent(workspaceId)}`,
+    );
+  });
+
+  it("shows one row per post, with its state and date, that opens that post", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({}));
+
+    renderWithPendingSchedule();
+
+    const row = document.querySelector<HTMLAnchorElement>("a.dash-row-link");
+    expect(row?.getAttribute("href")).toBe(
+      `/dash/blog/${pendingPostId}?workspace=${encodeURIComponent(workspaceId)}`,
+    );
+    expect(
+      row?.querySelector(".dash-row-title")?.textContent,
+    ).toBe("Tide notes");
+    expect(row?.querySelector(".dash-row-note")?.textContent).toContain(
+      "Last saved",
+    );
+    expect(
+      document.querySelector(".dash-row-state")?.textContent,
+    ).toBe("Goes live when you next publish the site");
+    // The one save time the CMS holds is named for what it is.
+    await expect
+      .element(page.getByText(/You last saved this draft on/u))
+      .toBeInTheDocument();
+  });
+
+  it("offers no row action while a change is on its way to the server", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
+        // A request that never answers holds the screen in the one state
+        // this test is about: a change sent, no result yet.
+        return new Promise<Response>(() => {});
+      },
+    );
+
+    renderWithPendingSchedule();
+
+    const menuName = "Actions for Tide notes";
+    await userEvent.click(page.getByRole("button", { name: menuName }));
+    await userEvent.click(
+      page.getByRole("menuitem", {
+        name: "Decline the app's publish request",
+      }),
+    );
+
+    // No second command can start on top of the first, so no row offers one.
+    await waitFor(
+      () =>
+        Array.from(
+          document.querySelectorAll<HTMLButtonElement>("button"),
+        ).find((button) => button.getAttribute("aria-label") === menuName) ===
+        undefined,
+    );
+  });
+
+  it("draws no row menu on any row when this installation has no blog-operations store", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({}));
+
+    // Two posts: one can be published now, one waits on the next site
+    // publish. With no store neither row may carry a menu, or the two rows
+    // would take different shapes in one list.
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    flushSync(() => {
+      root!.render(
+        createElement(BlogPostList, {
+          revision: {
+            ...revision,
+            definition: {
+              ...revision.definition,
+              blog: {
+                ...revision.definition.blog,
+                posts: [
+                  pendingSchedulePost(),
+                  {
+                    ...pendingSchedulePost(),
+                    id: createBlogPostId(
+                      "00000000-0000-4000-8000-00000000f003",
+                    ),
+                    slug: "harbour-notes",
+                    title: "Harbour notes",
+                    targetVisibility: "unpublished",
+                  },
+                ],
+              },
+            },
+          },
+          csrfToken: "csrf-token",
+          verifiedPublicPostIds: [],
+          postSummaries: new Map(),
+          archivedPosts: [],
+          pendingScheduleRequestAgentNames: new Map(),
+        }),
+      );
+    });
+
+    expect(document.querySelectorAll("a.dash-row-link")).toHaveLength(2);
+    expect(
+      Array.from(document.querySelectorAll("button")).filter((button) =>
+        button.getAttribute("aria-label")?.startsWith("Actions for"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("declines the pending schedule request from its row menu", async () => {
     const submitted: Array<{ url: string; body: string }> = [];
     vi.stubGlobal(
       "fetch",
@@ -564,7 +712,14 @@ describe("blog post controls browser acceptance", () => {
 
     renderWithPendingSchedule();
 
-    await userEvent.click(page.getByRole("button", { name: "Decline" }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Actions for Tide notes" }),
+    );
+    await userEvent.click(
+      page.getByRole("menuitem", {
+        name: "Decline the app's publish request",
+      }),
+    );
 
     await waitFor(() => submitted.length > 0);
     expect(submitted[0]!.url).toBe("/api/foundry-cms/blog-operations");

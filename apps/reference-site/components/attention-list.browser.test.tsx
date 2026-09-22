@@ -42,7 +42,7 @@ describe("Overview's Needs attention list (issue #222)", () => {
             },
             {
               key: "two",
-              href: "/dash/blog?workspace=w#blog-post-1",
+              href: "/dash/blog/post-1?workspace=w",
               label: 'Draft Assistant asked to publish "Tide notes" at 9am',
             },
             {

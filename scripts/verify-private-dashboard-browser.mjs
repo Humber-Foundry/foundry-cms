@@ -333,9 +333,14 @@ async function main() {
     // Generous timeout: this is the first dashboard request, so the dev server
     // compiles the route before it answers.
     await page.goto(`${origin}/dash/blog`, { timeout: 120_000 });
-    // A fresh site has no posts, so Blog opens its composer ready to write.
-    await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
-    await page.getByRole("textbox", { name: "Title" }).waitFor();
+    // A fresh site has no posts, so Blog opens on its empty state and offers
+    // "New post" (#230). It never opens straight into the writing box.
+    await page.getByRole("heading", { name: "Blog", exact: true }).waitFor();
+    await page.getByText("No posts yet").waitFor();
+    await page.getByRole("link", { name: "New post" }).waitFor();
+    if ((await page.locator("form.composer").count()) > 0) {
+      throw new Error("private_dashboard_blog_opened_in_the_writing_box");
+    }
     if (
       (await page
         .getByRole("button", { name: "Start a fresh draft" })
@@ -531,7 +536,11 @@ async function main() {
       .click();
     await page.waitForURL(/\/dash\/blog\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Blog", exact: true }).waitFor();
-    await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
+    // The writing box is its own screen now (#230): the list offers the way
+    // in, and the back link is the way out.
+    await page.getByRole("link", { name: "New post" }).click();
+    await page.waitForURL(/\/dash\/blog\/new\?workspace=workspace_[a-f0-9]{24}$/u);
+    await page.locator("a.dash-back-link", { hasText: "Back to Blog" }).waitFor();
     const blogTitle = page.locator('.composer input[name="title"]');
     await blogTitle.waitFor();
     if (!(await blogTitle.isEnabled())) {

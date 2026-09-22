@@ -13,9 +13,11 @@ import {
   blogPostLifecycleAction,
   blogPostScheduleStanding,
   confirmArchiveWithdrawal,
+  declineScheduleRequestCommand,
   formatLocalScheduleTime,
   openArchiveWithdrawalPreview,
-} from "./blog-post-controls";
+  pendingScheduleRequestNote,
+} from "./blog-operations";
 
 describe("blog post lifecycle controls", () => {
   const postId = createBlogPostId(
@@ -231,6 +233,39 @@ describe("blog execution failure note", () => {
 
   it("is null when there is no summary yet", () => {
     expect(blogPostExecutionFailureNote(undefined)).toBeNull();
+  });
+
+});
+
+describe("an app's pending schedule request", () => {
+  const postId = createBlogPostId(
+    "00000000-0000-4000-8000-00000000000d",
+  );
+  const proposal = {
+    id: "proposal-1",
+    localDateTime: "2026-10-01T09:00",
+    ianaTimeZone: "America/Vancouver",
+  } as const;
+
+  it("says who asked, and when, in one sentence", () => {
+    expect(pendingScheduleRequestNote("Draft Assistant", proposal)).toBe(
+      `Draft Assistant asked to publish this at ${formatLocalScheduleTime(
+        "2026-10-01T09:00",
+        "America/Vancouver",
+      )}.`,
+    );
+    expect(pendingScheduleRequestNote(null, proposal)).toMatch(/^An app asked/u);
+  });
+
+  it("builds the one decline command both Blog screens send", () => {
+    expect(declineScheduleRequestCommand(postId, proposal)).toEqual({
+      body: {
+        operation: "decline_schedule_proposal",
+        postId,
+        proposalId: "proposal-1",
+      },
+      operation: "decline-blog-post-schedule-proposal",
+    });
   });
 });
 
