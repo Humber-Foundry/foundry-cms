@@ -59,6 +59,7 @@ export function CampaignSendReview({
 }) {
   const senderMissing =
     summary.senderName === null || summary.senderAddress === null;
+  const noSendingAddress = "This site has no sending address yet.";
 
   return (
     <div className="send-review">
@@ -74,12 +75,12 @@ export function CampaignSendReview({
         </ReviewFact>
         <ReviewFact name="From this address">
           {senderMissing
-            ? "This site has no sending address yet."
+            ? noSendingAddress
             : summary.senderAddress}
         </ReviewFact>
         <ReviewFact name="Replies go to">
           {summary.replyAddress === null
-            ? "This site has no sending address yet."
+            ? noSendingAddress
             : summary.replyAddress}
         </ReviewFact>
         <ReviewFact name="The footer, with your postal address">

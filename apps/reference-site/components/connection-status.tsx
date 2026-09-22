@@ -47,11 +47,12 @@ export type ConnectionReadiness = Readonly<{
  * the plain sentence shows by default and the fuller explanation sits behind a
  * `HelpTip` (#149) rather than on every screen that renders it.
  *
- * `settingNamesShownInline`: email and publishing are connected by an operator
- * who reads the setting names, and ADR-0021 puts them on the line. The sender
- * details are the owner's own words — a name and a postal address — so that
- * line says it in plain words and keeps the names behind a disclosure for
- * whoever installs them.
+ * `connectedByOperator`: email and publishing are connected by an operator
+ * who reads the setting names, so ADR-0021 puts an absent name on the line
+ * and local development shows the setup link. The sender details are the
+ * owner's own words — a name and a postal address — so that line says it in
+ * plain words and keeps the names behind a disclosure for whoever installs
+ * them.
  *
  * `setOnLiveSite`: where an owner sets this connection once the site is live,
  * said under the local development sentence. Only a kind with a Settings
@@ -63,7 +64,7 @@ type ConnectionCopy = Readonly<{
   connectedSentence: string;
   notConnectedSentence: string;
   connectedMeaning: string;
-  settingNamesShownInline: boolean;
+  connectedByOperator: boolean;
   setOnLiveSite?: Readonly<{ before: string; label: string; href: string }>;
 }>;
 
@@ -88,7 +89,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
     connectedMeaning:
       "This means every email setting is installed, not that a message was " +
       "sent.",
-    settingNamesShownInline: true,
+    connectedByOperator: true,
     setOnLiveSite: {
       before: "On a live site the email connection is set in ",
       label: "Settings → Email",
@@ -103,7 +104,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
     connectedMeaning:
       "This means every publishing setting is installed, not that GitHub or " +
       "Cloudflare were reached.",
-    settingNamesShownInline: true,
+    connectedByOperator: true,
   },
   senderDetails: {
     setupLinkLabel: "How to set the sender details",
@@ -116,7 +117,7 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
       "This means the name, postal address, contact page and unsubscribe " +
       "page for the bottom of every email are set, and Foundry knows which " +
       "address the email comes from.",
-    settingNamesShownInline: false,
+    connectedByOperator: false,
   },
 };
 
@@ -145,12 +146,6 @@ export function ConnectionStatus({
 
   const copy = connectionCopy[kind];
 
-  const missingNames = readiness.missingSettings.join(", ");
-  const namesInline =
-    readiness.missingSettings.length > 0 && copy.settingNamesShownInline;
-  const namesBehindDisclosure =
-    readiness.missingSettings.length > 0 && !copy.settingNamesShownInline;
-
   // Local development names no setting on the open screen. Nothing is absent
   // that anybody here has to install, and a list of configuration names is
   // words a site owner cannot use. The names a connected site holds still
@@ -161,7 +156,7 @@ export function ConnectionStatus({
       <div className="connection-status">
         <p>
           {copy.localDevelopmentSentence}
-          {copy.settingNamesShownInline ? (
+          {copy.connectedByOperator ? (
             <>
               {" "}
               <a
@@ -205,6 +200,12 @@ export function ConnectionStatus({
       </p>
     );
   }
+
+  const missingNames = readiness.missingSettings.join(", ");
+  const namesInline =
+    readiness.missingSettings.length > 0 && copy.connectedByOperator;
+  const namesBehindDisclosure =
+    readiness.missingSettings.length > 0 && !copy.connectedByOperator;
 
   return (
     <p className="connection-status connection-status-missing" role="alert">

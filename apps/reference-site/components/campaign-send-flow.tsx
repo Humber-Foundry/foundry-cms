@@ -112,13 +112,18 @@ export function CampaignSendFlow({
   const testStaleAfterEdit = report.testEvidence !== null && !tested;
   // The review describes one exact revision. While the report and the screen
   // hold different ones, no send control is offered at all, because the review
-  // would otherwise name a subject nobody is reading. A server answer that
-  // carries no review at all is treated the same way.
+  // would otherwise name a subject nobody is reading.
   const reviewSummary: CampaignSendSummary | null =
-    report.sendSummary !== undefined &&
     report.sendSummary.campaignRevisionId === shownRevisionId
       ? report.sendSummary
       : null;
+  // The test goes to a verified address. Only a site owner holds one, so an
+  // Editor's test lands in the owner's inbox and the step must not promise
+  // the Editor a copy. The step and its button carry the same name.
+  const testStepName =
+    report.testRecipients.yours === null
+      ? "Send the site owner a test"
+      : "Send me a test";
 
   // The tick is one reading of one review, and it is spent on one step.
   //
@@ -322,14 +327,7 @@ export function CampaignSendFlow({
 
         <SendStep
           number={2}
-          // The test goes to a verified address. Only a site owner holds one,
-          // so an Editor's test lands in the owner's inbox and the step must
-          // not promise the Editor a copy.
-          name={
-            report.testRecipients.yours === null
-              ? "Send the site owner a test"
-              : "Send me a test"
-          }
+          name={testStepName}
           state={tested ? "done" : "now"}
           need={testNeed()}
         >
@@ -346,9 +344,7 @@ export function CampaignSendFlow({
                 })
               }
             >
-              {report.testRecipients.yours === null
-                ? "Send the site owner a test"
-                : "Send me a test"}
+              {testStepName}
             </button>
           )}
           {setupGuideNote}

@@ -60,6 +60,8 @@ describe("one campaign's screen, browser acceptance", () => {
       deliveryState?: string;
       deliveryMissingSettings?: ReadonlyArray<string>;
       senderDetailsState?: string;
+      /** The revision the server's send review describes, when not this one. */
+      sendSummaryRevisionId?: string;
     } = {},
   ) {
     const campaign = {
@@ -135,7 +137,7 @@ describe("one campaign's screen, browser acceptance", () => {
           eligibleSubscriberCount: 412,
         },
         sendSummary: {
-          campaignRevisionId: revision.id,
+          campaignRevisionId: options.sendSummaryRevisionId ?? revision.id,
           recipientCount: 412,
           subject: revision.subject,
           senderName: "Example News",
@@ -442,6 +444,29 @@ describe("one campaign's screen, browser acceptance", () => {
         .checked,
     ).toBe(false);
     expect(send.disabled).toBe(true);
+  });
+
+  it("offers no send while the server reviews a different revision", async () => {
+    const server = fakeNewsletterServer({
+      sendSummaryRevisionId: "30000000-0000-4000-8000-000000000099",
+    });
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    server.state.authorizationId = "50000000-0000-4000-8000-000000000001";
+    const host = mount(server.revision, "owner");
+
+    // The review would name a subject nobody is reading, so the screen asks
+    // for a reload instead and offers no control that could send.
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain(
+        "This email changed since the page opened. Reload the page and read " +
+          "it again before you send it.",
+      ),
+    );
+    expect(host.querySelector(".send-review")).toBeNull();
+    expect(buttonNamed(host, "Send to 412 people now")).toBeUndefined();
+    expect(host.querySelector('input[name="sendReviewed"]')).toBeNull();
+    expect(server.commands).toHaveLength(0);
   });
 
   it("makes the owner read a review naming the list before it will send", async () => {

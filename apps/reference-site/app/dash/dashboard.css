@@ -1245,7 +1245,7 @@
 
 .connection-status-details > summary {
   min-height: var(--dash-control-height);
-  padding: 0.6rem 0;
+  padding: var(--dash-space-2) 0;
   color: var(--dash-accent);
   font-weight: 600;
   cursor: pointer;
