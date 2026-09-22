@@ -46,4 +46,5 @@
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
 | [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md) | A page component paints only from design tokens, and two tests fail when one does not | Accepted | 2026-09-21 |
 | [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md) | Photos is a library, and a photo is placed where it is seen | Accepted | 2026-09-21 |
+| [ADR-0047](ADR-0047-web-traffic-counted-in-the-worker.md) | Web traffic is counted in the Worker request path, with no beacon and no cookie | Accepted | 2026-09-21 |
 | [ADR-0048](ADR-0048-sender-details-are-a-stored-site-setting.md) | The sender details are a stored site setting an Owner edits in Settings, with the environment variables as the per-value fallback | Accepted | 2026-09-22 |

@@ -8,7 +8,9 @@ import {
   AnalyticsEngineSourceError,
   interactionRollupSql,
   normalizeAnalyticsEngineRows,
+  normalizeWebTrafficRows,
   queryAnalyticsEngine,
+  webTrafficRollupSql,
 } from "./analytics-engine-source";
 import {
   brevoAnalyticsCapabilities,
@@ -147,6 +149,148 @@ describe("Analytics Engine rollups", () => {
         fetchImplementation,
       }),
     ).rejects.toThrow(AnalyticsEngineSourceError);
+  });
+});
+
+describe("the web traffic rollup", () => {
+  const siteId = "site_reference";
+
+  const row = {
+    bucket_start: "2026-08-01",
+    content_id: "page_about",
+    referrer_key: "referrer_host",
+    referrer_value: "partner.example.com",
+    weighted_page_views: 40,
+    weighted_visits: 25,
+    sample_interval: 1,
+  };
+
+  function measurementsFor(
+    rows: ReadonlyArray<Record<string, unknown>>,
+  ) {
+    return normalizeWebTrafficRows({
+      rows: rows as Parameters<typeof normalizeWebTrafficRows>[0]["rows"],
+      granularity: "day",
+      siteId,
+    });
+  }
+
+  it("reads only the page view columns the Worker writes", () => {
+    const sql = webTrafficRollupSql({
+      dataset: "foundry_reference_interactions",
+      since: "2026-08-01T00:00:00.000Z",
+      until: "2026-08-08T00:00:00.000Z",
+    });
+
+    expect(sql).toContain("blob1 = 'page_view'");
+    expect(sql).toContain("SUM(double1 * _sample_interval)");
+    expect(sql).toContain("SUM(double2 * _sample_interval)");
+    expect(sql).not.toMatch(/blob[5-9]/u);
+  });
+
+  it("keeps a page view point out of the interaction rollup", () => {
+    const sql = interactionRollupSql({
+      dataset: "foundry_reference_interactions",
+      since: "2026-08-01T00:00:00.000Z",
+      until: "2026-08-08T00:00:00.000Z",
+    });
+
+    expect(sql).toContain("blob1 IN ('form_impression', 'cta_activation')");
+  });
+
+  it("reports page views, arrivals, the page and the referrer", () => {
+    const measurements = measurementsFor([row]);
+
+    expect(
+      measurements.find(
+        (entry) =>
+          entry.metricKey === "web.page_views" && entry.dimension.key === "",
+      ),
+    ).toMatchObject({ subjectType: "site", subjectId: siteId, value: 40 });
+    expect(
+      measurements.find((entry) => entry.metricKey === "web.visits"),
+    ).toMatchObject({ value: 25 });
+    expect(
+      measurements.find((entry) => entry.metricKey === "content.page_views"),
+    ).toMatchObject({ subjectType: "content", subjectId: "page_about", value: 40 });
+    expect(
+      measurements.find(
+        (entry) =>
+          entry.metricKey === "web.page_views" &&
+          entry.dimension.key === "referrer_host",
+      ),
+    ).toMatchObject({ dimension: { key: "referrer_host", value: "partner.example.com" }, value: 40 });
+  });
+
+  it("adds the days it is given and weights a sampled row", () => {
+    const measurements = measurementsFor([
+      { ...row, weighted_page_views: 400, sample_interval: 10 },
+      {
+        ...row,
+        referrer_key: "referrer_channel",
+        referrer_value: "direct",
+        weighted_page_views: 100,
+        weighted_visits: 100,
+        sample_interval: 10,
+      },
+    ]);
+
+    expect(
+      measurements.find(
+        (entry) =>
+          entry.metricKey === "web.page_views" && entry.dimension.key === "",
+      ),
+    ).toMatchObject({ value: 500, sampleInterval: 10 });
+  });
+
+  it("leaves a page it does not own out of the per-page rows", () => {
+    const measurements = measurementsFor([{ ...row, content_id: "" }]);
+
+    expect(
+      measurements.some((entry) => entry.metricKey === "content.page_views"),
+    ).toBe(false);
+    expect(
+      measurements.find(
+        (entry) =>
+          entry.metricKey === "web.page_views" && entry.dimension.key === "",
+      )?.value,
+    ).toBe(40);
+  });
+
+  it("counts a move inside the site as a page view with no referrer row", () => {
+    const measurements = measurementsFor([
+      { ...row, referrer_key: "", referrer_value: "", weighted_visits: 0 },
+    ]);
+
+    expect(
+      measurements.every((entry) => entry.dimension.key === ""),
+    ).toBe(true);
+    expect(
+      measurements.find((entry) => entry.metricKey === "web.visits")?.value,
+    ).toBe(0);
+  });
+
+  it("refuses a referrer that is not a bare host or a known channel", () => {
+    expect(() =>
+      measurementsFor([
+        { ...row, referrer_value: "https://partner.example.com/page?a=b" },
+      ]),
+    ).toThrow(AnalyticsEngineSourceError);
+  });
+
+  it("refuses a page id that is not a public id", () => {
+    expect(() =>
+      measurementsFor([{ ...row, content_id: "someone@example.com" }]),
+    ).toThrow(AnalyticsEngineSourceError);
+  });
+
+  it("refuses a count that is not a whole, non-negative reading", () => {
+    expect(() =>
+      measurementsFor([{ ...row, weighted_page_views: -1 }]),
+    ).toThrow(AnalyticsEngineSourceError);
+    expect(() =>
+      measurementsFor([{ ...row, sample_interval: 0 }]),
+    ).toThrow(AnalyticsEngineSourceError);
   });
 });
 

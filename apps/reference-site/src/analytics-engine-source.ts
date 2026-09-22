@@ -1,4 +1,9 @@
-import type { AnalyticsFactMeasurement } from "@humber-foundry/application";
+import {
+  analyticsCompositeKey,
+  isAllowedAnalyticsDimension,
+  splitAnalyticsCompositeKey,
+  type AnalyticsFactMeasurement,
+} from "@humber-foundry/application";
 
 /**
  * Workers Analytics Engine supplies the one thing Web Analytics cannot:
@@ -27,6 +32,22 @@ export const allowedInteractionKinds = Object.freeze({
 });
 
 export type InteractionKind = keyof typeof allowedInteractionKinds;
+
+/**
+ * The event kind the Worker request path writes for one public page view.
+ * It is deliberately outside `allowedInteractionKinds`: a browser may not
+ * report it, and the interaction rollup never reads it.
+ */
+export const webTrafficEventKind = "page_view";
+
+/** The Worker binding an Analytics Engine dataset provides. */
+export type AnalyticsEngineDataset = Readonly<{
+  writeDataPoint(point: {
+    blobs: ReadonlyArray<string>;
+    doubles?: ReadonlyArray<number>;
+    indexes?: ReadonlyArray<string>;
+  }): void;
+}>;
 
 const subjectIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
@@ -139,15 +160,222 @@ export function normalizeAnalyticsEngineRows(
   });
 }
 
+export type WebTrafficRow = Readonly<{
+  /** `YYYY-MM-DD` for a day bucket, `YYYY-MM-DD HH:00:00` for an hour. */
+  bucket_start: string;
+  /** The published page or post id, or `""` for a path the site does not own. */
+  content_id: string;
+  referrer_key: string;
+  referrer_value: string;
+  /** Already multiplied by `_sample_interval` in the SQL projection. */
+  weighted_page_views: number;
+  weighted_visits: number;
+  sample_interval: number;
+}>;
+
+function weightedCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new AnalyticsEngineSourceError("row_invalid");
+  }
+  return value;
+}
+
+function addWeighted(
+  totals: Map<string, { value: number; sampleInterval: number }>,
+  key: string,
+  value: number,
+  sampleInterval: number,
+): void {
+  const current = totals.get(key);
+  totals.set(key, {
+    value: (current?.value ?? 0) + value,
+    sampleInterval: Math.max(current?.sampleInterval ?? 1, sampleInterval),
+  });
+}
+
+/**
+ * Turns weighted page view rows into the three canonical web traffic
+ * measurements: page views for the whole site, arrivals for the whole site,
+ * and page views for each published page. Page views also carry the referrer
+ * dimension, which is where the "where visits came from" rows come from.
+ *
+ * Every row is checked first. A referrer that is not a bare host or a known
+ * channel word, or a page id that is not a public id, is refused rather than
+ * stored.
+ */
+export function normalizeWebTrafficRows({
+  rows,
+  granularity = "day",
+  siteId,
+}: {
+  rows: ReadonlyArray<WebTrafficRow>;
+  granularity?: AnalyticsEngineBucketGranularity;
+  siteId: string;
+}): ReadonlyArray<AnalyticsFactMeasurement> {
+  type Totals = Map<string, { value: number; sampleInterval: number }>;
+  const sitePageViews: Totals = new Map();
+  const siteVisits: Totals = new Map();
+  const referrerPageViews: Totals = new Map();
+  const contentPageViews: Totals = new Map();
+
+  for (const row of rows) {
+    // `bucketInstants` refuses a bucket that is not the expected shape.
+    bucketInstants(row.bucket_start, granularity);
+    if (row.content_id !== "" && !subjectIdPattern.test(row.content_id)) {
+      throw new AnalyticsEngineSourceError("subject_id_invalid");
+    }
+    const dimension = { key: row.referrer_key, value: row.referrer_value };
+    if (!isAllowedAnalyticsDimension(dimension)) {
+      throw new AnalyticsEngineSourceError("row_invalid");
+    }
+    if (
+      !Number.isInteger(row.sample_interval) ||
+      row.sample_interval < 1
+    ) {
+      throw new AnalyticsEngineSourceError("row_invalid");
+    }
+    const pageViews = weightedCount(row.weighted_page_views);
+    const visits = weightedCount(row.weighted_visits);
+    const bucket = row.bucket_start;
+    const interval = row.sample_interval;
+
+    addWeighted(sitePageViews, bucket, pageViews, interval);
+    addWeighted(siteVisits, bucket, visits, interval);
+    if (dimension.key !== "") {
+      addWeighted(
+        referrerPageViews,
+        analyticsCompositeKey([bucket, dimension.key, dimension.value]),
+        pageViews,
+        interval,
+      );
+    }
+    if (row.content_id !== "") {
+      addWeighted(
+        contentPageViews,
+        analyticsCompositeKey([bucket, row.content_id]),
+        pageViews,
+        interval,
+      );
+    }
+  }
+
+  const measurement = (
+    metricKey: string,
+    bucket: string,
+    subjectType: "site" | "content",
+    subjectId: string,
+    dimension: { key: string; value: string },
+    total: { value: number; sampleInterval: number },
+  ): AnalyticsFactMeasurement => ({
+    metricKey,
+    ...bucketInstants(bucket, granularity),
+    granularity,
+    subjectType,
+    subjectId,
+    dimension,
+    unit: "count" as const,
+    // Analytics Engine samples under load, and the request path counts every
+    // caller, so a machine that reads pages is counted as well as a person.
+    quality: "estimated" as const,
+    sampleInterval: total.sampleInterval,
+    value: Math.round(total.value),
+    unavailableReason: null,
+  });
+
+  const emptyDimension = { key: "", value: "" };
+  const measurements: AnalyticsFactMeasurement[] = [];
+
+  for (const [bucket, total] of sitePageViews) {
+    measurements.push(
+      measurement(
+        "web.page_views",
+        bucket,
+        "site",
+        siteId,
+        emptyDimension,
+        total,
+      ),
+    );
+  }
+  for (const [bucket, total] of siteVisits) {
+    measurements.push(
+      measurement("web.visits", bucket, "site", siteId, emptyDimension, total),
+    );
+  }
+  for (const [key, total] of referrerPageViews) {
+    const [bucket, dimensionKey, dimensionValue] =
+      splitAnalyticsCompositeKey(key);
+    measurements.push(
+      measurement(
+        "web.page_views",
+        bucket,
+        "site",
+        siteId,
+        { key: dimensionKey, value: dimensionValue },
+        total,
+      ),
+    );
+  }
+  for (const [key, total] of contentPageViews) {
+    const [bucket, contentId] = splitAnalyticsCompositeKey(key);
+    measurements.push(
+      measurement(
+        "content.page_views",
+        bucket,
+        "content",
+        contentId,
+        emptyDimension,
+        total,
+      ),
+    );
+  }
+
+  return measurements;
+}
+
 const datasetPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 const instantPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
 
 /**
+ * The parts of a rollup statement every query shares.
+ *
  * The Analytics Engine SQL API takes a statement, and offers no bound
  * parameters. Every interpolated value is therefore checked against a strict
- * pattern first, and the statement is refused when one fails.
+ * pattern first, and the query is refused when one fails.
  */
+function rollupFrame({
+  dataset,
+  since,
+  until,
+  granularity,
+}: {
+  dataset: string;
+  since: string;
+  until: string;
+  granularity: AnalyticsEngineBucketGranularity;
+}): Readonly<{ bucketExpression: string; whereWindow: string }> {
+  if (
+    !datasetPattern.test(dataset) ||
+    !instantPattern.test(since) ||
+    !instantPattern.test(until) ||
+    Date.parse(since) >= Date.parse(until)
+  ) {
+    throw new AnalyticsEngineSourceError("query_invalid");
+  }
+  const clickhouseInstant = (instant: string) =>
+    instant.slice(0, 19).replace("T", " ");
+  return {
+    bucketExpression:
+      granularity === "hour"
+        ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
+        : "formatDateTime(toDate(timestamp), '%Y-%m-%d')",
+    whereWindow: `timestamp >= toDateTime('${clickhouseInstant(since)}')
+  AND timestamp < toDateTime('${clickhouseInstant(until)}')`,
+  };
+}
+
+/** The rollup for the anonymous interactions a browser reports. */
 export function interactionRollupSql({
   dataset,
   since,
@@ -159,22 +387,17 @@ export function interactionRollupSql({
   until: string;
   granularity?: AnalyticsEngineBucketGranularity;
 }): string {
-  if (
-    !datasetPattern.test(dataset) ||
-    !instantPattern.test(since) ||
-    !instantPattern.test(until) ||
-    Date.parse(since) >= Date.parse(until)
-  ) {
-    throw new AnalyticsEngineSourceError("query_invalid");
-  }
-  const clickhouseInstant = (instant: string) =>
-    instant.slice(0, 19).replace("T", " ");
-  const bucketExpression =
-    granularity === "hour"
-      ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
-      : "formatDateTime(toDate(timestamp), '%Y-%m-%d')";
-  // blob1 is the event kind and blob2 the public CMS object ID. No other
-  // column is written, so no other column can be selected.
+  const { bucketExpression, whereWindow } = rollupFrame({
+    dataset,
+    since,
+    until,
+    granularity,
+  });
+  // blob1 is the event kind and blob2 the public CMS object ID. The kinds are
+  // named here, so a page view point never reaches the interaction rollup.
+  const kinds = Object.keys(allowedInteractionKinds)
+    .map((kind) => `'${kind}'`)
+    .join(", ");
   return `SELECT
   ${bucketExpression} AS bucket_start,
   blob1 AS event_kind,
@@ -182,30 +405,64 @@ export function interactionRollupSql({
   SUM(_sample_interval) AS weighted_count,
   MAX(_sample_interval) AS sample_interval
 FROM ${dataset}
-WHERE timestamp >= toDateTime('${clickhouseInstant(since)}')
-  AND timestamp < toDateTime('${clickhouseInstant(until)}')
+WHERE ${whereWindow}
+  AND blob1 IN (${kinds})
 GROUP BY bucket_start, event_kind, subject_id
 FORMAT JSON`;
 }
 
-export async function queryAnalyticsEngine({
-  accountId,
-  apiToken,
+/**
+ * The rollup for the page views the Worker request path counts.
+ *
+ * blob1 is the event kind, blob2 the published page or post id, blob3 and
+ * blob4 the referrer dimension, double1 the page view and double2 the
+ * arrival marker. No other column is written, so no other column can be
+ * selected, and none of them can describe a person.
+ */
+export function webTrafficRollupSql({
   dataset,
   since,
   until,
   granularity = "day",
-  fetchImplementation = fetch,
 }: {
-  accountId: string;
-  apiToken: string;
   dataset: string;
   since: string;
   until: string;
   granularity?: AnalyticsEngineBucketGranularity;
+}): string {
+  const { bucketExpression, whereWindow } = rollupFrame({
+    dataset,
+    since,
+    until,
+    granularity,
+  });
+  return `SELECT
+  ${bucketExpression} AS bucket_start,
+  blob2 AS content_id,
+  blob3 AS referrer_key,
+  blob4 AS referrer_value,
+  SUM(double1 * _sample_interval) AS weighted_page_views,
+  SUM(double2 * _sample_interval) AS weighted_visits,
+  MAX(_sample_interval) AS sample_interval
+FROM ${dataset}
+WHERE ${whereWindow}
+  AND blob1 = '${webTrafficEventKind}'
+GROUP BY bucket_start, content_id, referrer_key, referrer_value
+FORMAT JSON`;
+}
+
+/** Runs one statement against the Analytics Engine SQL API. */
+async function runAnalyticsEngineSql({
+  accountId,
+  apiToken,
+  sql,
+  fetchImplementation = fetch,
+}: {
+  accountId: string;
+  apiToken: string;
+  sql: string;
   fetchImplementation?: typeof fetch;
-}): Promise<ReadonlyArray<AnalyticsEngineRow>> {
-  const sql = interactionRollupSql({ dataset, since, until, granularity });
+}): Promise<ReadonlyArray<unknown>> {
   const response = await fetchImplementation(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
       accountId,
@@ -232,5 +489,53 @@ export async function queryAnalyticsEngine({
   if (!Array.isArray(data)) {
     throw new AnalyticsEngineSourceError("query_failed");
   }
-  return data as ReadonlyArray<AnalyticsEngineRow>;
+  return data;
+}
+
+type RollupQuery = Readonly<{
+  accountId: string;
+  apiToken: string;
+  dataset: string;
+  since: string;
+  until: string;
+  granularity?: AnalyticsEngineBucketGranularity;
+  fetchImplementation?: typeof fetch;
+}>;
+
+/** Builds one rollup statement, runs it, and hands back its rows. */
+async function queryRollup<Row>(
+  query: RollupQuery,
+  buildSql: (input: {
+    dataset: string;
+    since: string;
+    until: string;
+    granularity: AnalyticsEngineBucketGranularity;
+  }) => string,
+): Promise<ReadonlyArray<Row>> {
+  const rows = await runAnalyticsEngineSql({
+    accountId: query.accountId,
+    apiToken: query.apiToken,
+    sql: buildSql({
+      dataset: query.dataset,
+      since: query.since,
+      until: query.until,
+      granularity: query.granularity ?? "day",
+    }),
+    fetchImplementation: query.fetchImplementation,
+  });
+  return rows as ReadonlyArray<Row>;
+}
+
+/** The anonymous interactions a browser reported. */
+export function queryAnalyticsEngine(
+  query: RollupQuery,
+): Promise<ReadonlyArray<AnalyticsEngineRow>> {
+  return queryRollup<AnalyticsEngineRow>(query, interactionRollupSql);
+}
+
+/** The page views the Worker request path counted. */
+export function queryWebTraffic(
+  query: RollupQuery,
+): Promise<ReadonlyArray<WebTrafficRow>> {
+  return queryRollup<WebTrafficRow>(query, webTrafficRollupSql);
 }

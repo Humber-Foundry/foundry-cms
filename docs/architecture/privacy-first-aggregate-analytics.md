@@ -28,14 +28,20 @@ dashboard.
 
 | Source | `source` | Reports | Quality |
 |---|---|---|---|
-| Cloudflare Web Analytics | `cloudflare_web` | Page views, referral-based visits, normalized referrer | `estimated` |
-| Workers Analytics Engine | `analytics_engine` | Form impressions, CTA activations | `best_effort` |
+| Cloudflare Web Analytics | `cloudflare_web` | Page views, referral-based visits, normalized referrer. Left in place and unconfigured; see ADR-0047 | `estimated` |
+| Workers Analytics Engine | `analytics_engine` | Page views, visits and referrers counted by the Worker request path; form impressions; CTA activations | `estimated`, `best_effort` |
 | D1 operational tables | `d1` | Accepted and blocked submissions, notification outcomes, consent and suppression changes, active subscribers | `exact`, `derived_exact` |
 | Newsletter provider | `provider` | Sent, delivered, bounces, complaints, unsubscribes, reported clicks and opens | `provider_reported`, `directional`, `unreliable` |
 
-A projector may only write metrics the registry assigns to its own source. The
-`analytics_metric_definitions` table is seeded from that same registry, and
-`d1-analytics-store.test.ts` fails if the two drift apart.
+A projector may only write metrics the registry allows its own source to
+measure. Most metrics have one allowed source. Page views, visits and per-page
+views have two, because the Worker request path and Cloudflare Web Analytics
+can both count them; see ADR-0047. Facts from two sources are never added
+together.
+
+The `analytics_metric_definitions` and `analytics_metric_sources` tables are
+seeded from that same registry, and `d1-analytics-store.test.ts` fails if they
+drift apart.
 
 The three Web Vitals metrics are registered but no source collects them yet.
 See "What this does not do" below.
@@ -190,6 +196,12 @@ range reaching past them is marked as clamped with its readings
 `outside_retention`.
 
 ## Collection
+
+`custom-worker.ts` counts each public HTML page it serves. The point holds the
+event kind, the published page id, the referrer host or channel, and an
+arrival marker. The address, its query string, the reader's network address and
+every other header are dropped in `web-traffic-collector.ts`. No cookie is set
+and no browser script is involved. See ADR-0047.
 
 `/api/analytics/interactions` accepts one enumerated event kind and one public
 CMS object ID, and discards everything else about the request — headers, query
