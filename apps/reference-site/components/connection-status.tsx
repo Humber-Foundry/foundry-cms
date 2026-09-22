@@ -55,8 +55,9 @@ export type ConnectionReadiness = Readonly<{
  * them.
  *
  * `setOnLiveSite`: where an owner sets this connection once the site is live,
- * said under the local development sentence. Only a kind with a Settings
- * section of its own carries one.
+ * said under the local development sentence. Email carries one because the
+ * Newsletter steps send the owner there (#238). Publishing's line is as it
+ * was; a line for it belongs with the Settings → Site work, not here.
  */
 type ConnectionCopy = Readonly<{
   setupLinkLabel: string;

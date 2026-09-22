@@ -82,6 +82,11 @@ them, and the connection line keeps that list behind a closed "Technical
 details" disclosure — the same way Settings keeps the site's version numbers
 and record identifiers.
 
+On a connected site, a test the provider does not take is answered on the
+test step itself, under its button, in plain words that say what happened and
+what to do next. The reason sits beside the control that was pressed, not at
+the foot of the screen.
+
 The alternative this replaces — a bare `provider_unavailable` — read as a bug
 in the dashboard when the answer is that the site is not connected.
 

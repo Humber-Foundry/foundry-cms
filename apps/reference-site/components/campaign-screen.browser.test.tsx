@@ -62,6 +62,8 @@ describe("one campaign's screen, browser acceptance", () => {
       senderDetailsState?: string;
       /** The revision the server's send review describes, when not this one. */
       sendSummaryRevisionId?: string;
+      /** The provider's answer to a test, when it is not a delivery. */
+      testFailureCode?: string;
     } = {},
   ) {
     const campaign = {
@@ -200,6 +202,13 @@ describe("one campaign's screen, browser acceptance", () => {
           >;
           commands.push(command);
           if (command.action === "request_test") {
+            if (options.testFailureCode !== undefined) {
+              return Response.json({
+                executionId,
+                state: "failed",
+                failureCode: options.testFailureCode,
+              });
+            }
             state.testedFingerprint = state.campaignFingerprint;
             state.readiness = "owner_confirmation_required";
             return Response.json({ executionId, state: "accepted" });
@@ -405,6 +414,38 @@ describe("one campaign's screen, browser acceptance", () => {
     expect(outsideDisclosure).not.toContain("FOUNDRY_");
     // Nothing was sent, and nothing reads as a fault.
     expect(server.commands).toHaveLength(0);
+  });
+
+  it("says on the test step why the provider did not take a test", async () => {
+    const server = fakeNewsletterServer({
+      testFailureCode: "provider_rate_limited",
+    });
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
+    );
+    await userEvent.click(buttonNamed(host, "Send me a test")!);
+    expect(server.commands).toContainEqual({
+      action: "request_test",
+      campaignId: server.campaign.id,
+      testRecipientIds: ["membership-owner"],
+    });
+
+    // The reason sits on the step itself, in plain words, and the step stays
+    // where it was: no test was delivered, so nothing reads as done.
+    const step = await vi.waitFor(() => {
+      const found = Array.from(host.querySelectorAll("li.send-step")).find(
+        (item) => item.textContent?.includes("2. Send me a test"),
+      );
+      expect(found?.textContent).toContain(
+        "The email provider is taking too many requests right now. Wait a " +
+          "few minutes, then send the test again.",
+      );
+      return found!;
+    });
+    expect(step.getAttribute("data-state")).toBe("now");
+    expect(buttonNamed(host, "Send me a test")).toBeDefined();
   });
 
   it("makes the owner read the same review before it will approve", async () => {

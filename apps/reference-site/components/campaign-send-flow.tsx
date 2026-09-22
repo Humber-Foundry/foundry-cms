@@ -62,6 +62,7 @@ export function CampaignSendFlow({
   role,
   busy,
   editBlocked,
+  testProblem,
   shownRevisionId,
   onCommand,
   onEdit,
@@ -70,6 +71,12 @@ export function CampaignSendFlow({
   delivery: DeliveryReadiness | null;
   role: HumanRole;
   busy: boolean;
+  /**
+   * Why the last test did not go out, in plain words, or "" while there is
+   * nothing to say. Drawn on the test step, under its button, so the reason
+   * sits beside the control that was pressed.
+   */
+  testProblem: string;
   /**
    * True while this installation has no sender details, so no revision can be
    * stored. The server refuses the save either way; the step says so instead
@@ -346,6 +353,11 @@ export function CampaignSendFlow({
             >
               {testStepName}
             </button>
+          )}
+          {testProblem === "" ? null : (
+            <p className="send-step-reason" role="status">
+              {testProblem}
+            </p>
           )}
           {setupGuideNote}
           {notConnected || testRecipientIds.length > 0 ? null : (

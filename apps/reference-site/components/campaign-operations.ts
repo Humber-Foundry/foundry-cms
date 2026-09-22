@@ -362,12 +362,15 @@ const documentType = /^<!doctype\b[^>]*>/iu;
  */
 function withPreviewHead(html: string): string {
   const head = openingHeadTag.exec(html);
-  if (head !== null) {
-    const after = head.index + head[0].length;
-    return html.slice(0, after) + campaignPreviewHead + html.slice(after);
-  }
-  const type = documentType.exec(html);
-  const after = type === null ? 0 : type[0].length;
+  const type = head === null ? documentType.exec(html) : null;
+  // Just inside the head tag; failing that, just after the document type;
+  // failing that, at the very start.
+  const after =
+    head !== null
+      ? head.index + head[0].length
+      : type === null
+        ? 0
+        : type[0].length;
   return html.slice(0, after) + campaignPreviewHead + html.slice(after);
 }
 

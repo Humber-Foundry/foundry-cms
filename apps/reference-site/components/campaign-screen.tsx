@@ -54,6 +54,12 @@ export function CampaignScreen({
   const [revision, setRevision] = useState(initialRevision);
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
+  /**
+   * Why the last test did not go out, or "" while there is nothing to say.
+   * It is drawn on the test step itself, because a refusal belongs beside
+   * the control that was pressed, not at the foot of the screen.
+   */
+  const [testProblem, setTestProblem] = useState("");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<CampaignSendReport | null>(null);
   const { delivery, senderDetails, senderDetailsMissing } =
@@ -72,6 +78,7 @@ export function CampaignScreen({
   async function saveEmail(command: unknown) {
     setBusy(true);
     setMessage("");
+    setTestProblem("");
     try {
       const response = await sendCampaignCommand(csrfToken, command);
       if (!response.ok) {
@@ -104,21 +111,26 @@ export function CampaignScreen({
   async function runStep(command: SendFlowCommand) {
     setBusy(true);
     setMessage("");
+    setTestProblem("");
     try {
       const response = await sendCampaignCommand(csrfToken, command);
       const body = (await response.json().catch(() => null)) as Record<
         string,
         unknown
       > | null;
+      // A test's answer goes on the test step. Every other step's answer goes
+      // at the foot of the screen, as before.
+      const say =
+        command.action === "request_test" ? setTestProblem : setMessage;
       if (!response.ok) {
-        setMessage(refusalMessage(refusalCodeIn(body)));
+        say(refusalMessage(refusalCodeIn(body)));
       } else if (
         command.action === "request_test" &&
         body?.state !== "accepted"
       ) {
         // The provider answered, but not with a delivery. Say so rather than
         // letting the step look finished.
-        setMessage(
+        say(
           testFailureMessage(
             typeof body?.failureCode === "string" ? body.failureCode : "",
           ),
@@ -176,6 +188,7 @@ export function CampaignScreen({
                 role={role}
                 busy={busy}
                 editBlocked={senderDetailsMissing}
+                testProblem={testProblem}
                 // The screen's own revision decides whether the review may be
                 // shown. The report describes one exact revision, and a review
                 // that read a different one would name the wrong subject.
