@@ -350,6 +350,9 @@ const destinations = [
   ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
+  ["Settings: Connected agents", "/dash/settings/agents"],
+  ["Settings: Email", "/dash/settings/email"],
+  ["Settings: Site", "/dash/settings/site"],
   ["Connect an agent", "/dash/settings/connect-agent"],
 ];
 
@@ -365,7 +368,7 @@ async function checkPagesSettingsPanel(page, origin, viewportLabel) {
 
   // Pages opens on the list of every page. Open the first one to reach the
   // editor and the settings panel this check measures.
-  const firstPage = page.locator(".pages-list-row").first();
+  const firstPage = page.locator(".dash-row-link").first();
   if ((await firstPage.count()) > 0) {
     await firstPage.click({ timeout: 8000 });
     await page.waitForURL(/&page=/u, { timeout: 8000 });

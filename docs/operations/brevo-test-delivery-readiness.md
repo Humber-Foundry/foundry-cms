@@ -104,6 +104,14 @@ These are the settings that build it, in setup order:
 These are ordinary configuration, not delivery secrets, so they are reported
 under their own heading rather than in the delivery list above.
 
+The Owner can also set the first five of them in the dashboard, on Settings'
+Email tab. A value saved there wins over the environment variable of the same
+name; a value never saved there still reads the environment variable, one value
+at a time. An installation that sets all of them here keeps working with
+nothing saved in the dashboard. `FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION` stays an
+environment variable, because it is a version mark on the footer format rather
+than something an Owner writes. See ADR-0048.
+
 ### While a sender detail is absent
 
 The Newsletter page loads and says what is missing. So does Settings, under

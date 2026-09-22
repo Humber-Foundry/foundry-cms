@@ -79,13 +79,34 @@ export type EditorPageSummary = Readonly<{
   publishedState: "on-your-site" | "changed-since-publish" | "not-published";
 }>;
 
-/** The words the owner reads for each published state. */
+/**
+ * The words the owner reads for each published state.
+ *
+ * One or two words, so the state reads as a column down the Pages list
+ * instead of a sentence on each row. "Draft changes" says the page is on the
+ * site and the draft holds newer words for it.
+ */
 export const editorPagePublishedStateLabels: Readonly<
   Record<EditorPageSummary["publishedState"], string>
 > = {
-  "on-your-site": "On your site",
-  "changed-since-publish": "Changed since you published",
-  "not-published": "Not on your site yet",
+  "on-your-site": "Published",
+  "changed-since-publish": "Draft changes",
+  "not-published": "Not published",
+};
+
+/**
+ * The colour each published state takes in a `DashboardStateLabel`.
+ *
+ * A published page is live, so it reads in the live colour. A page with
+ * unpublished words and a page that was never published are both draft work,
+ * so both read in the draft colour.
+ */
+export const editorPagePublishedStateTones: Readonly<
+  Record<EditorPageSummary["publishedState"], "live" | "draft">
+> = {
+  "on-your-site": "live",
+  "changed-since-publish": "draft",
+  "not-published": "draft",
 };
 
 /**
