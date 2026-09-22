@@ -98,9 +98,14 @@ published. Messages only looks at the site, so it starts no draft and names no
 workspace: it reads the draft the person is already editing, and the published
 site when there is none. Opening an inbox must write nothing, and taking a
 `?workspace=` value would let a stale link redirect and throw away the inbox
-cursor the screen already carries in `?older=`. Each row names the form, links to every page it appears on, and says
-how many messages it has brought in. A declared form on no page is listed and
-says so, because that is the reason an inbox stays empty.
+cursor the screen already carries in `?older=`. Each row names the form, says which pages it appears on and how many
+messages it has brought in, and opens the page it appears on. A declared form
+on no page is listed, says so, and opens Pages so the owner can go and place
+it: a form nobody can see is the reason an inbox stays empty.
+
+The rows are the shared dashboard list from #226, which merged while this work
+was open, so a form reads like every other thing the owner can open and this
+change adds no dashboard styles of its own.
 
 **Counting messages reads no message.** `countInboxByForm` is a separate store
 query that groups accepted submissions by form id. It is behind the same
