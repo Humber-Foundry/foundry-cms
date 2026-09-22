@@ -21,7 +21,10 @@ import {
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 
-import type { ReportingPeriodDays } from "./analytics-reporting-period";
+import {
+  reportingPeriodDays,
+  type ReportingPeriodDays,
+} from "./analytics-reporting-period";
 import { sampleAnalyticsDashboard } from "./analytics-sample-data";
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import { dashboardTimeZone } from "./dashboard-time";
@@ -81,7 +84,7 @@ function localDate(instantMs: number, timeZone: string): string {
 export function defaultReportingRange(
   now: string,
   timeZone: string = defaultReportingTimeZone,
-  days: ReportingPeriodDays = 7,
+  days: ReportingPeriodDays = reportingPeriodDays[0],
 ): AnalyticsRangeRequest {
   const nowMs = Date.parse(now);
   return {
@@ -201,7 +204,7 @@ export async function loadAnalyticsDashboard(
   {
     now = () => new Date().toISOString(),
     createContext = createAnalyticsDashboardContext,
-    periodDays = 7,
+    periodDays = reportingPeriodDays[0],
   }: {
     now?: () => string;
     createContext?: typeof createAnalyticsDashboardContext;

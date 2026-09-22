@@ -289,6 +289,76 @@ describe("the Visitors screen", () => {
     expect(markup).toContain("45");
   });
 
+  it("shows two parts that counted the same thing apart, each named", () => {
+    const fromTrafficService = {
+      source: "cloudflare_web" as const,
+      sourceName: "cloudflare",
+      sourceMetric: "pageViews",
+      comparabilitySignature:
+        "web.page_views|cloudflare_web|cloudflare|pageViews|1",
+    };
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          overview: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range,
+            metrics: [
+              reading(),
+              reading({
+                ...fromTrafficService,
+                value: { state: "available", value: 99 },
+              }),
+            ],
+            referrers: [
+              referrer(),
+              referrer({
+                ...fromTrafficService,
+                value: { state: "available", value: 30 },
+              }),
+            ],
+            comparison: null,
+            sources: [],
+          },
+        })}
+      />,
+    );
+
+    // Both numbers are shown, neither is added to the other, and each says
+    // which part of the site counted it.
+    expect(markup).toContain("120");
+    expect(markup).toContain("99");
+    expect(markup).toContain("own counter");
+    expect(markup).toContain("the traffic service");
+  });
+
+  it("names a referrer channel in plain words", () => {
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          overview: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range,
+            metrics: [reading()],
+            referrers: [
+              referrer({
+                dimensionKey: "referrer_channel",
+                dimensionValue: "search",
+              }),
+            ],
+            comparison: null,
+            sources: [],
+          },
+        })}
+      />,
+    );
+
+    expect(markup).toContain("A search engine");
+    expect(markup).not.toContain(">search<");
+  });
+
   it("suppresses a small referrer row", () => {
     const markup = renderToStaticMarkup(
       <AnalyticsDashboard

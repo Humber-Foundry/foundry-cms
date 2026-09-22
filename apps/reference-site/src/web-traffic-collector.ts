@@ -40,21 +40,23 @@ export type WebTrafficPoint = Readonly<{
   arrival: boolean;
 }>;
 
-/** Paths the public site never serves as a readable page. */
-const privatePathPrefixes: ReadonlyArray<string> = Object.freeze([
-  "/dash",
-  "/api/",
-  "/_next/",
-  "/mcp",
+/**
+ * The first part of every address the public site never serves as a readable
+ * page. They are matched as whole parts, so a published page at `/dashboard`
+ * or `/mcp-guide` is still counted.
+ */
+const privateFirstSegments: ReadonlySet<string> = new Set([
+  "dash",
+  "api",
+  "mcp",
 ]);
 
 export function isPublicPagePath(path: string): boolean {
   if (!path.startsWith("/")) return false;
-  if (privatePathPrefixes.some((prefix) => path.startsWith(prefix))) {
-    return false;
-  }
-  // Foundry's own internal routes all start a segment with an underscore.
-  return !path.split("/").some((segment) => segment.startsWith("_"));
+  const segments = path.split("/");
+  if (privateFirstSegments.has(segments[1] ?? "")) return false;
+  // Foundry's own internal routes all start a part with an underscore.
+  return !segments.some((segment) => segment.startsWith("_"));
 }
 
 /** One published web address per page and post, keyed by the address. */

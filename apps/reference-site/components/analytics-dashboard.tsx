@@ -81,6 +81,21 @@ const metricNames: Readonly<Record<string, string>> = {
   "web.vitals.cls_p75": "Movement while the page loads",
 };
 
+/** Plain words for the channel a reader arrived through. */
+const referrerChannelNames: Readonly<Record<string, string>> = {
+  direct: "Came straight to your site",
+  search: "A search engine",
+  social: "A social network",
+  referral: "Another website",
+  email: "An email",
+  other: "Somewhere else",
+};
+
+function referrerName(dimensionKey: string, dimensionValue: string) {
+  if (dimensionKey !== "referrer_channel") return dimensionValue;
+  return referrerChannelNames[dimensionValue] ?? dimensionValue;
+}
+
 function metricName(metricKey: string) {
   return metricNames[metricKey] ?? metricKey;
 }
@@ -172,18 +187,23 @@ function HeadlineNumber({
   previous,
   periodDays,
   help,
+  showSource = false,
 }: {
   reading: AnalyticsReading | undefined;
   previous: AnalyticsReading | undefined;
   periodDays: number;
   help: string;
+  /** Set when two parts of the site both counted this, so each is named. */
+  showSource?: boolean;
 }) {
   if (reading === undefined) return null;
   const unavailable = reading.value.state === "unavailable";
   return (
     <div className="analytics-headline">
       <p className="analytics-headline-label">
-        {metricName(reading.metricKey)}
+        {showSource
+          ? `${metricName(reading.metricKey)}, from ${sourceName(reading.source)}`
+          : metricName(reading.metricKey)}
         <HelpTip label={`What is ${metricName(reading.metricKey)}?`}>
           {help}
         </HelpTip>
@@ -465,23 +485,42 @@ export function AnalyticsDashboard({
     health,
   } = analytics;
 
-  const metricFor = (metricKey: string) =>
-    overview.metrics.find((entry) => entry.metricKey === metricKey);
-  const previousFor = (metricKey: string) =>
+  // Two parts of the site may each count the same thing. Their numbers are
+  // never added, so each series is its own tile, named by what counted it.
+  const seriesFor = (metricKey: string) =>
+    overview.metrics.filter((entry) => entry.metricKey === metricKey);
+  const previousFor = (reading: AnalyticsReading) =>
     overview.comparison?.metrics.find(
-      (entry) => entry.metricKey === metricKey,
+      (entry) =>
+        entry.metricKey === reading.metricKey &&
+        entry.comparabilitySignature === reading.comparabilitySignature,
     );
 
+  // The same rule for a page: one row per series, ordered by what it counted.
   const topPages = content.items
-    .map((item) => ({
-      subjectId: item.subjectId,
-      reading: item.readings[0],
-    }))
-    .filter((item) => item.reading !== undefined);
+    .flatMap((item) =>
+      item.readings.map((reading) => ({
+        subjectId: item.subjectId,
+        reading,
+      })),
+    )
+    .sort(
+      (left, right) =>
+        (availableNumber(right.reading.value) ?? -1) -
+        (availableNumber(left.reading.value) ?? -1),
+    );
+  const pageSourceCount = new Set(
+    topPages.map((item) => item.reading.source),
+  ).size;
   // ADR-0003 asks for Web Vitals beside the content they belong to. No source
   // collects them yet, so this part of the screen appears only once one does.
   const pageSpeed = content.items.filter((item) => item.vitals.length > 0);
   const timeZone = overview.range.timeZone;
+  // One referrer counted by two parts of the site arrives as two rows. Each
+  // row is named only when there is more than one part to tell apart.
+  const referrerSourceCount = new Set(
+    overview.referrers.map((row) => row.source),
+  ).size;
 
   return (
     <section className="analytics" aria-label="Visitor numbers">
@@ -507,18 +546,26 @@ export function AnalyticsDashboard({
       ) : null}
 
       <div className="analytics-headlines">
-        <HeadlineNumber
-          reading={metricFor("web.visits")}
-          previous={previousFor("web.visits")}
-          periodDays={periodDays}
-          help="A visit is one arrival from somewhere else, such as a search result or a link. Your site sets no cookies, so it cannot count how many different people these visits are."
-        />
-        <HeadlineNumber
-          reading={metricFor("web.page_views")}
-          previous={previousFor("web.page_views")}
-          periodDays={periodDays}
-          help="One page view is one page of your site opened. A reader who opens three pages counts as three page views."
-        />
+        {seriesFor("web.visits").map((reading, _index, series) => (
+          <HeadlineNumber
+            key={reading.comparabilitySignature ?? "visits"}
+            reading={reading}
+            previous={previousFor(reading)}
+            periodDays={periodDays}
+            showSource={series.length > 1}
+            help="A visit is one arrival from somewhere else, such as a search result or a link. Your site sets no cookies, so it cannot count how many different people these visits are."
+          />
+        ))}
+        {seriesFor("web.page_views").map((reading, _index, series) => (
+          <HeadlineNumber
+            key={reading.comparabilitySignature ?? "page_views"}
+            reading={reading}
+            previous={previousFor(reading)}
+            periodDays={periodDays}
+            showSource={series.length > 1}
+            help="One page view is one page of your site opened. A reader who opens three pages counts as three page views."
+          />
+        ))}
       </div>
 
       <h2>Page views each day</h2>
@@ -536,11 +583,17 @@ export function AnalyticsDashboard({
       ) : (
         <ol className="analytics-rank">
           {topPages.map((item) => (
-            <li className="analytics-rank-row" key={item.subjectId}>
+            <li
+              className="analytics-rank-row"
+              key={`${item.subjectId}:${item.reading.comparabilitySignature ?? "none"}`}
+            >
               <span className="analytics-rank-name">
                 {contentTitles[item.subjectId] ?? item.subjectId}
                 <span className="analytics-rank-path">
                   {contentPaths[item.subjectId] ?? ""}
+                  {pageSourceCount > 1
+                    ? ` · counted by ${sourceName(item.reading.source)}`
+                    : ""}
                 </span>
               </span>
               <span className="analytics-rank-value">
@@ -568,7 +621,14 @@ export function AnalyticsDashboard({
               className="analytics-rank-row"
               key={`${row.dimensionKey}:${row.dimensionValue}:${row.comparabilitySignature}`}
             >
-              <span className="analytics-rank-name">{row.dimensionValue}</span>
+              <span className="analytics-rank-name">
+                {referrerName(row.dimensionKey, row.dimensionValue)}
+                {referrerSourceCount > 1 ? (
+                  <span className="analytics-rank-path">
+                    Counted by {sourceName(row.source)}
+                  </span>
+                ) : null}
+              </span>
               <span className="analytics-rank-value">
                 {formatValue(row.value, "count")}
               </span>
