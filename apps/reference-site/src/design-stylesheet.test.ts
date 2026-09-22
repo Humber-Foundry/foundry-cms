@@ -98,6 +98,7 @@ describe("design stylesheet matches the design contract", () => {
       const rule = tokenRule(attribute, option.value);
       for (const [property, expected] of [
         ["--paper", option.preview.paper],
+        ["--card", option.preview.card],
         ["--panel", option.preview.panel],
         ["--ink", option.preview.ink],
         ["--ink-soft", option.preview.softInk],

@@ -2,6 +2,7 @@
   --ink: #17201d;
   --ink-soft: #4c5853;
   --paper: #f5f3ed;
+  --card: #fffaf0;
   --paper-bright: #fbfaf7;
   --line: #d7d8d0;
   --moss: #1e5c43;
@@ -24,17 +25,49 @@
  *
  * `apps/reference-site/src/design-stylesheet.test.ts` reads this file and the
  * contract together and fails if they disagree. Change both in one commit.
+ *
+ * Every `--design-*` property below is the whole palette a page component may
+ * paint with. A page component rule in `public.css` may not write a colour or a
+ * font family of its own; it reads one of these. See ADR-0040 and
+ * `docs/architecture/page-component-design-token-contract.md`.
  */
 .site-canvas {
   --design-heading-font: var(--font-serif);
   --design-body-font: var(--font-sans);
+  --design-mono-font: var(--font-mono);
   --design-accent: var(--moss);
   --design-accent-deep: var(--moss-dark);
   --design-section-padding: clamp(6rem, 12vw, 10rem);
   --design-content-width: var(--content-width);
 
-  background: var(--paper);
-  color: var(--ink);
+  /*
+   * Surfaces and text. Each one follows the page tone the owner chose, so a
+   * page component that reads them changes when the page tone changes.
+   */
+  --design-page: var(--paper);
+  --design-card: var(--card);
+  --design-panel: var(--panel);
+  --design-heading-ink: var(--ink);
+  --design-body-ink: var(--ink-soft);
+  --design-line: var(--line);
+  /* A heavy drawn frame, as thick as a pen line. */
+  --design-frame: var(--ink);
+  --design-shadow: color-mix(in srgb, var(--ink) 14%, transparent);
+  /* A panel laid over a photograph, dark enough to read white text on. */
+  --design-overlay: color-mix(in srgb, var(--ink) 90%, transparent);
+
+  /*
+   * The two full-width colour bands. `--design-band` is the light one, so page
+   * ink reads on it. `--design-band-strong` is the accent itself, so only
+   * `--design-accent-ink` reads on it.
+   */
+  --design-band: color-mix(in srgb, var(--design-accent) 28%, var(--paper));
+  --design-band-strong: var(--design-accent);
+  /* Text and buttons placed on the accent, the deep accent or the strong band. */
+  --design-accent-ink: #ffffff;
+
+  background: var(--design-page);
+  color: var(--design-heading-ink);
   font-family: var(--design-body-font);
 }
 
@@ -102,6 +135,7 @@
 /* Page tone */
 .site-canvas[data-colour-neutral="warm"] {
   --paper: #f5f3ed;
+  --card: #fffaf0;
   --panel: #e9e1cf;
   --ink: #17201d;
   --ink-soft: #4c5853;
@@ -110,6 +144,7 @@
 
 .site-canvas[data-colour-neutral="cool"] {
   --paper: #eef1f4;
+  --card: #f9fbfd;
   --panel: #dde5ec;
   --ink: #16202a;
   --ink-soft: #48555f;
@@ -118,6 +153,7 @@
 
 .site-canvas[data-colour-neutral="bright"] {
   --paper: #ffffff;
+  --card: #ffffff;
   --panel: #f1f2f4;
   --ink: #14171a;
   --ink-soft: #4b5157;

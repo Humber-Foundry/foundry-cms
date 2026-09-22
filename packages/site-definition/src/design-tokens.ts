@@ -18,9 +18,15 @@ export type DesignOptionPreview =
   | Readonly<{ kind: "font"; fontFamily: string }>
   /** `deepColour` is the pressed and hovered shade of the same accent. */
   | Readonly<{ kind: "accent"; colour: string; deepColour: string }>
+  /**
+   * `card` is the raised surface a page component paints a card, a photo mount
+   * or an input field with. It sits one step brighter than `paper` so a block
+   * lifts off the page without a border.
+   */
   | Readonly<{
       kind: "neutral";
       paper: string;
+      card: string;
       panel: string;
       ink: string;
       softInk: string;
@@ -103,6 +109,7 @@ const neutralOption = <const Value extends string>(
   description: string,
   tones: Readonly<{
     paper: string;
+    card: string;
     panel: string;
     ink: string;
     softInk: string;
@@ -276,6 +283,7 @@ export const designContract = Object.freeze({
           "An off-white with a cream cast, like uncoated paper.",
           {
             paper: "#f5f3ed",
+            card: "#fffaf0",
             panel: "#e9e1cf",
             ink: "#17201d",
             softInk: "#4c5853",
@@ -288,6 +296,7 @@ export const designContract = Object.freeze({
           "A pale blue-grey background. Crisp and businesslike.",
           {
             paper: "#eef1f4",
+            card: "#f9fbfd",
             panel: "#dde5ec",
             ink: "#16202a",
             softInk: "#48555f",
@@ -300,6 +309,7 @@ export const designContract = Object.freeze({
           "A plain white page. Puts every photograph and colour forward.",
           {
             paper: "#ffffff",
+            card: "#ffffff",
             panel: "#f1f2f4",
             ink: "#14171a",
             softInk: "#4b5157",
