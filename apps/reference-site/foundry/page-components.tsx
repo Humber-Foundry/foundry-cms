@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from "react";
 import {
   renderCallToActionPageComponent,
+  renderContactFormPageComponent,
   renderHeroPageComponent,
   renderProofPageComponent,
   renderServicesPageComponent,
@@ -21,6 +22,7 @@ import {
   type PageComponentRenderer,
 } from "./page-component-renderers";
 import { AttentionNotes } from "../components/attention-notes";
+import { ContactForm } from "../components/contact-form";
 import { NewsletterSignupForm } from "../components/newsletter-signup-form";
 
 export const imageCopyStoryComponent = createRegisteredPageComponent({
@@ -306,6 +308,10 @@ const installedRegistrations = Object.freeze([
   installPageComponent(
     foundationPageComponentRegistry.components.callToAction!,
     renderCallToActionPageComponent,
+  ),
+  installPageComponent(
+    foundationPageComponentRegistry.components.contactForm!,
+    renderContactFormPageComponent,
   ),
   installPageComponent(imageCopyStoryComponent, ({ section, mediaDelivery = "published", mediaAccessToken, inlineImage }) => {
     const props = registeredProps(imageCopyStoryComponent, section);

@@ -23,6 +23,7 @@ describe("page component composition", () => {
         "services",
         "proof",
         "callToAction",
+        "contactForm",
       ],
     });
     expect(Object.keys(pageCompositionContract.components)).toEqual([
@@ -30,12 +31,18 @@ describe("page component composition", () => {
       "services",
       "proof",
       "callToAction",
+      "contactForm",
     ]);
     expect(pageCompositionContract.components.hero.editableProps).toEqual([
       "eyebrow",
       "title",
       "summary",
     ]);
+    // The contact form's own fields are fixed, and the form it posts to is
+    // fixed. Only the words around them are the owner's to write.
+    expect(
+      pageCompositionContract.components.contactForm.editableProps,
+    ).toEqual(["title", "body", "actionLabel"]);
   });
 
   it("adds, orders, duplicates, removes, and configures registered components immutably", () => {

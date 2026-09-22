@@ -1,15 +1,19 @@
 import {
+  contactFormComponent,
   homePage,
   pagePath,
   resolveSiteHref,
   type PageHrefBuilder,
   type PageSection,
+  type RegisteredPageComponentProps,
+  type RegisteredPageSection,
   type SiteDefinition,
   type SiteHref,
   type SitePage,
 } from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
+import { ContactForm } from "@/components/contact-form";
 import { MediaOccurrence } from "@/components/media-occurrence";
 import { RichTextRenderer } from "@/components/rich-text-renderer";
 import { sectionAnchor } from "@/src/section-anchor";
@@ -195,6 +199,40 @@ export const renderCallToActionPageComponent: PageComponentRenderer = ({
       <p className="eyebrow">{t("eyebrow", section.eyebrow, { label: "Eyebrow" })}</p><h2 id={`${section.id}_title`}>{t("title", section.title, { label: "Title" })}</h2>
       <div className="rich-text">{callToActionBody ?? <RichTextRenderer document={section.body} headingOffset={1} />}</div>
       <a className="button button-light" href={resolveActionHref(definition, section.action.href, currentPage, pageHref, blogHref)}>{section.action.label}</a>
+    </section>
+  );
+};
+
+/**
+ * The contact form block. The words come from the section; the fields, the
+ * automated-traffic check and the send belong to the form component, because
+ * they are what makes a message safe to save.
+ *
+ * On an editing surface the form is drawn but sends nothing, so the owner can
+ * see the block while they arrange the page without filling their own inbox.
+ */
+export const renderContactFormPageComponent: PageComponentRenderer = ({
+  section,
+  editingSurface,
+}) => {
+  const validation = contactFormComponent.validate(section);
+  if (!validation.ok) throw new TypeError("contact_form_page_component_required");
+  const props = (section as RegisteredPageSection)
+    .props as RegisteredPageComponentProps<typeof contactFormComponent.fields>;
+  return (
+    <section
+      className="contact-form-section"
+      id={sectionAnchor(section)}
+      aria-labelledby={`${section.id}_title`}
+    >
+      <ContactForm
+        formId={props.formId}
+        title={props.title}
+        body={props.body}
+        actionLabel={props.actionLabel}
+        titleId={`${section.id}_title`}
+        previewOnly={editingSurface === true}
+      />
     </section>
   );
 };

@@ -13,6 +13,10 @@ import { installedSiteDefinition } from "../foundry/site-definition";
 import { createCloudflareTurnstileVerifier } from "./cloudflare-turnstile";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
+import {
+  publicFormPublicStatus,
+  type PublicFormPublicStatus,
+} from "./public-form-public-status";
 
 type RateLimitBinding = Readonly<{
   limit(input: { key: string }): Promise<Readonly<{ success: boolean }>>;
@@ -21,6 +25,7 @@ type RateLimitBinding = Readonly<{
 type PublicFormEnvironment = Readonly<{
   FOUNDRY_DB?: D1DatabaseBinding;
   FOUNDRY_CANONICAL_ORIGIN?: string;
+  FOUNDRY_TURNSTILE_SITE_KEY?: string;
   FOUNDRY_TURNSTILE_SECRET?: string;
   FOUNDRY_FORM_RATE_LIMITER?: RateLimitBinding;
 }>;
@@ -58,6 +63,28 @@ async function sha256(value: unknown): Promise<string> {
 async function loadEnvironment(): Promise<PublicFormEnvironment> {
   const { env } = await getCloudflareContext({ async: true });
   return env as PublicFormEnvironment;
+}
+
+/**
+ * Whether one declared form can take a message right now.
+ *
+ * A form block on the site asks this before it draws a field. An unknown form
+ * id and a missing setting give the same answer, so nobody can use this to
+ * learn which forms a site declares or how it is configured.
+ */
+export async function readPublicFormStatus(
+  formId: string,
+): Promise<PublicFormPublicStatus> {
+  let environment: PublicFormEnvironment;
+  try {
+    environment = await loadEnvironment();
+  } catch {
+    return publicFormPublicStatus(undefined, {});
+  }
+  return publicFormPublicStatus(
+    installedPublicForms.find((form) => form.id === formId),
+    environment,
+  );
 }
 
 export async function acceptPublicFormSubmission(

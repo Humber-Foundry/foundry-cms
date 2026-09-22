@@ -8,12 +8,14 @@ import {
 
 const runtimeMocks = vi.hoisted(() => ({
   accept: vi.fn(),
+  status: vi.fn(),
 }));
 vi.mock("../../../../../src/public-form-runtime", () => ({
   acceptPublicFormSubmission: runtimeMocks.accept,
+  readPublicFormStatus: runtimeMocks.status,
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const body = {
   schemaVersion: "1.0.0",
@@ -132,4 +134,54 @@ describe("public form endpoint", () => {
       );
     },
   );
+});
+
+describe("what a form block is told before a visitor types", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("answers for the form the address names", async () => {
+    runtimeMocks.status.mockResolvedValue({
+      available: true,
+      schemaVersion: "1.0.0",
+      turnstileSiteKey: "0xSITEKEY",
+    });
+
+    const response = await GET(
+      new Request("https://foundry.example/api/forms/contact/submissions"),
+      context,
+    );
+
+    expect(runtimeMocks.status).toHaveBeenCalledWith("contact");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      available: true,
+      schemaVersion: "1.0.0",
+      turnstileSiteKey: "0xSITEKEY",
+    });
+  });
+
+  it("says a form is not ready without naming a setting", async () => {
+    runtimeMocks.status.mockResolvedValue({
+      available: false,
+      schemaVersion: null,
+      turnstileSiteKey: null,
+    });
+
+    const response = await GET(
+      new Request("https://foundry.example/api/forms/unknown/submissions"),
+      { params: Promise.resolve({ formId: "unknown" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).not.toContain("FOUNDRY_");
+    expect(JSON.parse(body)).toEqual({
+      available: false,
+      schemaVersion: null,
+      turnstileSiteKey: null,
+    });
+  });
 });

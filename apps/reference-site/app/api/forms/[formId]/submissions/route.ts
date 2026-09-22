@@ -5,7 +5,10 @@ import {
   PublicFormUnavailableError,
 } from "@humber-foundry/application";
 
-import { acceptPublicFormSubmission } from "../../../../../src/public-form-runtime";
+import {
+  acceptPublicFormSubmission,
+  readPublicFormStatus,
+} from "../../../../../src/public-form-runtime";
 
 const envelopeKeys = [
   "schemaVersion",
@@ -112,6 +115,21 @@ function publicError(
     retryable ? { error, retryable: true } : { error },
     { status, headers },
   );
+}
+
+/**
+ * Tells a form block on the site whether this form can take a message, and
+ * nothing else. It reads no body and needs no caller identity.
+ */
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ formId: string }> },
+) {
+  const { formId } = await context.params;
+  return Response.json(await readPublicFormStatus(formId), {
+    status: 200,
+    headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
+  });
 }
 
 export async function POST(

@@ -4,6 +4,7 @@ import {
   homePage,
   createPageComponentRegistry,
   createRegisteredPageComponent,
+  mergePageComponentFieldEdit,
   foundationPageComponentRegistry,
   isSiteDefinitionWithPageComponents,
   applyPageComposition,
@@ -384,5 +385,71 @@ describe("installation-owned page component registry", () => {
       props: { title: "A copied story" },
     });
     expect(homePage(changed.definition).sections.some(({ id }) => id === "section_story")).toBe(false);
+  });
+});
+
+describe("the contact form component", () => {
+  const registration = foundationPageComponentRegistry.components.contactForm!;
+
+  it("is registered for every installation", () => {
+    expect(foundationPageComponentRegistry.allowedComponents).toContain(
+      "contactForm",
+    );
+    expect(registration.label).toBe("Contact form");
+  });
+
+  it("scaffolds a block that names the declared form", () => {
+    const section = foundationPageComponentRegistry.createDefault(
+      "contactForm",
+      "section_contact_form",
+    );
+    expect(section).toEqual({
+      id: "section_contact_form",
+      type: "registered",
+      component: "contactForm",
+      props: {
+        formId: "contact",
+        title: "Send a message",
+        body: "Tell us what you need. Leave your email address and we will write back.",
+        actionLabel: "Send message",
+      },
+    });
+    expect(registration.validate(section).ok).toBe(true);
+  });
+
+  it("lets the owner write the words and keeps the form fixed", () => {
+    expect(registration.editableFields).toEqual([
+      "title",
+      "body",
+      "actionLabel",
+    ]);
+    const section = foundationPageComponentRegistry.createDefault(
+      "contactForm",
+      "section_contact_form",
+    ) as { props: Record<string, unknown> };
+    expect(
+      mergePageComponentFieldEdit(
+        registration.fields.formId!,
+        section.props.formId,
+        "somebody_elses_form",
+      ),
+    ).toBe("contact");
+  });
+
+  it("refuses a block with a field the component did not register", () => {
+    expect(
+      registration.validate({
+        id: "section_contact_form",
+        type: "registered",
+        component: "contactForm",
+        props: {
+          formId: "contact",
+          title: "Send a message",
+          body: "Say hello.",
+          actionLabel: "Send message",
+          recipient: "someone@example.com",
+        },
+      }).ok,
+    ).toBe(false);
   });
 });
