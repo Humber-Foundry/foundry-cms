@@ -186,11 +186,12 @@ describe("blog posts list browser acceptance", () => {
       .element(page.getByRole("button", { name: "Recover access" }))
       .toBeInTheDocument();
     expect(confirmButton()?.disabled).toBe(true);
-    // Restoring is only offered once a post has finished archiving.
+    // Restoring is only offered once a post has finished archiving, so the
+    // control is absent rather than shown turned off.
     const restore = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),
     ).find((button) => button.textContent === "Restore as draft");
-    expect(restore?.disabled).toBe(true);
+    expect(restore).toBeUndefined();
   });
 
   it("enables confirm only after the withdrawal preview was opened in this session", async () => {
@@ -582,7 +583,7 @@ describe("blog posts list browser acceptance", () => {
       row?.querySelector(".dash-row-title")?.textContent,
     ).toBe("Tide notes");
     expect(row?.querySelector(".dash-row-note")?.textContent).toContain(
-      "Draft saved",
+      "Last saved",
     );
     expect(
       document.querySelector(".dash-row-state")?.textContent,

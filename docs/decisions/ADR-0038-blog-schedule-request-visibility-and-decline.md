@@ -136,5 +136,5 @@ row's action menu.
   fixes that by grouping the title and every status line into one grid cell
   (`.post-list-info`), so the layout holds regardless of how many status
   lines a post carries. Since #230 each active post is a `DashboardListRow`
-instead of that `<li>` grid, and every status line is one supporting line
-under the title.
+  instead of that `<li>` grid, and every status line is one supporting line
+  under the title.

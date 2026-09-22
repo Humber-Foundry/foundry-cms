@@ -2,6 +2,7 @@
 
 import type { ContentRevision } from "@humber-foundry/application";
 
+import { BlogCommandFeedback } from "./blog-command-feedback";
 import { blogListHref } from "./blog-links";
 import { BlogPostComposer } from "./blog-post-composer";
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -54,19 +55,7 @@ export function NewBlogPostScreen({
         }}
         onCancel={() => window.location.assign(listHref)}
       />
-      {commands.pendingAttempt === null ? null : (
-        <button
-          type="button"
-          className="dash-button dash-button-plain"
-          disabled={commands.busy}
-          onClick={() => commands.retryPendingAttempt()}
-        >
-          Retry the last change
-        </button>
-      )}
-      {commands.message === "" ? null : (
-        <p role="alert">{commands.message}</p>
-      )}
+      <BlogCommandFeedback commands={commands} />
     </section>
   );
 }

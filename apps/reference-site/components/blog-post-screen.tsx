@@ -9,6 +9,7 @@ import {
 } from "@humber-foundry/application";
 import type { BlogPost } from "@humber-foundry/site-definition";
 
+import { BlogCommandFeedback } from "./blog-command-feedback";
 import { blogListHref, blogPostHref } from "./blog-links";
 import {
   blogMutationKey,
@@ -291,19 +292,7 @@ export function BlogPostScreen({
         }}
         onCancel={() => window.location.assign(listHref)}
       />
-      {commands.pendingAttempt === null ? null : (
-        <button
-          type="button"
-          className="dash-button dash-button-plain"
-          disabled={commands.busy}
-          onClick={() => commands.retryPendingAttempt()}
-        >
-          Retry the last change
-        </button>
-      )}
-      {commands.message === "" ? null : (
-        <p role="alert">{commands.message}</p>
-      )}
+      <BlogCommandFeedback commands={commands} />
     </section>
   );
 }

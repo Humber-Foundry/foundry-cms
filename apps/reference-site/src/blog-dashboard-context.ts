@@ -20,34 +20,35 @@ import { loadHumanAccessEnvironment } from "./human-access-environment";
  * The posts list and one post's own screen both need this (#230), so the read
  * lives here rather than in either route.
  */
-export type BlogPostOperationalContext = Readonly<{
+export type BlogPostStanding = Readonly<{
   summaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
-  archivedPosts: ReadonlyArray<ArchivedBlogPostSummary>;
   pendingScheduleRequestAgentNames: ReadonlyMap<BlogPostId, string>;
 }>;
 
-const noBlogPostOperationalContext: BlogPostOperationalContext = {
+export type BlogPostOperationalContext = BlogPostStanding &
+  Readonly<{ archivedPosts: ReadonlyArray<ArchivedBlogPostSummary> }>;
+
+const noBlogPostStanding: BlogPostStanding = {
   summaries: new Map(),
-  archivedPosts: [],
   pendingScheduleRequestAgentNames: new Map(),
 };
 
 /**
- * Each named post's schedule, archive and retry state, plus every archived
- * post. Loaded straight from the blog-operations application — the same one
- * the blog-operations API route uses — so the dashboard does not need a
- * second HTTP round trip to know what it already computed on the server.
+ * Each named post's schedule, archive and retry state, and the name of any
+ * app that has asked to publish it. Loaded straight from the blog-operations
+ * application — the same one the blog-operations API route uses — so the
+ * dashboard needs no second HTTP round trip to know what it already computed
+ * on the server.
  *
  * Returns empty results instead of throwing when blog-post operations are
  * not configured (for example, local development without a database), so a
  * missing schedule/archive backend never blocks the ordinary post list.
  */
-export async function loadBlogPostOperationalContext(
+export async function loadBlogPostStanding(
   postIds: ReadonlyArray<BlogPostId>,
-): Promise<BlogPostOperationalContext> {
+): Promise<BlogPostStanding> {
   try {
     const environment = await loadHumanAccessEnvironment();
-    const application = await loadBlogPostOperationsApplication(environment);
     const siteId = installedSiteDefinition.site.id;
     const summaries = await loadBlogPostOperationalSummaries(
       environment,
@@ -64,13 +65,35 @@ export async function loadBlogPostOperationalContext(
     );
     return {
       summaries,
-      archivedPosts: await application.queries.listArchivedPosts(siteId),
       pendingScheduleRequestAgentNames: await blogScheduleRequestAgentNames(
         environment,
         pendingProposalsByPostId,
       ),
     };
   } catch {
-    return noBlogPostOperationalContext;
+    return noBlogPostStanding;
+  }
+}
+
+/**
+ * The same read, plus every archived post. Only the posts list draws archived
+ * posts, so one post's own screen uses `loadBlogPostStanding` and never asks
+ * the store for a list it would throw away.
+ */
+export async function loadBlogPostOperationalContext(
+  postIds: ReadonlyArray<BlogPostId>,
+): Promise<BlogPostOperationalContext> {
+  const standing = await loadBlogPostStanding(postIds);
+  try {
+    const environment = await loadHumanAccessEnvironment();
+    const application = await loadBlogPostOperationsApplication(environment);
+    return {
+      ...standing,
+      archivedPosts: await application.queries.listArchivedPosts(
+        installedSiteDefinition.site.id,
+      ),
+    };
+  } catch {
+    return { ...standing, archivedPosts: [] };
   }
 }

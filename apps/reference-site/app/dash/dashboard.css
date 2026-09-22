@@ -1308,10 +1308,12 @@
   cursor: pointer;
 }
 
-/* Post and email lists ----------------------------------------------------
+/* Archived post list -------------------------------------------------------
  *
- * One row per item: its title and its state in words on the left, its
- * buttons on the right. */
+ * One row per archived post: its title and its state in words on the left,
+ * its buttons on the right. An archived post has left the draft and has no
+ * screen of its own, so it is not a `DashboardListRow`. Every list the owner
+ * can open uses `.dash-list` instead. */
 .post-list {
   margin: 1.5rem 0 0;
   padding: 0;
@@ -1331,16 +1333,6 @@
   border-top: 0;
 }
 
-/* Everything that names the post and its state — the title, and any status
- * or schedule-request line under it — is one grid cell, so a post can carry
- * several status lines without pushing the action buttons out of their own
- * column. See issue #219. */
-.post-list-info {
-  display: grid;
-  gap: 0.35rem;
-  min-width: 0;
-}
-
 .post-list-summary {
   display: grid;
   gap: 0.2rem;
@@ -1356,16 +1348,6 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
-}
-
-/* The schedule form (or its "needs a preview first" note) sits under the
- * title and buttons, the full width of the row. */
-.post-list-full-row {
-  grid-column: 1 / -1;
-}
-
-.post-list-editing {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Blog screens ------------------------------------------------------------

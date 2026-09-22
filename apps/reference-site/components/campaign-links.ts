@@ -10,11 +10,7 @@
  * both read it.
  */
 
-function withWorkspace(path: string, workspace: string | null): string {
-  return workspace === null || workspace === ""
-    ? path
-    : `${path}?workspace=${encodeURIComponent(workspace)}`;
-}
+import { withWorkspace } from "./dashboard-links";
 
 export function campaignListHref(workspace: string | null): string {
   return withWorkspace("/dash/campaigns", workspace);

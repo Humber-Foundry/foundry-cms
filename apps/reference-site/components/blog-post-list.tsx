@@ -9,6 +9,7 @@ import type {
 } from "@humber-foundry/application";
 import type { BlogPostId } from "@humber-foundry/site-definition";
 
+import { BlogCommandFeedback } from "./blog-command-feedback";
 import { blogListHref, blogPostHref, newBlogPostHref } from "./blog-links";
 import {
   blogHasPendingSitePublish,
@@ -41,10 +42,17 @@ import { useBlogCommands } from "./use-blog-commands";
  * were there. Writing one post now lives on its own screen; this one lists
  * what exists and offers the way in.
  *
- * Every row action goes through the row's "…" menu. Which actions a row
- * carries depends on where that post stands — a post with no schedule has
- * nothing to cancel — so the menus are not all the same length. A control the
- * owner cannot use is left out rather than shown turned off.
+ * Every action on a post row goes through the row's "…" menu. Which actions a
+ * row carries depends on where that post stands — a post with no schedule has
+ * nothing to cancel — so the menus are not all the same length. An action the
+ * owner may not take is left out rather than shown turned off.
+ *
+ * Archived posts keep a plain row of buttons under their own heading. An
+ * archived post has left the draft, so it has no screen of its own to open and
+ * `DashboardListRow` does not fit it. Its "Confirm and continue archiving" is
+ * also the one control the dashboard shows turned off on purpose: the sentence
+ * beside it says a preview has to be opened first, which is the reason
+ * `DashboardActionMenu` asks for and cannot carry.
  */
 export function BlogPostList({
   revision,
@@ -201,6 +209,10 @@ export function BlogPostList({
             <DashboardList label="Your posts">
               {posts.map((post) => {
                 const standing = blogPostStanding(post, verifiedPublicPosts);
+                // A post saved with no title still needs a name on its row:
+                // the title is the only thing the owner can press.
+                const postName =
+                  post.title.trim() === "" ? "Untitled post" : post.title;
                 const summary = postSummaries.get(post.id);
                 const scheduleStanding = blogPostScheduleStanding(summary);
                 const executionFailure = blogPostExecutionFailureNote(summary);
@@ -287,12 +299,13 @@ export function BlogPostList({
                     label: "Archive",
                     tone: "destructive",
                     onSelect: () => {
-                      const liveNotice = standing.label === "On your site"
-                        ? " This post is on the site now; archiving takes it off the site first."
-                        : "";
+                      const liveNotice =
+                        standing.label === "On your site"
+                          ? " This post is on the site now; archiving takes it off the site first."
+                          : "";
                       if (
                         !window.confirm(
-                          `Archive "${post.title}"?${liveNotice} It moves to Archived posts and can be restored as a draft later.`,
+                          `Archive "${postName}"?${liveNotice} It moves to Archived posts and can be restored as a draft later.`,
                         )
                       ) {
                         return;
@@ -309,7 +322,7 @@ export function BlogPostList({
                   });
                 }
                 const noteParts = [
-                  scheduleStanding.line ?? `Draft saved ${draftSaved}`,
+                  scheduleStanding.line ?? `Last saved ${draftSaved}`,
                   executionFailure,
                   pendingRequest === null
                     ? null
@@ -322,17 +335,25 @@ export function BlogPostList({
                   <DashboardListRow
                     key={post.id}
                     href={blogPostHref(post.id, revision.workspaceId)}
-                    title={post.title}
+                    title={postName}
                     note={noteParts.join(" · ")}
                     state={
                       <DashboardStateLabel tone={standing.tone}>
                         {standing.label}
                       </DashboardStateLabel>
                     }
+                    // A row carries a menu when there is something to take on
+                    // that post. The shared standard asks every row in one
+                    // list to hold the same shape; here every active post has
+                    // the same actions offered except the ones its own state
+                    // rules out — a post with no schedule has nothing to
+                    // cancel. A row carries no menu at all only when this
+                    // installation has no blog-operations store to read, and
+                    // then no row does.
                     actions={
                       actions.length === 0 ? undefined : (
                         <DashboardActionMenu
-                          label={`Actions for ${post.title}`}
+                          label={`Actions for ${postName}`}
                           actions={actions}
                         />
                       )
@@ -388,9 +409,9 @@ export function BlogPostList({
                   {archived.collectionState === "archiving" &&
                   withdrawalPreviews.get(archived.postId) === undefined ? (
                     <p className="composer-hint">
-                      Preview the site without this post before you can
-                      confirm. This shows what visitors will see once the
-                      post is fully off the site.
+                      Preview the site without this post before you can confirm.
+                      This shows what visitors will see once the post is fully
+                      off the site.
                     </p>
                   ) : null}
                   <div className="post-list-actions">
@@ -440,45 +461,32 @@ export function BlogPostList({
                         </button>
                       </>
                     ) : null}
-                    <button
-                      type="button"
-                      className="dash-button dash-button-plain"
-                      disabled={
-                        commands.busy ||
-                        archived.collectionState !== "archived"
-                      }
-                      onClick={() => {
-                        void commands.sendBlogOperation(
-                          {
-                            operation: "restore",
-                            postId: archived.postId,
-                            selectedPostRevisionId: archived.postRevisionId,
-                          },
-                          "restore-blog-post",
-                        );
-                      }}
-                    >
-                      Restore as draft
-                    </button>
+                    {archived.collectionState !== "archived" ? null : (
+                      <button
+                        type="button"
+                        className="dash-button dash-button-plain"
+                        disabled={commands.busy}
+                        onClick={() => {
+                          void commands.sendBlogOperation(
+                            {
+                              operation: "restore",
+                              postId: archived.postId,
+                              selectedPostRevisionId: archived.postRevisionId,
+                            },
+                            "restore-blog-post",
+                          );
+                        }}
+                      >
+                        Restore as draft
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
             </ul>
           </section>
         )}
-        {commands.pendingAttempt === null ? null : (
-          <button
-            type="button"
-            className="dash-button dash-button-plain"
-            disabled={commands.busy}
-            onClick={() => commands.retryPendingAttempt()}
-          >
-            Retry the last change
-          </button>
-        )}
-        {commands.message === "" ? null : (
-          <p role="alert">{commands.message}</p>
-        )}
+        <BlogCommandFeedback commands={commands} />
       </section>
     </>
   );
