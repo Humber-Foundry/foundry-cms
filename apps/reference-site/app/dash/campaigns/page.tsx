@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 
 import { createBlogPostArtifactFingerprints } from "@humber-foundry/application";
 
-import { CampaignControls } from "@/components/campaign-controls";
+import { CampaignList } from "@/components/campaign-list";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
 import { loadPendingCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
 import {
@@ -12,14 +12,13 @@ import {
   readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
-import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Newsletter is where campaigns are written, tested and scheduled. A campaign
- * can stand alone or start from a blog post; either way Foundry renders and
- * fingerprints the exact email that gets sent.
+ * Newsletter opens here, on the list of every email this site has written
+ * (#237). An email is written, previewed, tested and sent on its own screen;
+ * this one says what exists and offers the way in.
  */
 export default async function DashboardCampaignsPage({
   searchParams,
@@ -58,32 +57,11 @@ export default async function DashboardCampaignsPage({
 
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>Newsletter</h1>
-          <p>
-            Write a campaign, send yourself a test, then schedule it. Only you
-            can authorise a send to the whole list.
-          </p>
-        </div>
-      </div>
-      <CampaignControls
+      <CampaignList
         csrfToken={mutationToken}
-        workspaceId={dashboardWorkspace.workspaceId}
-        // Only site photos an email can load are offered here. A relative
-        // built-in address such as "/logo.svg" cannot be sent in an email
-        // (ADR-0014 needs an absolute address), so the picker lists uploads and
-        // absolute site photos, never a bare path the owner could not send.
-        siteImages={siteStaticImageTiles(
-          definition,
-          contentRevision.definition,
-        ).filter((image) => image.src.startsWith("https://"))}
+        workspace={dashboardWorkspace.workspaceId}
         initialCampaigns={campaigns}
         initialScheduleRequests={scheduleRequests}
-        // The steps say whose step each one is. The server still decides every
-        // command; this only lets the screen explain an Owner-only step to an
-        // Editor instead of refusing it after the fact.
-        role={access.membership.role}
         postSources={postArtifacts.flatMap((artifact) => {
           const post = definition.blog.posts.find(
             ({ id }) => id === artifact.postId,

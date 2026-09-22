@@ -508,6 +508,12 @@ item's unpublished revision. The internal `workspaceId` and revision number
 never appear as ordinary page copy; the dashboard says "unpublished changes"
 or "your draft" instead.
 
+**Email** — The dashboard's word for what this glossary calls a **campaign**.
+Newsletter says "Emails", "New email" and "Open" on the screens a site owner
+reads, because an owner writes and sends an email, not a campaign. Code
+identifiers (`Campaign`, `campaignId`, `campaign-list.tsx`) keep "campaign";
+only the words a person reads changed.
+
 **User** — The dashboard's word for what this glossary's Actors section and
 the code call a **member** (a human's membership in the site — its `role`
 and `status`). "Member" reads as jargon and does not say what the person can
@@ -568,6 +574,8 @@ editing page.
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
 - [Preset looks and the design token vocabulary](docs/decisions/ADR-0009-design-presets-and-token-vocabulary.md)
+- [A page component paints only from design tokens](docs/decisions/ADR-0040-page-components-paint-only-from-design-tokens.md)
+- [The page component design token contract](docs/architecture/page-component-design-token-contract.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)

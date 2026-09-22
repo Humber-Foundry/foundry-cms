@@ -13,7 +13,7 @@
 | [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) | Bulk campaign execution boundary | Accepted | 2026-07-30 |
 | [ADR-0007](ADR-0007-mcp-publication-scope-derivation-boundary.md) | MCP publication scope derivation and enforcement boundary | Accepted | 2026-07-30 |
 | [ADR-0008](ADR-0008-seo-metadata-shared-field-set.md) | One SEO and sharing field set, with a derived canonical URL | Accepted | 2026-08-15 |
-| [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md) | Preset looks are derived, and the token contract owns the palette | Accepted | 2026-08-15 |
+| [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md) | Preset looks are derived, and the token contract owns the palette | Accepted, amended | 2026-08-15 |
 | [ADR-0010](ADR-0010-messages-inbox-and-owner-notification-demotion.md) | Messages is an inbox, and the owner notification is demoted | Accepted | 2026-08-15 |
 | [ADR-0011](ADR-0011-media-thumbnail-variant.md) | Browser-made media thumbnail variant | Accepted | 2026-08-15 |
 | [ADR-0012](ADR-0012-page-image-field-media-reference.md) | Page-component image fields reference gallery photos | Accepted | 2026-08-16 |
@@ -44,4 +44,5 @@
 | [ADR-0037](ADR-0037-mcp-photo-tools.md) | An agent adds a photo by sending its bytes, and places it through the media library's own commands | Accepted | 2026-09-20 |
 | [ADR-0038](ADR-0038-blog-schedule-request-visibility-and-decline.md) | The dashboard shows an app's schedule request, and a person's decline is its own immutable record | Accepted | 2026-09-20 |
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
+| [ADR-0040](ADR-0040-page-components-paint-only-from-design-tokens.md) | A page component paints only from design tokens, and two tests fail when one does not | Accepted | 2026-09-21 |
 | [ADR-0047](ADR-0047-web-traffic-counted-in-the-worker.md) | Web traffic is counted in the Worker request path, with no beacon and no cookie | Accepted | 2026-09-21 |

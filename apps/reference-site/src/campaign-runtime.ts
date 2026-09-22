@@ -89,40 +89,70 @@ import {
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
 
-const localCampaignTestDeliveryStore =
-  createInMemoryCampaignTestDeliveryStore();
-const localCampaignStore = createInMemoryCampaignStore({
-  cancelOpenTestDeliveries: (input) =>
-    localCampaignTestDeliveryStore.cancelForCampaignEdit(input),
-  persistTestReceiptConfirmation: async (confirmation) => {
-    await localCampaignTestDeliveryStore.persistReceiptConfirmation(
-      confirmation,
-    );
-  },
-});
-const localSubscriberStore = createInMemorySubscriberLedgerStore();
-const localBulkCurrentRevisions = new Map<string, string>();
-const localBulkActiveOwners = new Set(["membership-local-owner"]);
-const localBulkActiveSubscribers = new Set<string>();
 /**
- * A development installation keeps its schedule requests in memory too, and
- * admits the same local owner the local bulk state store admits.
+ * Everything a development installation keeps in memory instead of in D1.
+ *
+ * A real installation has one database, so a dashboard page and the campaigns
+ * route read the same campaigns. Next builds the page graph and the
+ * route-handler graph as separate module instances, so plain module constants
+ * would give each of them its own store: an email written through the route
+ * would then be missing from the list a page renders. The stores are held on
+ * `globalThis` so both read one store, the same way `media-asset-runtime.ts`
+ * holds the local media stores.
  */
-const localScheduleProposalStore =
-  createInMemoryCampaignScheduleProposalStore({
-    humanAuthorities: localBulkActiveOwners,
+function createLocalCampaignState() {
+  const testDeliveryStore = createInMemoryCampaignTestDeliveryStore();
+  const campaignStore = createInMemoryCampaignStore({
+    cancelOpenTestDeliveries: (input) =>
+      testDeliveryStore.cancelForCampaignEdit(input),
+    persistTestReceiptConfirmation: async (confirmation) => {
+      await testDeliveryStore.persistReceiptConfirmation(confirmation);
+    },
   });
-const localBulkStateStore = createInMemoryCampaignBulkStateStore({
-  currentRevision: (campaignId) => {
-    const revisionId = localBulkCurrentRevisions.get(campaignId);
-    if (revisionId === undefined) {
-      throw new Error("campaign_not_found");
-    }
-    return revisionId as ReturnType<typeof createCampaignRevisionId>;
-  },
-  activeOwners: localBulkActiveOwners,
-  activeSubscribers: localBulkActiveSubscribers,
-});
+  const bulkCurrentRevisions = new Map<string, string>();
+  const bulkActiveOwners = new Set(["membership-local-owner"]);
+  const bulkActiveSubscribers = new Set<string>();
+  return {
+    testDeliveryStore,
+    campaignStore,
+    subscriberStore: createInMemorySubscriberLedgerStore(),
+    bulkCurrentRevisions,
+    bulkActiveOwners,
+    bulkActiveSubscribers,
+    // A development installation keeps its schedule requests in memory too,
+    // and admits the same local owner the local bulk state store admits.
+    scheduleProposalStore: createInMemoryCampaignScheduleProposalStore({
+      humanAuthorities: bulkActiveOwners,
+    }),
+    bulkStateStore: createInMemoryCampaignBulkStateStore({
+      currentRevision: (campaignId) => {
+        const revisionId = bulkCurrentRevisions.get(campaignId);
+        if (revisionId === undefined) {
+          throw new Error("campaign_not_found");
+        }
+        return revisionId as ReturnType<typeof createCampaignRevisionId>;
+      },
+      activeOwners: bulkActiveOwners,
+      activeSubscribers: bulkActiveSubscribers,
+    }),
+  };
+}
+
+const localRuntime = globalThis as typeof globalThis & {
+  __foundryLocalCampaignState?: ReturnType<typeof createLocalCampaignState>;
+};
+localRuntime.__foundryLocalCampaignState ??= createLocalCampaignState();
+
+const {
+  testDeliveryStore: localCampaignTestDeliveryStore,
+  campaignStore: localCampaignStore,
+  subscriberStore: localSubscriberStore,
+  bulkCurrentRevisions: localBulkCurrentRevisions,
+  bulkActiveOwners: localBulkActiveOwners,
+  bulkActiveSubscribers: localBulkActiveSubscribers,
+  scheduleProposalStore: localScheduleProposalStore,
+  bulkStateStore: localBulkStateStore,
+} = localRuntime.__foundryLocalCampaignState;
 
 /** Every gallery asset one campaign revision's images reference. */
 function collectCampaignImageAssetIds(
