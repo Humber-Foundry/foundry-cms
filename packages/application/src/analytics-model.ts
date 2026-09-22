@@ -76,7 +76,18 @@ export type AnalyticsMetricKey =
 
 export type AnalyticsMetricDefinition = Readonly<{
   metricKey: AnalyticsMetricKey;
+  /**
+   * The source that first owned this metric. It names the source state the
+   * dashboard reads when the metric has no measurement at all.
+   */
   source: AnalyticsSource;
+  /**
+   * Further sources allowed to measure the same metric. One metric can be
+   * measured by more than one system: the site's own Worker and an external
+   * traffic service both count a page view. Readings from two sources are
+   * still never added together; `comparabilitySignature` keeps them apart.
+   */
+  additionalSources: ReadonlyArray<AnalyticsSource>;
   subjectTypes: ReadonlyArray<AnalyticsSubjectType>;
   unit: AnalyticsUnit;
   defaultQuality: AnalyticsQuality;
@@ -184,12 +195,15 @@ export class AnalyticsVocabularyError extends Error {
 
 type AnalyticsMetricEntry = Omit<
   AnalyticsMetricDefinition,
-  "aggregation" | "bucketGranularity" | "valueDomain"
+  "aggregation" | "bucketGranularity" | "valueDomain" | "additionalSources"
 > &
   Partial<
     Pick<
       AnalyticsMetricDefinition,
-      "aggregation" | "bucketGranularity" | "valueDomain"
+      | "aggregation"
+      | "bucketGranularity"
+      | "valueDomain"
+      | "additionalSources"
     >
   >;
 
@@ -197,6 +211,7 @@ function metric(entry: AnalyticsMetricEntry): AnalyticsMetricDefinition {
   return Object.freeze({
     aggregation: "sum" as const,
     valueDomain: "non_negative" as const,
+    additionalSources: Object.freeze([] as ReadonlyArray<AnalyticsSource>),
     bucketGranularity: entry.metricKey.startsWith("campaign.")
       ? ("campaign" as const)
       : ("range" as const),
@@ -208,24 +223,26 @@ const registry: ReadonlyArray<AnalyticsMetricDefinition> = Object.freeze([
   metric({
     metricKey: "web.page_views",
     source: "cloudflare_web",
+    additionalSources: ["analytics_engine"],
     subjectTypes: ["site"],
     unit: "count",
     defaultQuality: "estimated",
     definitionVersion: 1,
     prominence: "primary",
     definition:
-      "Page views reported by Cloudflare Web Analytics, bots excluded where the platform supports it.",
+      "Pages opened on the site. The site's own server counts one for each page it sends.",
   }),
   metric({
     metricKey: "web.visits",
     source: "cloudflare_web",
+    additionalSources: ["analytics_engine"],
     subjectTypes: ["site"],
     unit: "count",
     defaultQuality: "estimated",
     definitionVersion: 1,
     prominence: "primary",
     definition:
-      "Referral-based visits. This is not a count of unique people or sessions.",
+      "Arrivals from somewhere else. This is not a count of unique people or sessions.",
   }),
   metric({
     metricKey: "web.vitals.lcp_p75",
@@ -266,13 +283,14 @@ const registry: ReadonlyArray<AnalyticsMetricDefinition> = Object.freeze([
   metric({
     metricKey: "content.page_views",
     source: "cloudflare_web",
+    additionalSources: ["analytics_engine"],
     subjectTypes: ["content"],
     unit: "count",
     defaultQuality: "estimated",
     definitionVersion: 1,
     prominence: "primary",
     definition:
-      "Page views joined to the content item that owned the published path in that bucket.",
+      "Page views counted against the page or post that owned the web address at the time.",
   }),
   metric({
     metricKey: "interaction.form_impressions",
@@ -508,6 +526,20 @@ export function analyticsMetricDefinition(
     throw new AnalyticsVocabularyError(metricKey);
   }
   return definition;
+}
+
+/** Every source allowed to measure this metric, primary source first. */
+export function analyticsMetricSources(
+  definition: AnalyticsMetricDefinition,
+): ReadonlyArray<AnalyticsSource> {
+  return [definition.source, ...definition.additionalSources];
+}
+
+export function metricMeasuredBy(
+  definition: AnalyticsMetricDefinition,
+  source: AnalyticsSource,
+): boolean {
+  return analyticsMetricSources(definition).includes(source);
 }
 
 export function isAnalyticsMetricKey(

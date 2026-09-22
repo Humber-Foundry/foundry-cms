@@ -1,10 +1,10 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
+import type { AnalyticsEngineDataset } from "../../../../src/analytics-engine-source";
 import { publicSubjectIds } from "../../../../src/analytics-public-subjects";
 import {
   collectInteraction,
   writeInteractionPoint,
-  type AnalyticsEngineDataset,
 } from "../../../../src/analytics-interaction-collector";
 
 /**

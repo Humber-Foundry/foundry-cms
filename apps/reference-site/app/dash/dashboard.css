@@ -3406,13 +3406,16 @@
   margin-top: 3.5rem;
 }
 
-.analytics h3 {
+/* One heading level for each part of the screen, under the page's own
+ * heading. The size stays the body size; weight and colour carry the step. */
+.analytics h2 {
   margin: 2.5rem 0 0.75rem;
   font-family: var(--dash-font);
   font-size: var(--dash-text);
 }
 
-.analytics h4 {
+/* The name of one form or one newsletter inside a part. */
+.analytics h3 {
   margin: 0 0 0.5rem;
   color: var(--ink-soft);
   font-family: var(--dash-font-mono);
@@ -3540,8 +3543,182 @@
   margin-top: 0.75rem;
 }
 
+
+/* The two periods the Visitors screen offers. Each option is a link, so the
+ * chosen period is in the address and can be shared or reloaded. */
+.analytics-period {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.analytics-period-option {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dash-control-height);
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 0 1rem;
+  background: var(--dash-surface);
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  text-decoration: none;
+}
+
+.analytics-period-chosen {
+  border-color: var(--dash-accent);
+  background: var(--dash-accent-tint);
+  color: var(--dash-accent);
+  font-weight: 700;
+}
+
+.analytics-range-note {
+  margin: 0 0 1rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.analytics-sample-note {
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--sand);
+  border-radius: var(--dash-radius);
+  padding: 0.75rem 1rem;
+  background: var(--paper-bright);
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Two headline numbers, so the row is always complete. */
+.analytics-headlines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--dash-gap);
+}
+
+.analytics-headline {
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1.25rem;
+  background: var(--dash-surface);
+}
+
+.analytics-headline-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.analytics-headline-value {
+  margin: 0.25rem 0;
+  font-size: var(--dash-h1);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.analytics-headline-note {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Page views each day. Plain SVG, no charting library. */
+.analytics-chart {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
+  aspect-ratio: 4 / 1;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 0.5rem;
+  background: var(--dash-surface);
+}
+
+.analytics-chart-bar {
+  fill: var(--dash-accent);
+}
+
+.analytics-chart-bar-uncounted {
+  fill: var(--dash-line);
+}
+
+.analytics-chart-scale {
+  display: flex;
+  justify-content: space-between;
+  max-width: 36rem;
+  margin: 0.5rem 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.analytics-chart-note {
+  margin: 0.25rem 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Most read pages, and where visits came from. A list, because the number of
+ * rows varies and a grid would leave a ragged last row. */
+.analytics-rank {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 0;
+  background: var(--dash-surface);
+  list-style: none;
+}
+
+.analytics-rank-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--dash-line);
+}
+
+.analytics-rank-row:first-child {
+  border-top: 0;
+}
+
+.analytics-rank-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.analytics-rank-path {
+  overflow: hidden;
+  color: var(--dash-ink-soft);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-rank-value {
+  flex: none;
+  font-size: var(--dash-h2);
+}
+
+@media (max-width: 40rem) {
+  .analytics-headlines {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .analytics-period-option {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
 .analytics .inventory-row {
-  grid-template-columns: 1.2fr 1.4fr 1fr 1fr;
+  grid-template-columns: 1.3fr 1.3fr 1fr 1fr;
 }
 
 /* Photo library -----------------------------------------------------------

@@ -3,6 +3,7 @@ import "server-only";
 import {
   allowedInteractionKinds,
   isInteractionKind,
+  type AnalyticsEngineDataset,
   type InteractionKind,
 } from "./analytics-engine-source";
 
@@ -28,14 +29,6 @@ export type InteractionRejectionCode =
 export type InteractionCollectionResult =
   | Readonly<{ outcome: "accepted"; point: InteractionPoint }>
   | Readonly<{ outcome: "rejected"; code: InteractionRejectionCode }>;
-
-export type AnalyticsEngineDataset = Readonly<{
-  writeDataPoint(point: {
-    blobs: ReadonlyArray<string>;
-    doubles?: ReadonlyArray<number>;
-    indexes?: ReadonlyArray<string>;
-  }): void;
-}>;
 
 /**
  * Validates one reported interaction against the public objects this site

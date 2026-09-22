@@ -314,7 +314,9 @@ describe("every reading carries its interpretation", () => {
       completeThrough: "2026-07-02T07:00:00.000Z",
       value: { state: "available", value: 100 },
     });
-    expect(reading?.definition).toMatch(/Cloudflare Web Analytics/u);
+    // The definition explains the number in plain words, and never names the
+    // system that measured it: two sources may measure one metric.
+    expect(reading?.definition).toMatch(/Pages opened on the site/u);
     expect(reading?.freshness).toBe("fresh");
   });
 
@@ -1093,5 +1095,126 @@ describe("query caching", () => {
     });
 
     expect(first.range.startUtc).not.toBe(second.range.startUtc);
+  });
+});
+
+describe("the daily traffic series behind the chart", () => {
+  const week = { fromLocalDate: "2026-06-29", toLocalDate: "2026-07-01" };
+
+  it("returns one entry for every stored day the range covers", async () => {
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+
+    // Facts are stored in UTC day buckets, so a three-day local range gives
+    // the three UTC days that start inside it.
+    expect(traffic.days.map((day) => day.bucketStartUtc)).toEqual([
+      "2026-06-30T00:00:00.000Z",
+      "2026-07-01T00:00:00.000Z",
+      "2026-07-02T00:00:00.000Z",
+    ]);
+  });
+
+  it("reports the page views and arrivals measured for a day", async () => {
+    facts = [
+      fact({
+        metricKey: "web.page_views",
+        bucketStartUtc: "2026-07-01T00:00:00.000Z",
+        bucketEndUtc: "2026-07-02T00:00:00.000Z",
+        source: "analytics_engine",
+        sourceMetric: "worker_points",
+        value: 42,
+      }),
+      fact({
+        metricKey: "web.visits",
+        bucketStartUtc: "2026-07-01T00:00:00.000Z",
+        bucketEndUtc: "2026-07-02T00:00:00.000Z",
+        source: "analytics_engine",
+        sourceMetric: "worker_points",
+        value: 30,
+      }),
+    ];
+
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+    const day = traffic.days.find(
+      (entry) => entry.bucketStartUtc === "2026-07-01T00:00:00.000Z",
+    );
+
+    expect(day?.pageViews).toEqual({ state: "available", value: 42 });
+    expect(day?.visits).toEqual({ state: "available", value: 30 });
+  });
+
+  it("reports an uncounted day as unavailable, never as a zero", async () => {
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+
+    expect(traffic.days[0].pageViews).toEqual({
+      state: "unavailable",
+      reason: "not_measured",
+    });
+  });
+
+  it("names a source that is not reporting, for an uncounted day", async () => {
+    sourceStates = [
+      sourceState({ source: "analytics_engine", status: "unavailable" }),
+    ];
+
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+
+    expect(traffic.days[0].pageViews).toEqual({
+      state: "unavailable",
+      reason: "source_unavailable",
+    });
+  });
+
+  it("leaves out a day that has not begun", async () => {
+    const traffic = await application("2026-07-01T12:00:00.000Z").queries
+      .traffic({ actor, range: week });
+
+    expect(
+      traffic.days.every(
+        (day) => Date.parse(day.bucketStartUtc) <= Date.parse("2026-07-01T12:00:00.000Z"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses to add two unlike measurements of one day", async () => {
+    facts = [
+      fact({
+        metricKey: "web.page_views",
+        bucketStartUtc: "2026-07-01T00:00:00.000Z",
+        bucketEndUtc: "2026-07-02T00:00:00.000Z",
+        source: "analytics_engine",
+        sourceMetric: "worker_points",
+        value: 42,
+      }),
+      fact({
+        metricKey: "web.page_views",
+        bucketStartUtc: "2026-07-01T00:00:00.000Z",
+        bucketEndUtc: "2026-07-02T00:00:00.000Z",
+        source: "cloudflare_web",
+        sourceMetric: "pageViews",
+        value: 50,
+      }),
+    ];
+
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+    const day = traffic.days.find(
+      (entry) => entry.bucketStartUtc === "2026-07-01T00:00:00.000Z",
+    );
+
+    expect(day?.pageViews.state).toBe("unavailable");
   });
 });
