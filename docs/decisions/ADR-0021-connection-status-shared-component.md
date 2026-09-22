@@ -61,7 +61,8 @@ of names, and never renders a value, a token, a key or a personal address.
 
 ### 3. Where it shows
 
-- **Newsletter** (`campaign-controls.tsx`): the existing "not connected" note
+- **Newsletter** (`campaign-controls.tsx`, split into `campaign-send-flow.tsx`
+  and its sibling screens by #237): the existing "not connected" note
   in the sending steps is replaced with `<ConnectionStatus kind="email" />`.
   Steps 2 to 4 keep disabling while not connected; only the note changed.
 - **Blog** (`blog-post-controls.tsx`): `<PublishingConnectionStatus />` sits

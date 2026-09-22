@@ -151,6 +151,10 @@ async function main() {
 
       await page.goto(`${origin}/dash/campaigns?workspace=${workspace}`);
       await page.getByRole("heading", { name: "Newsletter" }).waitFor();
+      // Newsletter opens on the campaign list (#237), so the writing box is
+      // reached through "New email".
+      await page.getByRole("button", { name: "New email" }).click();
+      await page.waitForURL(/\/dash\/campaigns\/new\?workspace=workspace_/u);
       const composer = page.locator("form.composer");
       await composer.waitFor({ state: "visible" });
       await composer
@@ -168,8 +172,9 @@ async function main() {
       );
       await page.getByRole("button", { name: "Save email" }).click();
 
-      // The save reloads the list, and the list read above supplies the
-      // request, so the campaign now shows what the app asked for.
+      // The save returns to the list, and the list read above supplies the
+      // request, so the campaign row now shows what the app asked for.
+      await page.waitForURL(/\/dash\/campaigns\?workspace=workspace_/u);
       await page
         .getByText(/asked to send this at/u)
         .waitFor({ state: "visible" });
@@ -187,7 +192,14 @@ async function main() {
           JSON.parse(request.postData() ?? "{}").action ===
             "decline_schedule_request",
       );
-      await page.getByRole("button", { name: "Decline" }).first().click();
+      // A row's actions sit behind its "..." menu since #226.
+      await page
+        .getByRole("button", { name: /^Actions for / })
+        .first()
+        .click();
+      await page
+        .getByRole("menuitem", { name: "Decline the app's send request" })
+        .click();
       const command = JSON.parse((await declined).postData() ?? "{}");
       if (command.proposalId !== scheduleRequest.proposalId) {
         throw new Error("decline_named_the_wrong_request");
