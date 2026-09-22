@@ -118,6 +118,13 @@ export interface PublicFormNotificationStore {
     olderThanReceiptId: PublicFormReceiptId | null;
   }): Promise<PublicFormInboxPage>;
   countUnreadInbox(input: { siteId: SiteId }): Promise<number>;
+  /**
+   * How many accepted messages each form has received, by form id. A form with
+   * no messages may be left out; the caller reads a missing form as zero.
+   */
+  countInboxByForm(input: {
+    siteId: SiteId;
+  }): Promise<Readonly<Record<string, number>>>;
   listSuspectedSpam(input: {
     siteId: SiteId;
   }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -148,6 +155,10 @@ export type PublicFormOperationsApplication = Readonly<{
       olderThanReceiptId?: PublicFormReceiptId | null;
     }): Promise<PublicFormInboxPage>;
     unreadCount(input: { actor: ExternalHumanIdentity }): Promise<number>;
+    /** How many messages each form has received, by form id. */
+    messageCountsByForm(input: {
+      actor: ExternalHumanIdentity;
+    }): Promise<Readonly<Record<string, number>>>;
     suspectedSpam(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -283,6 +294,10 @@ export function createPublicFormOperationsApplication({
       async unreadCount({ actor }) {
         await authorize(actor, "forms.review");
         return store.countUnreadInbox({ siteId });
+      },
+      async messageCountsByForm({ actor }) {
+        await authorize(actor, "forms.review");
+        return store.countInboxByForm({ siteId });
       },
       async suspectedSpam({ actor }) {
         await authorize(actor, "forms.review");

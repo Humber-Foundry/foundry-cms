@@ -159,7 +159,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "b059525904da5f978a777655ec624affda58815844c4e2cf9d7f3b9a6c80bc2e",
+    "inputSchemaSha256": "d8c34a73cad8ff9644beb9908b57d7d66ad7b44148bd63c80abdb74f097026f1",
     "name": "foundry.page.restructure",
     "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
   },
@@ -175,7 +175,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     },
     "inputSchemaSha256": "7760a5a5ce90f1c50ad52b3bb68cfcb409a0d348b55eb2f066cd92e85474cac1",
     "name": "foundry.section.list",
-    "outputSchemaSha256": "4dc2404f46f7fb195024816d8d275f58ca2e3eaf7f3246e5da4353ba1c2debeb",
+    "outputSchemaSha256": "1b1f71127e5aef1f224242dbf2692dd49d131745173fbf4c1e6c4b22c5c3b21a",
   },
   {
     "annotations": {

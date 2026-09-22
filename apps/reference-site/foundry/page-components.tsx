@@ -1,4 +1,5 @@
 import {
+  contactFormComponent,
   createPageComponentRegistryFromRegistrations,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
@@ -20,7 +21,9 @@ import {
   type InlineTextRenderer,
   type PageComponentRenderer,
 } from "./page-component-renderers";
+import { sectionAnchor } from "@/src/section-anchor";
 import { AttentionNotes } from "../components/attention-notes";
+import { ContactForm } from "../components/contact-form";
 import { NewsletterSignupForm } from "../components/newsletter-signup-form";
 
 export const imageCopyStoryComponent = createRegisteredPageComponent({
@@ -311,6 +314,34 @@ const installedRegistrations = Object.freeze([
     foundationPageComponentRegistry.components.callToAction!,
     renderCallToActionPageComponent,
   ),
+  /**
+   * The contact form block. The words come from the section; the fields, the
+   * automated-traffic check and the send belong to the form component, because
+   * they are what makes a message safe to save.
+   *
+   * On an editing surface the form is drawn but sends nothing, so the owner
+   * can see the block while they arrange the page without filling their own
+   * inbox. See ADR-0044.
+   */
+  installPageComponent(contactFormComponent, ({ section, editingSurface }) => {
+    const props = registeredProps(contactFormComponent, section);
+    return (
+      <section
+        className="contact-form-section"
+        id={sectionAnchor(section)}
+        aria-labelledby={`${section.id}_title`}
+      >
+        <ContactForm
+          formId={props.formId}
+          title={props.title}
+          body={props.body}
+          actionLabel={props.actionLabel}
+          titleId={`${section.id}_title`}
+          previewOnly={editingSurface === true}
+        />
+      </section>
+    );
+  }),
   installPageComponent(imageCopyStoryComponent, ({ section, mediaDelivery = "published", mediaAccessToken, inlineImage }) => {
     const props = registeredProps(imageCopyStoryComponent, section);
     return (

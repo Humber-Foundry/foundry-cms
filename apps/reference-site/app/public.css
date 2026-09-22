@@ -934,3 +934,133 @@
     flex: 1 1 100%;
   }
 }
+
+/* Contact form.
+   The fields stack in one column so a long message has the full width, and
+   every control stays at least 44px high so it can be tapped. Controls keep
+   their corner radius: square corners are for photos. Two type sizes only —
+   the heading, and everything else — with colour carrying the hierarchy.
+
+   Every colour and font family here comes from a design token custom
+   property, so choosing another look changes this block too. */
+
+.contact-form-section {
+  width: min(100%, var(--design-content-width));
+  margin-inline: auto;
+  padding: clamp(4.5rem, 9vw, 8rem) var(--page-gutter);
+}
+
+.contact-form-title {
+  max-width: 16ch;
+  margin: 0 0 1.25rem;
+  color: var(--design-ink);
+  font-family: var(--design-heading-font);
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+/* One size for every word below the heading. Colour separates the lead
+   sentence and the note under the button from the field labels. */
+.contact-form-body {
+  max-width: 36rem;
+  margin: 0 0 2rem;
+  color: var(--design-ink-soft);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.contact-form-fields {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 36rem;
+}
+
+.contact-form-label {
+  margin-bottom: 0.5rem;
+  color: var(--design-ink);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.contact-form-label + .contact-form-input {
+  margin-bottom: 1.25rem;
+}
+
+.contact-form-input {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--design-line);
+  border-radius: 0.5rem;
+  background: var(--design-card);
+  color: var(--design-ink);
+  font: inherit;
+  font-family: var(--design-body-font);
+  font-size: 1rem;
+}
+
+.contact-form-message {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.contact-form-input:focus-visible {
+  outline: 2px solid var(--design-accent);
+  outline-offset: 2px;
+}
+
+.contact-form-button {
+  min-height: 3rem;
+  padding: 0.75rem 1.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--design-accent-deep);
+  color: var(--design-accent-ink);
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--design-body-font);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.contact-form-button:hover:not(:disabled) {
+  background: var(--design-accent);
+}
+
+.contact-form-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.contact-form-button:focus-visible {
+  outline: 2px solid var(--design-accent);
+  outline-offset: 2px;
+}
+
+.contact-form-note {
+  max-width: 36rem;
+  margin: 1rem 0 0;
+  color: var(--design-ink-soft);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* The automated-traffic check. It is empty until the widget draws itself, so
+   it takes its spacing only once it holds something, and it fills the column
+   so the widget is exactly as wide as the fields above it. */
+.contact-form-check {
+  width: 100%;
+}
+
+.contact-form-check:not(:empty) {
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 52rem) {
+  .contact-form-button {
+    width: 100%;
+  }
+}

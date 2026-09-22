@@ -154,6 +154,29 @@ describe("D1 public form inbox", () => {
     expect(page.unreadCount).toBe(2);
   });
 
+  it("counts each form's received messages and leaves held spam out", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    await acceptanceStore.accept(submissionAt(1));
+    await acceptanceStore.accept(submissionAt(2));
+    await acceptanceStore.accept(
+      submissionAt(3, {
+        classification: "suspected_spam",
+        deliveryStatus: "held",
+      }),
+    );
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await expect(store.countInboxByForm({ siteId })).resolves.toEqual({
+      contact: 2,
+    });
+  });
+
+  it("counts nothing for a site that has received no message", async () => {
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await expect(store.countInboxByForm({ siteId })).resolves.toEqual({});
+  });
+
   it("pages through older messages with a receipt cursor", async () => {
     const acceptanceStore = createD1PublicFormAcceptanceStore(database);
     for (const index of [1, 2, 3]) {

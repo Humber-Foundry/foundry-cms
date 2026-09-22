@@ -4,13 +4,20 @@ import {
 } from "@humber-foundry/application";
 
 import { MessageInbox } from "@/components/message-inbox";
+import { SiteFormsSummary } from "@/components/site-forms-summary";
 import { SpamReviewControls } from "@/components/spam-review-controls";
+import { installedPublicForms } from "@/foundry/public-forms";
 import { ownerAlertSummary } from "@/src/owner-alert-status";
-import { loadPublicFormInbox } from "@/src/public-form-messages-runtime";
 import {
+  loadFormMessageCounts,
+  loadPublicFormInbox,
+} from "@/src/public-form-messages-runtime";
+import {
+  loadEditedOrPublishedDefinition,
   loadMutationToken,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
+import { siteFormsOverview } from "@/src/site-forms-overview";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +61,15 @@ export default async function DashboardFormsPage({
       access,
       readInboxCursor((await searchParams).older),
     );
+  // The draft, so a form block the owner has just placed is listed here
+  // before the site is published. Messages only looks at the site, so it
+  // starts no draft and names no workspace: it reads the one this person is
+  // already editing, and the published site when there is none.
+  const forms = siteFormsOverview(
+    await loadEditedOrPublishedDefinition(),
+    installedPublicForms,
+    await loadFormMessageCounts(access),
+  );
 
   return (
     <main className="dashboard-main" id="main">
@@ -63,6 +79,14 @@ export default async function DashboardFormsPage({
           <p>What people sent you through the forms on your site.</p>
         </div>
       </div>
+
+      <section aria-labelledby="site-forms">
+        <h2 id="site-forms">Forms on your site</h2>
+        <p>
+          Where people can write to you, and how many messages each form has received.
+        </p>
+        <SiteFormsSummary forms={forms} />
+      </section>
 
       <section aria-labelledby="inbox">
         <h2 id="inbox">Inbox</h2>
