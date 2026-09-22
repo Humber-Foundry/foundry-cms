@@ -308,8 +308,11 @@ describe("exact production content authorization", () => {
   });
 
   it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
+    // Pinned so a change to the hashing rules is caught. It moves whenever
+    // the tracked published content changes: it last moved when the home page
+    // gained the contact form block (#235).
     expect(fixedBaseRuntimeContentHash).toBe(
-      "d456747b1e7b45a66764886dc20e3598ef4427d606792b2dffbd2f252397b81e",
+      "9aeb764fc4bad0945ad45a1fd2778bf0a84d51b7a19923bac0aa7be9e379ac59",
     );
     expect(fixedBaseRuntimeContentHash).not.toBe(
       trackedPublishedContentHash,
