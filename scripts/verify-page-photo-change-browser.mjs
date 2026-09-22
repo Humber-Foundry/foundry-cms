@@ -169,7 +169,7 @@ async function main() {
     // Return to the page editor and enter edit mode. Pages opens on the list
     // of every page, so open the home page from it first.
     await page.goto(`${origin}/dash/pages?workspace=${workspace}`);
-    await page.locator(".pages-list-row").first().click();
+    await page.locator(".dash-row-link").first().click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u);
 
     // Record the full-width image section's photo in every saved revision.

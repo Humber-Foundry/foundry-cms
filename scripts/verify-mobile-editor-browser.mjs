@@ -115,7 +115,7 @@ try {
   // the address names no page. The owner taps a row to open that page.
   const workspaceId = new URL(page.url()).searchParams.get("workspace");
   await page.goto(`${origin}/dash/pages?workspace=${workspaceId}`);
-  await page.locator(".pages-list-row").first().click();
+  await page.locator(".dash-row-link").first().click();
   await page.waitForURL(
     /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
   );
