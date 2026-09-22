@@ -29,9 +29,16 @@ export const expectedDashboardDirectives = [
   ["object-src", "'none'"],
 ];
 
-/** True when a directive value admits a host or a scheme beyond `'self'`. */
+/**
+ * True when a directive value admits a source other than the site's own
+ * origin: a host name, a wildcard, or a scheme such as `data:`. Only the
+ * quoted keywords the dashboard policy uses are allowed through, so a bare
+ * host written without a scheme is caught too.
+ */
 export function namesAHost(value) {
-  return /https?:|\*/u.test(value);
+  return !["'self'", "'none'", "'unsafe-inline'", "'unsafe-eval'"].includes(
+    value,
+  );
 }
 
 /**

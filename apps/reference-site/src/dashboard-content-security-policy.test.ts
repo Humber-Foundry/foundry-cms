@@ -61,11 +61,13 @@ describe("dashboardContentSecurityPolicy", () => {
     expect(dashboardPolicyShortfall("frame-src 'self'")).toBe(
       "script-src lacks 'self'",
     );
-    expect(
-      dashboardPolicyShortfall(
-        "script-src 'self' https://cdn.example; frame-src 'self'; object-src 'none'",
-      ),
-    ).toBe("script-src names a host");
+    for (const source of ["https://cdn.example", "cdn.example", "*", "data:"]) {
+      expect(
+        dashboardPolicyShortfall(
+          `script-src 'self' ${source}; frame-src 'self'; object-src 'none'`,
+        ),
+      ).toBe("script-src names a host");
+    }
   });
 
   it("adds eval only for the development server, which needs it", () => {
