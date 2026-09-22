@@ -252,7 +252,7 @@ describe("the public contact form", () => {
   it("keeps what the visitor wrote when the send fails", async () => {
     answerStatus(
       workingStatus,
-      () => new Response(JSON.stringify({ error: "x" }), { status: 503 }),
+      () => new Response(JSON.stringify({ error: "x" }), { status: 400 }),
     );
     acceptTheCheck();
     render();
@@ -270,6 +270,29 @@ describe("the public contact form", () => {
     );
     expect(note.textContent).toContain("Please try again");
     expect(field("name")!.value).toBe("Ada");
+    expect(field("message")!.value).toBe("Please call me back.");
+  });
+
+  it("says plainly when the form cannot take messages just now", async () => {
+    answerStatus(
+      workingStatus,
+      () => new Response(JSON.stringify({ error: "x" }), { status: 503 }),
+    );
+    acceptTheCheck();
+    render();
+    await readyForm();
+    type("name", "Ada");
+    type("message", "Please call me back.");
+    document.querySelector("form")!.requestSubmit();
+
+    const note = await waitFor(
+      () =>
+        [...document.querySelectorAll(".contact-form-note")].find(
+          (candidate) =>
+            candidate.textContent?.includes("cannot take messages") === true,
+        ) ?? undefined,
+    );
+    expect(note.textContent).toContain("try again later");
     expect(field("message")!.value).toBe("Please call me back.");
   });
 

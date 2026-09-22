@@ -213,7 +213,11 @@ async function main() {
     const canvas = page.frameLocator(".editor-canvas iframe");
     const canvasImage = canvas.locator(".canvas-image-field");
     await canvasImage.first().waitFor({ state: "visible" });
-    if ((await canvas.locator("input[type=text], input[type=url]").count()) > 0) {
+    // A page component's own visitor-facing fields are content, not an editor
+    // control, so the contact form block's fields are left out of this count.
+    const rawAddressInputs =
+      "input[type=text]:not(.contact-form-input), input[type=url]:not(.contact-form-input)";
+    if ((await canvas.locator(rawAddressInputs).count()) > 0) {
       throw new Error("page_photo_field_is_a_raw_address_input");
     }
     const changePhoto = canvas.getByRole("button", { name: "Change photo" });
