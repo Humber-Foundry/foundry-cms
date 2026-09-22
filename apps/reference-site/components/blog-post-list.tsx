@@ -16,14 +16,15 @@ import {
   blogHasPendingSitePublish,
   blogPostExecutionFailureNote,
   blogPostName,
-  blogScreenDescription,
-  changeNotConfirmedMessage,
-  previewNotOpenedMessage,
   blogPostScheduleStanding,
   blogPostStanding,
+  blogScreenDescription,
+  changeNotConfirmedMessage,
   confirmArchiveWithdrawal,
   formatLocalScheduleTime,
   openArchiveWithdrawalPreview,
+  openInNewTab,
+  previewNotOpenedMessage,
   type ArchiveWithdrawalLocation,
 } from "./blog-operations";
 import { PublishingConnectionStatus } from "./connection-status";
@@ -113,35 +114,34 @@ export function BlogPostList({
    */
   async function previewArchiveWithdrawal(archived: ArchivedBlogPostSummary) {
     if (archived.archiveRequestId === null) return;
-    const popup = window.open("", "_blank");
-    if (popup !== null) popup.opener = null;
+    const requestId = archived.archiveRequestId;
+    // Whether the server's own reason has already been shown. A refusal says
+    // why; anything else has no answer to read, so it gets the plain sentence.
+    let reasonShown = false;
     commands.setBusy(true);
     commands.setMessage("");
     try {
-      const result = await openArchiveWithdrawalPreview({
-        postId: archived.postId,
-        archiveRequestId: archived.archiveRequestId,
-        mutationToken: commands.mutationToken,
+      await openInNewTab(async () => {
+        const result = await openArchiveWithdrawalPreview({
+          postId: archived.postId,
+          archiveRequestId: requestId,
+          mutationToken: commands.mutationToken,
+        });
+        commands.setMutationToken(result.mutationToken);
+        if (result.outcome === "failed") {
+          commands.setMessage(result.message);
+          reasonShown = true;
+          throw new Error("archive_withdrawal_preview_refused");
+        }
+        setWithdrawalPreviews((previous) => {
+          const next = new Map(previous);
+          next.set(archived.postId, result.withdrawal);
+          return next;
+        });
+        return result.previewUrl;
       });
-      commands.setMutationToken(result.mutationToken);
-      if (result.outcome === "failed") {
-        popup?.close();
-        commands.setMessage(result.message);
-        return;
-      }
-      setWithdrawalPreviews((previous) => {
-        const next = new Map(previous);
-        next.set(archived.postId, result.withdrawal);
-        return next;
-      });
-      if (popup === null) {
-        window.open(result.previewUrl, "_blank", "noopener,noreferrer");
-      } else {
-        popup.location.href = result.previewUrl;
-      }
     } catch {
-      popup?.close();
-      commands.setMessage(previewNotOpenedMessage);
+      if (!reasonShown) commands.setMessage(previewNotOpenedMessage);
     } finally {
       commands.setBusy(false);
     }

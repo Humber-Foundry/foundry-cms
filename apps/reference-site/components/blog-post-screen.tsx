@@ -18,6 +18,7 @@ import {
   blogPostScheduleStanding,
   blogPostStanding,
   formatLocalScheduleTime,
+  openInNewTab,
   previewNotOpenedMessage,
   scheduleNeedsApprovalMessage,
 } from "./blog-operations";
@@ -121,43 +122,43 @@ export function BlogPostScreen({
   const executionFailure = blogPostExecutionFailureNote(summary);
   const pendingRequest = summary?.pendingScheduleProposal ?? null;
   const listHref = blogListHref(revision.workspaceId);
+  // A change is on its way to the server. Every control on this screen waits
+  // for the answer, so a second command cannot start on top of the first.
+  const changeInFlight = commands.busy || commands.pendingAttempt !== null;
+  // The one lifecycle change this post can take now, or nothing when it is
+  // waiting on the next site publish. See `blogPostStanding`.
+  const lifecycleAction = standing.action;
 
   async function openPostPreview() {
-    const popup = window.open("", "_blank");
-    if (popup !== null) popup.opener = null;
     commands.setBusy(true);
     commands.setMessage("");
     try {
-      const result = await sendContentRevisionAttempt({
-        attempt: {
-          body: JSON.stringify({
-            operation: "open_preview",
-            workspaceId: revision.workspaceId,
-            revision: revision.revision,
-          }),
-          idempotencyKey: blogMutationKey("open-blog-preview"),
-        },
-        mutationToken: commands.mutationToken,
+      await openInNewTab(async () => {
+        const result = await sendContentRevisionAttempt({
+          attempt: {
+            body: JSON.stringify({
+              operation: "open_preview",
+              workspaceId: revision.workspaceId,
+              revision: revision.revision,
+            }),
+            idempotencyKey: blogMutationKey("open-blog-preview"),
+          },
+          mutationToken: commands.mutationToken,
+        });
+        commands.setMutationToken(result.mutationToken);
+        if (
+          !result.response.ok ||
+          typeof result.body !== "object" ||
+          result.body === null ||
+          !("previewUrl" in result.body) ||
+          typeof result.body.previewUrl !== "string"
+        ) {
+          throw new Error("blog_preview_access_failed");
+        }
+        setPreviewedRevision(revision.revision);
+        return blogPostPreviewUrl(result.body.previewUrl, post.slug);
       });
-      commands.setMutationToken(result.mutationToken);
-      if (
-        !result.response.ok ||
-        typeof result.body !== "object" ||
-        result.body === null ||
-        !("previewUrl" in result.body) ||
-        typeof result.body.previewUrl !== "string"
-      ) {
-        throw new Error("blog_preview_access_failed");
-      }
-      setPreviewedRevision(revision.revision);
-      const destination = blogPostPreviewUrl(result.body.previewUrl, post.slug);
-      if (popup === null) {
-        window.open(destination, "_blank", "noopener,noreferrer");
-      } else {
-        popup.location.href = destination;
-      }
     } catch {
-      popup?.close();
       commands.setMessage(previewNotOpenedMessage);
     } finally {
       commands.setBusy(false);
@@ -242,11 +243,32 @@ export function BlogPostScreen({
         <button
           type="button"
           className="dash-button dash-button-plain"
-          disabled={commands.busy}
+          disabled={changeInFlight}
           onClick={() => void openPostPreview()}
         >
           Preview ↗
         </button>
+        {lifecycleAction === null ? null : (
+          <button
+            type="button"
+            className="dash-button dash-button-plain"
+            disabled={changeInFlight}
+            onClick={() => {
+              void commands.sendRevisionCommand(
+                {
+                  operation: lifecycleAction.operation,
+                  workspaceId: revision.workspaceId,
+                  schemaVersion: revision.definition.schemaVersion,
+                  baseRevision: revision.revision,
+                  postId: post.id,
+                },
+                lifecycleAction.operation,
+              );
+            }}
+          >
+            {lifecycleAction.label}
+          </button>
+        )}
       </div>
       {scheduleStanding.line === null ? null : (
         <p className="composer-hint">{scheduleStanding.line}</p>
@@ -273,7 +295,7 @@ export function BlogPostScreen({
             <details className="composer-settings">
               <summary>Schedule this post</summary>
               <ScheduleForm
-                busy={commands.busy}
+                busy={changeInFlight}
                 onSchedule={(localValue) => void schedulePost(localValue)}
               />
             </details>
@@ -290,7 +312,7 @@ export function BlogPostScreen({
           workspaceId: revision.workspaceId,
           siteImages,
         }}
-        busy={commands.busy || commands.pendingAttempt !== null}
+        busy={changeInFlight}
         saveLabel={commands.busy ? "Saving…" : "Save changes"}
         onSave={(edited) => {
           void commands.sendRevisionCommand(

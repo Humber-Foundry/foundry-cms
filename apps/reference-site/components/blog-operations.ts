@@ -248,6 +248,32 @@ export function blogOperationErrorCode(body: unknown): string {
     : "";
 }
 
+/**
+ * Opens one new tab and sends it to the address `find` returns.
+ *
+ * The tab is opened by the press itself, because a browser blocks a tab
+ * opened later, once the request has answered. A `find` that throws closes
+ * the tab again, so a refusal never leaves an empty window behind. Both
+ * previews on the Blog screens go through this.
+ */
+export async function openInNewTab(
+  find: () => Promise<string>,
+): Promise<void> {
+  const popup = window.open("", "_blank");
+  if (popup !== null) popup.opener = null;
+  try {
+    const destination = await find();
+    if (popup === null) {
+      window.open(destination, "_blank", "noopener,noreferrer");
+    } else {
+      popup.location.href = destination;
+    }
+  } catch (error) {
+    popup?.close();
+    throw error;
+  }
+}
+
 export type ArchiveWithdrawalLocation = Readonly<{
   workspaceId: string;
   revision: number;

@@ -150,6 +150,10 @@ describe("one blog post's own screen", () => {
     await expect
       .element(page.getByRole("button", { name: "Preview ↗" }))
       .toBeInTheDocument();
+    // The screen says the owner can publish from here, so the control is here.
+    await expect
+      .element(page.getByRole("button", { name: "Publish" }))
+      .toBeInTheDocument();
     const title = document.querySelector<HTMLInputElement>(
       'input[name="title"]',
     );

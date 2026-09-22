@@ -1393,7 +1393,8 @@
  *
  * Blog opens on the posts list, and one post is its own screen (#230). */
 
-/* The sentence under a list that explains what the list's rows say. */
+/* The sentence under a list that explains what its rows say. Any dashboard
+ * list may use it; Blog is the first. */
 .dash-list-note {
   margin: var(--dash-space-4) 0 0;
   color: var(--dash-ink-soft);
