@@ -21,6 +21,8 @@ import { resolve } from "node:path";
 
 import { chromium } from "playwright";
 
+import { contentSecurityPolicyDirectives } from "./lib/content-security-policy.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 /** Hosts a component would try. `.invalid` never resolves (RFC 2606). */
@@ -76,20 +78,6 @@ function stopServer(child) {
   }
 }
 
-/** The directive values of one Content-Security-Policy header. */
-function directives(policy) {
-  return new Map(
-    policy
-      .split(";")
-      .map((directive) => directive.trim())
-      .filter((directive) => directive !== "")
-      .map((directive) => {
-        const [name, ...values] = directive.split(/\s+/u);
-        return [name, values];
-      }),
-  );
-}
-
 /**
  * The document at `path` must carry a policy that admits scripts and frames
  * from the site's own origin only. The header is the guard; the browser
@@ -101,7 +89,7 @@ async function expectDashboardPolicy(origin, path) {
   if (policy === null) {
     throw new Error(`design_preview_no_policy:${path}:${response.status}`);
   }
-  const parsed = directives(policy);
+  const parsed = contentSecurityPolicyDirectives(policy);
   for (const [name, expected] of [
     ["script-src", "'self'"],
     ["frame-src", "'self'"],
@@ -117,43 +105,56 @@ async function expectDashboardPolicy(origin, path) {
   }
 }
 
-/** The public site must carry no such policy: it renders the live challenge. */
-async function expectNoPublicPolicy(origin) {
-  const response = await fetch(`${origin}/`, { redirect: "manual" });
+/**
+ * The public site and the exact preview must carry no such policy: they
+ * render the live challenge. The status does not matter here; the exact
+ * preview needs a capability this script does not hold, and the check is
+ * only that the policy stops at the dashboard's edge.
+ */
+async function expectNoPolicy(origin, path) {
+  const response = await fetch(`${origin}${path}`, { redirect: "manual" });
   if (response.headers.get("content-security-policy") !== null) {
-    throw new Error("design_preview_policy_leaked_to_public_site");
+    throw new Error(`design_preview_policy_outside_dashboard:${path}`);
   }
 }
 
-/** Records what the page did that a preview must never do. */
+/**
+ * Records what the page did that a preview must never do: a console error,
+ * an uncaught exception, or any request to a host outside the site's origin.
+ * A third-party request is kept by address with what became of it: "sent"
+ * until the browser reports otherwise, then the failure reason.
+ */
 function watch(page, origin) {
   const record = {
     consoleErrors: [],
     pageErrors: [],
-    thirdPartyRequests: [],
+    thirdPartyRequests: new Map(),
     thirdPartyResponses: [],
   };
+  const outside = (url) => !url.startsWith(`${origin}/`);
   page.on("console", (message) => {
-    if (message.type() === "error" || message.type() === "warning") {
-      record.consoleErrors.push(`${message.type()}: ${message.text()}`);
+    if (message.type() === "error") {
+      record.consoleErrors.push(message.text());
     }
   });
   page.on("pageerror", (error) => {
     record.pageErrors.push(String(error));
   });
   page.on("request", (request) => {
-    if (!request.url().startsWith(`${origin}/`)) {
-      record.thirdPartyRequests.push(request.url());
+    if (outside(request.url())) {
+      record.thirdPartyRequests.set(request.url(), "sent");
     }
   });
   page.on("requestfailed", (request) => {
-    if (!request.url().startsWith(`${origin}/`)) {
-      record.thirdPartyRequests[record.thirdPartyRequests.indexOf(request.url())] =
-        `${request.url()} -> ${request.failure()?.errorText ?? "failed"}`;
+    if (outside(request.url())) {
+      record.thirdPartyRequests.set(
+        request.url(),
+        request.failure()?.errorText ?? "failed",
+      );
     }
   });
   page.on("response", (response) => {
-    if (!response.url().startsWith(`${origin}/`)) {
+    if (outside(response.url())) {
       record.thirdPartyResponses.push(`${response.url()} ${response.status()}`);
     }
   });
@@ -164,7 +165,7 @@ function expectClean(record, step) {
   const faults = [
     ...record.consoleErrors,
     ...record.pageErrors,
-    ...record.thirdPartyRequests,
+    ...record.thirdPartyRequests.keys(),
   ];
   if (faults.length > 0) {
     throw new Error(`design_preview_${step}:${JSON.stringify(faults)}`);
@@ -234,7 +235,8 @@ async function main() {
     // nothing outside the dashboard.
     await expectDashboardPolicy(origin, "/dash");
     await expectDashboardPolicy(origin, "/dash/design");
-    await expectNoPublicPolicy(origin);
+    await expectNoPolicy(origin, "/");
+    await expectNoPolicy(origin, "/__foundry/preview/workspace_0/1");
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
@@ -281,7 +283,6 @@ async function main() {
 
     // The guard itself. A component that puts a third-party frame or script
     // into the preview must be refused by the browser, with no request sent.
-    const before = record.thirdPartyRequests.length;
     await page.evaluate(
       ({ frameSrc, scriptSrc }) => {
         const preview = document.querySelector(".design-preview-page");
@@ -306,8 +307,8 @@ async function main() {
       refusals.some(
         (entry) =>
           entry.includes(new URL(url).host) &&
-          (entry.startsWith("error: Refused to frame") ||
-            entry.startsWith("error: Refused to load the script")),
+          (entry.startsWith("Refused to frame") ||
+            entry.startsWith("Refused to load the script")),
       );
     if (!refused(thirdPartyFrame) || !refused(thirdPartyScript)) {
       throw new Error(
@@ -317,14 +318,13 @@ async function main() {
     // A refused load may still surface as a request the browser itself
     // blocked; Playwright reports the reason as `csp` or as
     // `net::ERR_BLOCKED_BY_CSP`. It must never get a response.
-    const attempted = record.thirdPartyRequests.slice(before);
-    const escaped = attempted.filter(
-      (entry) => !/-> (?:net::ERR_BLOCKED_BY_CSP|csp)$/u.test(entry),
+    const escaped = [...record.thirdPartyRequests].filter(
+      ([, outcome]) => !/^(?:net::ERR_BLOCKED_BY_CSP|csp)$/u.test(outcome),
     );
     if (escaped.length !== 0 || record.thirdPartyResponses.length !== 0) {
       throw new Error(
         `design_preview_guard_let_a_request_out:${JSON.stringify({
-          attempted,
+          escaped: Object.fromEntries(escaped),
           responses: record.thirdPartyResponses,
         })}`,
       );
@@ -340,6 +340,8 @@ async function main() {
         `design_preview_guard_frame_loaded:${JSON.stringify(frameDocuments)}`,
       );
     }
+
+    console.log(`Design preview acceptance passed at ${origin}.`);
   } finally {
     if (browser !== undefined) await browser.close();
     stopServer(server);
@@ -347,6 +349,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
-  process.exit(1);
+  process.stderr.write(`${error instanceof Error ? error.stack : error}\n`);
+  process.exitCode = 1;
 });

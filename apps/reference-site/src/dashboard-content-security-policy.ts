@@ -16,8 +16,9 @@
  *   `'unsafe-inline'` stays, because Next writes its own inline scripts
  *   without a nonce. Neither keyword admits another host.
  * - `frame-src 'self'`: a frame may show the site's own origin only. The page
- *   editor's canvas is a `srcdoc` frame, which this directive does not
- *   restrict, so the editor is unaffected.
+ *   editor's canvas is a `srcdoc` frame (`@puckeditor/core` sets `srcDoc` on
+ *   its iframe), so it is the site's own origin, is admitted, and inherits
+ *   this policy.
  * - `object-src 'none'`: no plug-in object or embed at all.
  *
  * The exact preview at `/__foundry/preview/...` and the public site are

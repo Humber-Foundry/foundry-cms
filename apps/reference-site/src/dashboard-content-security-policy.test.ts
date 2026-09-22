@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { contentSecurityPolicyDirectives as directives } from "../../../scripts/lib/content-security-policy.mjs";
+
 import {
   dashboardContentSecurityPolicy,
   dashboardContentSecurityPolicyHeaders,
@@ -15,19 +17,6 @@ import {
  * keep the live Turnstile challenge.
  */
 describe("dashboardContentSecurityPolicy", () => {
-  function directives(policy: string): Map<string, string[]> {
-    return new Map(
-      policy
-        .split(";")
-        .map((directive) => directive.trim())
-        .filter((directive) => directive !== "")
-        .map((directive) => {
-          const [name, ...values] = directive.split(/\s+/u);
-          return [name, values] as const;
-        }),
-    );
-  }
-
   it("allows scripts from the site's own origin only", () => {
     const policy = directives(
       dashboardContentSecurityPolicy({ development: false }),

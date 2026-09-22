@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { contentSecurityPolicyDirectives } from "./lib/content-security-policy.mjs";
 import { assertReferencePage } from "./lib/reference-page.mjs";
 
 async function findAvailablePort() {
@@ -109,6 +110,41 @@ try {
     );
   }
 
+  // The dashboard's Content Security Policy (#234, ADR-0049) is a
+  // `next.config` header. This is the one place the built Worker is served,
+  // so this is where it is proven to carry the policy, not only the dev
+  // server. `/dash` itself is answered above by the Worker's own identity
+  // boundary, before Next runs, so a path below it is the one to check.
+  const designResponse = await fetch(`${origin}/dash/design`, {
+    redirect: "manual",
+  });
+  const dashboardPolicy = contentSecurityPolicyDirectives(
+    designResponse.headers.get("content-security-policy") ?? "",
+  );
+  for (const [name, expected] of [
+    ["script-src", "'self'"],
+    ["frame-src", "'self'"],
+    ["object-src", "'none'"],
+  ]) {
+    if (!(dashboardPolicy.get(name) ?? []).includes(expected)) {
+      throw new Error(
+        `The Worker served /dash/design without \`${name} ${expected}\` in ` +
+          "its Content-Security-Policy header.",
+      );
+    }
+  }
+  if ((dashboardPolicy.get("script-src") ?? []).includes("'unsafe-eval'")) {
+    throw new Error(
+      "The Worker served /dash/design with 'unsafe-eval', which only the " +
+        "development server needs.",
+    );
+  }
+  if (publicResponse.headers.get("content-security-policy") !== null) {
+    throw new Error(
+      "The Worker served the public page with the dashboard's Content-Security-Policy.",
+    );
+  }
+
   const integrationCallbackResponse = await fetch(
     `${origin}/api/integrations/brevo/webhooks/transactional`,
     {
@@ -126,8 +162,9 @@ try {
   }
 
   console.log(
-    "Verified the public page, fail-closed dashboard, and bearer-guarded " +
-      "public integration callback in workerd.",
+    "Verified the public page, fail-closed dashboard with its " +
+      "Content-Security-Policy, and bearer-guarded public integration " +
+      "callback in workerd.",
   );
 } catch (error) {
   process.stderr.write(previewOutput);
