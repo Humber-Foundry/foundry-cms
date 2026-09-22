@@ -19,6 +19,24 @@ const stylesheet = readFileSync(
   "utf8",
 );
 
+const globalStylesheet = readFileSync(
+  fileURLToPath(new URL("../app/globals.css", import.meta.url)),
+  "utf8",
+);
+
+/**
+ * The rules a page component paints with that live in `globals.css` rather
+ * than in `public.css`. The hero renders `button button-primary` and three
+ * components render `eyebrow`, so these are page component rules wherever
+ * their text sits.
+ */
+const sharedControlSelectors = [
+  ".eyebrow",
+  ".button",
+  ".button-primary",
+  ".button-primary:hover",
+];
+
 /** The properties whose value paints a colour or picks a font. */
 const paintingProperties = new Set([
   "accent-color",
@@ -107,6 +125,21 @@ function place(declaration: Declaration): string {
   return `public.css:${declaration.line} ${declaration.property}: ${declaration.value}`;
 }
 
+/**
+ * A value that names a colour of its own rather than reading one. Custom
+ * property names are taken out first: `var(--white)` reads a property whose
+ * name happens to hold a colour word, and which property it may read is the
+ * next test's question, not this one's.
+ */
+function holdsALiteralColour(value: string): boolean {
+  const withoutNames = value.replaceAll(/--[a-z0-9-]+/giu, "");
+  return (
+    /#[0-9a-f]{3,8}\b/iu.test(withoutNames) ||
+    /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(/iu.test(withoutNames) ||
+    new RegExp(`\\b(?:${colourWords.join("|")})\\b`, "iu").test(withoutNames)
+  );
+}
+
 describe("the page component stylesheet paints only from design tokens", () => {
   it("reads enough painting declarations to be a real check", () => {
     expect(painting.length).toBeGreaterThan(20);
@@ -114,11 +147,7 @@ describe("the page component stylesheet paints only from design tokens", () => {
 
   it("writes no literal colour", () => {
     const offenders = painting
-      .filter(({ value }) =>
-        /#[0-9a-f]{3,8}\b/iu.test(value) ||
-        /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(/iu.test(value) ||
-        new RegExp(`\\b(?:${colourWords.join("|")})\\b`, "iu").test(value),
-      )
+      .filter(({ value }) => holdsALiteralColour(value))
       .map(place);
 
     expect(offenders).toEqual([]);
@@ -132,6 +161,54 @@ describe("the page component stylesheet paints only from design tokens", () => {
         ),
       )
       .map(place);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("smuggles no literal colour into a custom property of its own", () => {
+    // A rule could dodge every check above by defining its own custom property
+    // and reading it back. A custom property declared here is not a design
+    // token, so it may hold no colour either.
+    const offenders = declarations(stylesheet)
+      .filter(
+        ({ property, value }) =>
+          property.startsWith("--") &&
+          (/#[0-9a-f]{3,8}\b/iu.test(value) ||
+            /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(/iu.test(value)),
+      )
+      .map(place);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("paints the shared controls a page component renders from tokens too", () => {
+    // `.eyebrow` and `.button-primary` also render outside a site canvas, on
+    // the dashboard and the page-not-found screen, where no design token is
+    // set. Each one therefore reads a token with a fallback, and the fallback
+    // is the value that class had before any design existed.
+    const offenders: string[] = [];
+    for (const selector of sharedControlSelectors) {
+      const start = globalStylesheet.indexOf(`${selector} {`);
+      expect(start, `no rule for ${selector}`).toBeGreaterThanOrEqual(0);
+      const open = globalStylesheet.indexOf("{", start);
+      const rule = globalStylesheet.slice(
+        open + 1,
+        globalStylesheet.indexOf("}", open),
+      );
+      for (const declaration of declarations(`${rule}\n`)) {
+        if (!paintingProperties.has(declaration.property)) continue;
+        const names = [
+          ...declaration.value.matchAll(/var\(\s*(--[a-z0-9-]+)/giu),
+        ].map((match) => match[1]!);
+        // The first name is the one the browser reads; anything after it is
+        // the fallback for the same class outside a site canvas.
+        const readsAToken = names.length === 0 || names[0]!.startsWith("--design-");
+        if (readsAToken && !holdsALiteralColour(declaration.value)) continue;
+        offenders.push(
+          `globals.css ${selector} ${declaration.property}: ${declaration.value}`,
+        );
+      }
+    }
 
     expect(offenders).toEqual([]);
   });

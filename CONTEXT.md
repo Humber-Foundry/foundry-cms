@@ -568,6 +568,8 @@ editing page.
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
 - [Preset looks and the design token vocabulary](docs/decisions/ADR-0009-design-presets-and-token-vocabulary.md)
+- [A page component paints only from design tokens](docs/decisions/ADR-0040-page-components-paint-only-from-design-tokens.md)
+- [The page component design token contract](docs/architecture/page-component-design-token-contract.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)

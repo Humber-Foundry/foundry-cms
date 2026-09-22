@@ -37,6 +37,29 @@ function relativeLuminance(hex: string): number {
   );
 }
 
+/**
+ * `color-mix(in srgb, <first> <weight>%, <second>)`, worked out the same way a
+ * browser works it out. `--design-band` is mixed from the accent and the paper,
+ * so the band's colour exists nowhere to read: it has to be mixed here before
+ * the text on it can be checked.
+ */
+function mixInSrgb(first: string, weight: number, second: string): string {
+  const channels = (hex: string): number[] => {
+    const match = /^#([0-9a-f]{6})$/iu.exec(hex);
+    if (match === null) throw new TypeError(`not_a_six_digit_hex_colour:${hex}`);
+    const value = Number.parseInt(match[1]!, 16);
+    return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+  };
+  const [firstChannels, secondChannels] = [channels(first), channels(second)];
+  const mixed = firstChannels.map((channel, index) =>
+    Math.round(channel * weight + secondChannels[index]! * (1 - weight)),
+  );
+  return `#${mixed.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** The weight `globals.css` mixes `--design-band` with. */
+const bandAccentWeight = 0.2;
+
 export function contrastRatio(first: string, second: string): number {
   const a = relativeLuminance(first);
   const b = relativeLuminance(second);
@@ -93,17 +116,20 @@ describe("design token contract", () => {
     }
   });
 
-  it("offers only accent colours that carry white button text at WCAG AA", () => {
+  it("offers only accent colours that carry their own ink at WCAG AA", () => {
+    // ADR-0040 made each accent option name the ink that reads on it, rather
+    // than leaving white written here by hand. This check reads that ink, so
+    // an accent registered with an ink it cannot carry fails.
     for (const option of accentOptions) {
       const preview = option.preview;
       expect(preview.kind, option.value).toBe("accent");
       if (preview.kind !== "accent") continue;
       expect(
-        contrastRatio(preview.colour, "#ffffff"),
+        contrastRatio(preview.colour, preview.inkColour),
         `accent ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
       expect(
-        contrastRatio(preview.deepColour, "#ffffff"),
+        contrastRatio(preview.deepColour, preview.inkColour),
         `accent hover ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
     }
@@ -143,20 +169,28 @@ describe("design token contract", () => {
     }
   });
 
-  it("carries its own ink on every accent and its deep shade", () => {
-    // `--design-accent-ink` is the text on the accent, the deep accent and the
-    // strong band, so each accent option names it and owes AA on both shades.
-    for (const option of accentOptions) {
-      const preview = option.preview;
-      if (preview.kind !== "accent") continue;
-      expect(
-        contrastRatio(preview.inkColour, preview.colour),
-        `accent ink ${option.value}`,
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        contrastRatio(preview.inkColour, preview.deepColour),
-        `accent ink on deep ${option.value}`,
-      ).toBeGreaterThanOrEqual(4.5);
+  it("keeps page text readable on the light band every accent mixes", () => {
+    // ADR-0040 mixes `--design-band` from the accent and the paper, and page
+    // components put ordinary page text on it. Every accent and page tone the
+    // owner can pair therefore owes the same reading guarantee.
+    for (const accent of accentOptions) {
+      for (const neutral of neutralOptions) {
+        if (accent.preview.kind !== "accent") continue;
+        if (neutral.preview.kind !== "neutral") continue;
+        const band = mixInSrgb(
+          accent.preview.colour,
+          bandAccentWeight,
+          neutral.preview.paper,
+        );
+        expect(
+          contrastRatio(neutral.preview.ink, band),
+          `ink on ${accent.value} band over ${neutral.value}`,
+        ).toBeGreaterThanOrEqual(7);
+        expect(
+          contrastRatio(neutral.preview.softInk, band),
+          `soft ink on ${accent.value} band over ${neutral.value}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 

@@ -97,6 +97,14 @@ rule.
   inherits a colour and a font that already differ.
 - `apps/reference-site/src/design-stylesheet.test.ts` keeps `globals.css` and
   the design contract in agreement.
+- `packages/site-definition/src/design-presets.test.ts` checks every colour the
+  owner can end up with is still readable: page text on the paper, on the card
+  and on the light band, and the accent's own ink on the accent and its deep
+  shade.
+
+Copy all of these. The browser test alone is not enough: `--design-accent-ink`
+is white under every look, so a hand-written `color: #fff` would slip past it.
+The stylesheet test is what reads the source and catches that.
 
 ## The duty of a client installation
 
@@ -108,6 +116,6 @@ this repository.
 that installation.** Fix it in the installation. The owner of that site chose a
 look, and the component must follow it.
 
-Copy the two tests above into the installation as well. They read the
+Copy the tests above into the installation as well. They read the
 installation's own stylesheet and its own component registry, so they hold the
 same rule there.

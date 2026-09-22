@@ -81,7 +81,11 @@ Each one follows a registered token option. Two are new registrations:
 `--design-page`, `--design-ink`, `--design-ink-soft`, `--design-line`,
 `--design-frame`, `--design-shadow`, `--design-overlay`, `--design-band` and
 `--design-band-strong` add no new value at all. They read or mix the tones and
-the accent that are already registered.
+the accent that are already registered. `--design-band` is one fifth accent
+over the page's paper: enough for the band to read as its own colour, and
+light enough that page text keeps WCAG AAA on it for every accent and page
+tone the owner can pair. `design-presets.test.ts` mixes the same colour and
+checks every pair.
 
 `--design-mono-font` is the one design property the owner does not choose. It is
 the framework's fixed-width font for a small technical detail, such as a service
@@ -117,10 +121,19 @@ hex value.
   accent ink.
 - `packages/site-definition/src/design-presets.test.ts` holds ADR-0009's reading
   guarantee over the new values: page text reaches WCAG AAA on the card surface
-  as well as the paper, and each accent's ink reaches WCAG AA on both the accent
-  and its deep shade.
+  and on the light band as well as on the paper, and each accent's ink reaches
+  WCAG AA on both the accent and its deep shade.
 
-### 3. An installation carries the same duty
+### 3. The rule reaches past `public.css`
+
+Three of the rules a page component paints with live in `globals.css`, because
+the same classes also render on the dashboard and the page-not-found screen
+where no design is set: `.eyebrow`, `.button` and `.button-primary`. Each reads
+a design token with the value it had before any design existed as the fallback,
+`var(--design-accent-ink, var(--white))`, and `page-component-stylesheet.test.ts`
+checks those three rules too.
+
+### 4. An installation carries the same duty
 
 `docs/architecture/page-component-design-token-contract.md` states the rule for
 an installation that hand-ports `page-components.tsx`. An installation

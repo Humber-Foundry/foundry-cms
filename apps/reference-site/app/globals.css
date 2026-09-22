@@ -61,12 +61,12 @@
    * ink reads on it. `--design-band-strong` is the accent itself, so only
    * `--design-accent-ink` reads on it.
    */
-  --design-band: color-mix(in srgb, var(--design-accent) 28%, var(--paper));
+  --design-band: color-mix(in srgb, var(--design-accent) 20%, var(--paper));
   --design-band-strong: var(--design-accent);
   /* Text and buttons placed on the accent, the deep accent or the strong
      band. Each accent option names its own, because it is the accent the
      ink has to read on. */
-  --design-accent-ink: #ffffff;
+  --design-accent-ink: var(--white);
 
   background: var(--design-page);
   color: var(--design-ink);
@@ -310,7 +310,7 @@ button:focus-visible {
 
 .button-primary {
   background: var(--design-accent, var(--moss));
-  color: var(--white);
+  color: var(--design-accent-ink, var(--white));
 }
 
 .button-primary:hover {
