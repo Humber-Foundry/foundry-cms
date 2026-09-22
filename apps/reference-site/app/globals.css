@@ -47,8 +47,8 @@
   --design-page: var(--paper);
   --design-card: var(--card);
   --design-panel: var(--panel);
-  --design-heading-ink: var(--ink);
-  --design-body-ink: var(--ink-soft);
+  --design-ink: var(--ink);
+  --design-ink-soft: var(--ink-soft);
   --design-line: var(--line);
   /* A heavy drawn frame, as thick as a pen line. */
   --design-frame: var(--ink);
@@ -63,11 +63,13 @@
    */
   --design-band: color-mix(in srgb, var(--design-accent) 28%, var(--paper));
   --design-band-strong: var(--design-accent);
-  /* Text and buttons placed on the accent, the deep accent or the strong band. */
+  /* Text and buttons placed on the accent, the deep accent or the strong
+     band. Each accent option names its own, because it is the accent the
+     ink has to read on. */
   --design-accent-ink: #ffffff;
 
   background: var(--design-page);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-body-font);
 }
 
@@ -105,31 +107,37 @@
 .site-canvas[data-colour-accent="moss"] {
   --design-accent: #1e5c43;
   --design-accent-deep: #154633;
+  --design-accent-ink: #ffffff;
 }
 
 .site-canvas[data-colour-accent="clay"] {
   --design-accent: #9a4f36;
   --design-accent-deep: #753824;
+  --design-accent-ink: #ffffff;
 }
 
 .site-canvas[data-colour-accent="harbour"] {
   --design-accent: #1f4f79;
   --design-accent-deep: #163a59;
+  --design-accent-ink: #ffffff;
 }
 
 .site-canvas[data-colour-accent="indigo"] {
   --design-accent: #3b3f83;
   --design-accent-deep: #2b2e62;
+  --design-accent-ink: #ffffff;
 }
 
 .site-canvas[data-colour-accent="plum"] {
   --design-accent: #6b3563;
   --design-accent-deep: #4e2749;
+  --design-accent-ink: #ffffff;
 }
 
 .site-canvas[data-colour-accent="graphite"] {
   --design-accent: #3a4750;
   --design-accent-deep: #29333a;
+  --design-accent-ink: #ffffff;
 }
 
 /* Page tone */

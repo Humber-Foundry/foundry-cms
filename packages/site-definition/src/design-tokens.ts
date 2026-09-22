@@ -16,8 +16,16 @@
 /** What the Design module draws so an option shows its own effect. */
 export type DesignOptionPreview =
   | Readonly<{ kind: "font"; fontFamily: string }>
-  /** `deepColour` is the pressed and hovered shade of the same accent. */
-  | Readonly<{ kind: "accent"; colour: string; deepColour: string }>
+  /**
+   * `deepColour` is the pressed and hovered shade of the same accent.
+   * `inkColour` is the text and button colour that reads on both of them.
+   */
+  | Readonly<{
+      kind: "accent";
+      colour: string;
+      deepColour: string;
+      inkColour: string;
+    }>
   /**
    * `card` is the raised surface a page component paints a card, a photo mount
    * or an input field with. It sits one step brighter than `paper` so a block
@@ -95,12 +103,19 @@ const accentOption = <const Value extends string>(
   description: string,
   colour: string,
   deepColour: string,
+  /** Every registered accent is dark, so white is the ink that reads on it. */
+  inkColour = "#ffffff",
 ) =>
   Object.freeze({
     value,
     label,
     description,
-    preview: Object.freeze({ kind: "accent" as const, colour, deepColour }),
+    preview: Object.freeze({
+      kind: "accent" as const,
+      colour,
+      deepColour,
+      inkColour,
+    }),
   });
 
 const neutralOption = <const Value extends string>(

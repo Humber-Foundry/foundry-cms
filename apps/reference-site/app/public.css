@@ -20,7 +20,7 @@
 }
 
 .site-header nav a {
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 0.875rem;
   font-weight: 600;
   text-decoration: none;
@@ -68,7 +68,7 @@
 .hero-summary {
   max-width: 36rem;
   margin: 2rem 0 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: clamp(1.125rem, 2vw, 1.35rem);
   line-height: 1.5;
 }
@@ -92,7 +92,7 @@
 }
 
 .text-link {
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-size: 0.9rem;
   font-weight: 700;
   text-underline-offset: 0.35rem;
@@ -129,7 +129,7 @@
 .section-heading > p:last-child {
   max-width: 35rem;
   margin: 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1.1rem;
 }
 
@@ -166,7 +166,7 @@
 .service-list p {
   max-width: 45rem;
   margin: 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
 }
 
 .proof {
@@ -192,7 +192,7 @@
 
 .proof figcaption {
   margin-top: 1.5rem;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 0.875rem;
 }
 
@@ -214,7 +214,7 @@
 
 .metrics dt {
   order: 2;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 0.8rem;
 }
 
@@ -257,7 +257,7 @@
 }
 
 .contact[data-component-variant="ink"] {
-  background: var(--design-heading-ink);
+  background: var(--design-ink);
 }
 
 .contact .eyebrow {
@@ -356,7 +356,6 @@
 .invitation-section h2 {
   max-width: 16ch;
   margin: 0.5rem 0 1.25rem;
-  color: var(--design-heading-ink);
   font-family: var(--design-heading-font);
   font-size: clamp(2.25rem, 5vw, 4.5rem);
   font-weight: 500;
@@ -368,13 +367,23 @@
 .connector-heading > p:last-child,
 .invitation-section > p:last-of-type {
   max-width: 36rem;
-  color: var(--design-body-ink);
   font-size: clamp(1rem, 1.5vw, 1.18rem);
   line-height: 1.5;
 }
 
-/* The invitation sits on the strong band, so every word in it takes the ink
-   that reads on the accent colour rather than the page ink. */
+/* The story and the connector heading sit on the page, so they take the page
+   ink. The invitation sits on the strong band, so every word in it takes the
+   ink that reads on the accent colour. Each selector sets its colour once. */
+.story-copy h2,
+.connector-heading h2 {
+  color: var(--design-ink);
+}
+
+.story-copy > p:last-child,
+.connector-heading > p:last-child {
+  color: var(--design-ink-soft);
+}
+
 .invitation-section h2,
 .invitation-section > p:last-of-type {
   color: var(--design-accent-ink);
@@ -431,7 +440,7 @@
 
 .connector-heading .handwritten-label {
   grid-column: 1 / -1;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
 }
 
 .connector-grid {
@@ -459,7 +468,7 @@
 
 .connector-grid h3 {
   margin: 2rem 0 0.65rem;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: 1.5rem;
   line-height: 1.25;
@@ -467,7 +476,7 @@
 
 .connector-grid p {
   margin: 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   line-height: 1.5;
 }
 
@@ -493,7 +502,7 @@
   padding: 0.75rem 1.35rem;
   border: 2px solid var(--design-frame);
   background: var(--design-card);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-weight: 700;
   text-decoration: none;
   box-shadow: 0.3rem 0.3rem 0 var(--design-band);
@@ -540,7 +549,7 @@
 .lh-section h2 {
   max-width: 16ch;
   margin: 0 0 1.25rem;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: clamp(2.25rem, 5vw, 4rem);
   font-weight: 500;
@@ -550,19 +559,19 @@
 
 .lh-section p {
   max-width: 36rem;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1.05rem;
   line-height: 1.6;
 }
 
 .lh-big-line {
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
 }
 
 .marker-highlight {
   padding: 0 0.25rem;
   background: var(--design-band);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-weight: 700;
 }
 
@@ -582,7 +591,7 @@
 
 .lh-attention h3 {
   margin: 0 0 0.5rem;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: 1.5rem;
   font-weight: 500;
@@ -590,7 +599,7 @@
 
 .lh-attention-guidance p {
   margin: 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1.05rem;
 }
 
@@ -601,7 +610,7 @@
   border: 1px solid var(--design-line);
   border-radius: 0.5rem;
   background: var(--design-card);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   cursor: pointer;
   font: inherit;
   font-weight: 600;
@@ -626,7 +635,7 @@
   padding: 1.25rem;
   border-radius: 0.5rem;
   box-shadow: 0 0.5rem 1.5rem var(--design-shadow);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   cursor: grab;
   line-height: 1.45;
   touch-action: none;
@@ -652,7 +661,7 @@
 .lh-section blockquote {
   max-width: 34ch;
   margin: clamp(3rem, 6vw, 5rem) 0 0;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: clamp(1.6rem, 3vw, 2.5rem);
   letter-spacing: -0.025em;
@@ -670,7 +679,7 @@
   justify-content: space-between;
   gap: 2rem;
   padding-block: 2.25rem;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 0.8rem;
 }
 
@@ -717,7 +726,7 @@
 .blog-post-excerpt {
   max-width: 42rem;
   margin-block: 2rem 4rem;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1.2rem;
 }
 
@@ -818,7 +827,7 @@
 .newsletter-signup-title {
   max-width: 16ch;
   margin: 0 0 1.25rem;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-family: var(--design-heading-font);
   font-size: clamp(2.25rem, 5vw, 4.5rem);
   font-weight: 500;
@@ -831,7 +840,7 @@
 .newsletter-signup-body {
   max-width: 36rem;
   margin: 0 0 2rem;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1rem;
   line-height: 1.5;
 }
@@ -843,7 +852,7 @@
 .newsletter-signup-label {
   display: block;
   margin-bottom: 0.5rem;
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -861,7 +870,7 @@
   border: 1px solid var(--design-line);
   border-radius: 0.5rem;
   background: var(--design-card);
-  color: var(--design-heading-ink);
+  color: var(--design-ink);
   font: inherit;
   font-size: 1rem;
 }
@@ -901,7 +910,7 @@
 .newsletter-signup-note {
   max-width: 36rem;
   margin: 1rem 0 0;
-  color: var(--design-body-ink);
+  color: var(--design-ink-soft);
   font-size: 1rem;
   line-height: 1.5;
 }

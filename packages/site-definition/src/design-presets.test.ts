@@ -125,6 +125,41 @@ describe("design token contract", () => {
     }
   });
 
+  it("offers only page tones whose card surface carries the same text", () => {
+    // ADR-0040 lets a page component paint a card, a photo mount or an input
+    // field with `--design-card`, and put ordinary page text on it. The card
+    // therefore owes the same reading guarantee the paper gives.
+    for (const option of neutralOptions) {
+      const preview = option.preview;
+      if (preview.kind !== "neutral") continue;
+      expect(
+        contrastRatio(preview.ink, preview.card),
+        `ink on card ${option.value}`,
+      ).toBeGreaterThanOrEqual(7);
+      expect(
+        contrastRatio(preview.softInk, preview.card),
+        `soft ink on card ${option.value}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("carries its own ink on every accent and its deep shade", () => {
+    // `--design-accent-ink` is the text on the accent, the deep accent and the
+    // strong band, so each accent option names it and owes AA on both shades.
+    for (const option of accentOptions) {
+      const preview = option.preview;
+      if (preview.kind !== "accent") continue;
+      expect(
+        contrastRatio(preview.inkColour, preview.colour),
+        `accent ink ${option.value}`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(preview.inkColour, preview.deepColour),
+        `accent ink on deep ${option.value}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("keeps every accent readable on every page tone", () => {
     for (const accent of accentOptions) {
       for (const neutral of neutralOptions) {

@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-21
+- **Amends:** [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md)
 
 ## Context
 
@@ -56,8 +57,8 @@ available to a page component rule:
 | `--design-page` | The page background |
 | `--design-card` | A raised surface: a card, a photo mount, an input field |
 | `--design-panel` | A tinted block inside the page |
-| `--design-heading-ink` | Heading text |
-| `--design-body-ink` | Paragraph text |
+| `--design-ink` | Heading text, and any dark fill |
+| `--design-ink-soft` | Paragraph text and other secondary text |
 | `--design-line` | A hairline border |
 | `--design-frame` | A heavy drawn frame |
 | `--design-shadow` | A drop shadow |
@@ -67,28 +68,57 @@ available to a page component rule:
 | `--design-section-padding` | The space between one band and the next |
 | `--design-content-width` | How wide text and pictures run |
 
-Each one follows a registered token option. `--design-card` is new: the page
-tone token now carries a `card` tone beside `paper`, `panel`, `ink`, `softInk`
-and `line`, with a value for each of the three page tones the owner can choose.
-`--design-band` and `--design-band-strong` are mixed from the accent, so a band
-follows the accent colour.
+Each one follows a registered token option. Two are new registrations:
+
+- **`--design-card`**: the page tone token now carries a `card` tone beside
+  `paper`, `panel`, `ink`, `softInk` and `line`, with a value for each of the
+  three page tones the owner can choose.
+- **`--design-accent-ink`**: each accent option now names the ink that reads on
+  it, beside its colour and its deep shade. All six name white, because all six
+  accents are dark, and `design-presets.test.ts` checks each one reaches WCAG AA
+  on both shades.
+
+`--design-page`, `--design-ink`, `--design-ink-soft`, `--design-line`,
+`--design-frame`, `--design-shadow`, `--design-overlay`, `--design-band` and
+`--design-band-strong` add no new value at all. They read or mix the tones and
+the accent that are already registered.
+
+`--design-mono-font` is the one design property the owner does not choose. It is
+the framework's fixed-width font for a small technical detail, such as a service
+number. It is named here so that a rule which needs it still reads a design
+property rather than writing a font stack.
 
 A component that needs a second colour uses one of these. It does not invent a
 hex value.
 
-### 2. Three tests hold the rule
+### 2. Four tests hold the rule
 
 - `apps/reference-site/src/page-component-stylesheet.test.ts` reads `public.css`
   and fails on a literal colour, a literal font family, or any custom property
   that is not a `--design-*` one, in any declaration that paints.
 - `apps/reference-site/components/page-component-design-tokens.browser.test.tsx`
   renders every registered page component twice, under two preset looks that
-  differ in every token, and fails when a component paints the same either way.
-  It also checks every heading is set in the chosen heading font, and it pins
+  differ in every token. For each element it takes only the values the component
+  paints for itself — a value that matches the element's parent was inherited
+  from the canvas and says nothing — and fails when one of those values is the
+  same under both looks. The two design properties that are the same under every
+  look, `--design-mono-font` and `--design-accent-ink`, are read off the canvas
+  with a probe element and allowed.
+
+  Taking only the component's own values is what makes the test able to fail. A
+  whole-subtree comparison passes for any component at all, because the canvas
+  sets `color` and `font-family` on itself and everything below inherits them.
+
+  The same file checks every heading is set in the chosen heading font, and pins
   the published home page's colours so an unintended change to the public site
   fails.
 - `apps/reference-site/src/design-stylesheet.test.ts` keeps the stylesheet and
-  the design contract in agreement, and now covers the `card` tone.
+  the design contract in agreement, and now covers the `card` tone and the
+  accent ink.
+- `packages/site-definition/src/design-presets.test.ts` holds ADR-0009's reading
+  guarantee over the new values: page text reaches WCAG AAA on the card surface
+  as well as the paper, and each accent's ink reaches WCAG AA on both the accent
+  and its deep shade.
 
 ### 3. An installation carries the same duty
 
@@ -98,16 +128,27 @@ component that ignores the tokens is a defect in that installation.
 
 ## Consequences
 
-The public reference site looks the same. `--design-accent-ink` is white, which
+The public reference site looks the same. Its published home page holds only the
+four foundation sections — the opening, the services, the quote and numbers, and
+the closing panel — and every colour and font in those was already a token or a
+value equal to one under the default look. `--design-accent-ink` is white, which
 is the colour the closing section, the light button and the newsletter button
-already used, and the page tone, accent and heading font were already the
-values those rules named by hand for the default look. The browser test pins
-those exact colours.
+already used. The browser test pins those exact colours, and also checks the
+published home page still holds only those four sections, so the pin cannot
+quietly stop covering it.
 
-The bespoke sections change under a look other than the default, which is the
-point: the story background follows the page tone, the two bands follow the
-accent, and every heading follows the heading font. Under the default look they
-shift from a fixed periwinkle and green to shades mixed from the moss accent.
+The bespoke sections do change, which is the point: the story background follows
+the page tone, the two bands follow the accent, and every heading follows the
+heading font. Under the default look they shift from a fixed periwinkle and
+green to shades mixed from the moss accent. They are not on the published
+reference home page, so no published page moves; an installation that uses them
+will see the change and should see it.
+
+The attention story's note papers were labelled "Green", "Periwinkle" and
+"Yellow" on the editing panel. A note now takes its paper from the site's own
+colours, so those words would be wrong the moment the owner chose another look.
+The labels are now "First paper", "Second paper" and "Third paper". The stored
+values are left alone, because they are already in published sites.
 
 The attention story had no styles in this repository at all, so its headings
 fell back to the body font. It now has token-driven styles here, which is what

@@ -52,8 +52,8 @@ const paintingProperties = new Set([
   "text-shadow",
 ]);
 
-/** The only colour words a rule may write without naming a token. */
-const allowedColourWords = new Set([
+/** The CSS-wide keywords, which name no colour and no font of their own. */
+const cssWideKeywords = new Set([
   "currentcolor",
   "inherit",
   "initial",
@@ -141,7 +141,7 @@ describe("the page component stylesheet paints only from design tokens", () => {
       .filter(
         ({ property, value }) =>
           (property === "font-family" || property === "font") &&
-          !allowedColourWords.has(value.toLowerCase()) &&
+          !cssWideKeywords.has(value.toLowerCase()) &&
           !/^var\(--design-[a-z-]+\)$/u.test(value),
       )
       .map(place);

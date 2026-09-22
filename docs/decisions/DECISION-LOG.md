@@ -13,7 +13,7 @@
 | [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) | Bulk campaign execution boundary | Accepted | 2026-07-30 |
 | [ADR-0007](ADR-0007-mcp-publication-scope-derivation-boundary.md) | MCP publication scope derivation and enforcement boundary | Accepted | 2026-07-30 |
 | [ADR-0008](ADR-0008-seo-metadata-shared-field-set.md) | One SEO and sharing field set, with a derived canonical URL | Accepted | 2026-08-15 |
-| [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md) | Preset looks are derived, and the token contract owns the palette | Accepted | 2026-08-15 |
+| [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md) | Preset looks are derived, and the token contract owns the palette | Accepted, amended | 2026-08-15 |
 | [ADR-0010](ADR-0010-messages-inbox-and-owner-notification-demotion.md) | Messages is an inbox, and the owner notification is demoted | Accepted | 2026-08-15 |
 | [ADR-0011](ADR-0011-media-thumbnail-variant.md) | Browser-made media thumbnail variant | Accepted | 2026-08-15 |
 | [ADR-0012](ADR-0012-page-image-field-media-reference.md) | Page-component image fields reference gallery photos | Accepted | 2026-08-16 |

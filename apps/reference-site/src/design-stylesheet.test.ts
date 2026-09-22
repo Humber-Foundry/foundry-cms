@@ -88,6 +88,9 @@ describe("design stylesheet matches the design contract", () => {
       expect(customProperty(rule, "--design-accent-deep"), option.value).toBe(
         option.preview.deepColour,
       );
+      expect(customProperty(rule, "--design-accent-ink"), option.value).toBe(
+        option.preview.inkColour,
+      );
     }
   });
 

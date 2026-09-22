@@ -37,8 +37,8 @@ declared on `.site-canvas` in `globals.css`.
 | `--design-page` | The page background |
 | `--design-card` | A raised surface: a card, a photo mount, an input field |
 | `--design-panel` | A tinted block inside the page |
-| `--design-heading-ink` | Heading text |
-| `--design-body-ink` | Paragraph text |
+| `--design-ink` | Heading text, and any dark fill |
+| `--design-ink-soft` | Paragraph text and other secondary text |
 | `--design-line` | A hairline border |
 | `--design-frame` | A heavy drawn frame |
 | `--design-shadow` | A drop shadow |
@@ -61,8 +61,8 @@ owner's choice:
 
 | Instead of | Write |
 | --- | --- |
-| `color: #212530` on a heading | `color: var(--design-heading-ink)` |
-| `color: #343947` on a paragraph | `color: var(--design-body-ink)` |
+| `color: #212530` on a heading | `color: var(--design-ink)` |
+| `color: #343947` on a paragraph | `color: var(--design-ink-soft)` |
 | `background: #fffaf0` on a card | `background: var(--design-card)` |
 | `background: #8298cd` on a band | `background: var(--design-band)` |
 | `background: #17a578` on a strong band | `background: var(--design-band-strong)` |
@@ -72,10 +72,16 @@ owner's choice:
 | `font-family: var(--font-serif)` | `font-family: var(--design-heading-font)` |
 | `width: 78rem` | `width: min(100%, var(--design-content-width))` |
 
+`--design-mono-font` is the one property the owner does not choose. It is the
+framework's fixed-width font for a small technical detail. Every other property
+follows a registered token option.
+
 If a component needs a colour that is not in the table, add it to the table.
-Declare it on `.site-canvas` in `globals.css`, derive it from a registered token
-option in `packages/site-definition/src/design-tokens.ts`, and give it an
-owner-readable label there. Do not add it to the component's own rule.
+Declare it on `.site-canvas` in `globals.css`, and derive it from a registered
+token option in `packages/site-definition/src/design-tokens.ts` — either by
+reading a token the contract already registers, or by adding a value to a token
+option there with an owner-readable label. Do not add it to the component's own
+rule.
 
 ## How the rule is enforced here
 
@@ -85,7 +91,10 @@ owner-readable label there. Do not add it to the component's own rule.
   declaration that paints.
 - `apps/reference-site/components/page-component-design-tokens.browser.test.tsx`
   renders every registered page component under two preset looks that differ in
-  every token, and fails when a component paints the same either way.
+  every token. It compares only the values a component paints for itself, and
+  fails when one of them is the same under both looks. Compare whole subtrees
+  instead and the test can never fail, because everything below `.site-canvas`
+  inherits a colour and a font that already differ.
 - `apps/reference-site/src/design-stylesheet.test.ts` keeps `globals.css` and
   the design contract in agreement.
 
