@@ -30,8 +30,6 @@ export type InteractionCollectionResult =
   | Readonly<{ outcome: "accepted"; point: InteractionPoint }>
   | Readonly<{ outcome: "rejected"; code: InteractionRejectionCode }>;
 
-export type { AnalyticsEngineDataset };
-
 /**
  * Validates one reported interaction against the public objects this site
  * publishes. An unknown subject is refused, which bounds the dataset's

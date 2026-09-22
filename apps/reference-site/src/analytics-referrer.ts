@@ -7,6 +7,11 @@
  * they cannot reach the read model. See ADR-0003 and ADR-0047.
  */
 
+import {
+  assertAggregateAnalyticsPayload,
+  isAllowedAnalyticsDimension,
+} from "@humber-foundry/application";
+
 export type ReferrerDimension = Readonly<{ key: string; value: string }>;
 
 const referrerChannels: ReadonlyArray<
@@ -31,7 +36,15 @@ const referrerChannels: ReadonlyArray<
   },
 ]);
 
-/** Reduces a referrer to a bare host, or to a channel when there is none. */
+/**
+ * Reduces a referrer to a bare host, or to a channel when there is none.
+ *
+ * The host is checked against the read model's own rules before it is
+ * returned. A host those rules refuse — a machine name with no dot, a network
+ * address, a name with an underscore — becomes the plain channel `referral`.
+ * Returning it unchanged would make the projector refuse the whole run, and
+ * one odd referring link would then cost a week of counting.
+ */
 export function normalizeReferrer(refererHost: string): ReferrerDimension {
   const host = refererHost.trim().toLowerCase();
   if (host === "" || host === "(none)" || host === "direct") {
@@ -43,7 +56,25 @@ export function normalizeReferrer(refererHost: string): ReferrerDimension {
   if (channel !== undefined) {
     return { key: "referrer_channel", value: channel.channel };
   }
-  return { key: "referrer_host", value: host };
+  const dimension = { key: "referrer_host", value: host };
+  return readModelAccepts(dimension)
+    ? dimension
+    : { key: "referrer_channel", value: "referral" };
+}
+
+/**
+ * Both rules the read model applies to a referrer: the shape rule for a
+ * dimension, and the privacy rule that refuses anything that could name a
+ * person or a machine, such as a network address.
+ */
+function readModelAccepts(dimension: ReferrerDimension): boolean {
+  if (!isAllowedAnalyticsDimension(dimension)) return false;
+  try {
+    assertAggregateAnalyticsPayload(dimension);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

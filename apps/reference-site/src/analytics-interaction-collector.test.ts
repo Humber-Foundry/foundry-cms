@@ -5,8 +5,8 @@ vi.mock("server-only", () => ({}));
 import {
   collectInteraction,
   writeInteractionPoint,
-  type AnalyticsEngineDataset,
 } from "./analytics-interaction-collector";
+import type { AnalyticsEngineDataset } from "./analytics-engine-source";
 
 const publicSubjectIds = new Set(["cta_book", "content_home"]);
 

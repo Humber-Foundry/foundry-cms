@@ -121,14 +121,18 @@ function formatValue(value: AnalyticsValue, unit: string) {
   return formatNumber(value.value);
 }
 
-const dayLabelFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "UTC",
-  day: "numeric",
-  month: "short",
-});
-
-function dayLabel(bucketStartUtc: string) {
-  return dayLabelFormat.format(new Date(Date.parse(bucketStartUtc)));
+/**
+ * A day as the owner reads it, in the site's own reporting time zone. A fact
+ * bucket starts at midnight UTC, which is a different clock time here, so the
+ * label has to be worked out in the reporting zone or a bar reads as the
+ * wrong day.
+ */
+function dayLabel(instant: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    day: "numeric",
+    month: "short",
+  }).format(new Date(Date.parse(instant)));
 }
 
 /** The number in a value, or null when there is none to read. */
@@ -222,9 +226,11 @@ const chartAspect = 4;
 function PageViewChart({
   days,
   periodDays,
+  timeZone,
 }: {
   days: ReadonlyArray<AnalyticsTrafficDay>;
   periodDays: number;
+  timeZone: string;
 }) {
   const counted = days.filter((day) => day.pageViews.state === "available");
   if (counted.length === 0) {
@@ -240,7 +246,14 @@ function PageViewChart({
       ? day
       : best,
   );
-  const highestValue = Math.max(1, availableNumber(highest.pageViews) ?? 1);
+  const highestValue = availableNumber(highest.pageViews) ?? 0;
+  if (highestValue === 0) {
+    return (
+      <p className="analytics-empty">
+        Every counted day in the last {periodDays} days had no page views.
+      </p>
+    );
+  }
   const step = chartBarWidth + chartBarGap;
   const width = days.length * step - chartBarGap;
   const chartHeight = width / chartAspect;
@@ -254,6 +267,7 @@ function PageViewChart({
         role="img"
         aria-label={`Page views each day for the last ${periodDays} days. The busiest day was ${dayLabel(
           highest.bucketStartUtc,
+          timeZone,
         )} with ${formatNumber(highestValue)} page views.`}
       >
         {days.map((day, index) => {
@@ -280,11 +294,13 @@ function PageViewChart({
         })}
       </svg>
       <p className="analytics-chart-scale">
-        <span>{dayLabel(days[0].bucketStartUtc)}</span>
-        <span>{dayLabel(days[days.length - 1].bucketStartUtc)}</span>
+        <span>{dayLabel(days[0].bucketStartUtc, timeZone)}</span>
+        <span>
+          {dayLabel(days[days.length - 1].bucketStartUtc, timeZone)}
+        </span>
       </p>
       <p className="analytics-chart-note">
-        Busiest day: {dayLabel(highest.bucketStartUtc)},{" "}
+        Busiest day: {dayLabel(highest.bucketStartUtc, timeZone)},{" "}
         {formatNumber(highestValue)} page views.
         {counted.length < days.length
           ? ` ${days.length - counted.length} of these days have not been counted yet.`
@@ -296,8 +312,10 @@ function PageViewChart({
 
 function ReadingCell({
   reading,
+  timeZone,
 }: {
   reading: AnalyticsReading | AnalyticsDerivedRatio;
+  timeZone: string;
 }) {
   const isDerived = !("source" in reading);
   const unavailable = reading.value.state === "unavailable";
@@ -325,7 +343,7 @@ function ReadingCell({
           {`From ${sourceName(reading.source)}`}
           {reading.completeThrough === null
             ? "."
-            : `, counted up to ${dayLabel(reading.completeThrough)}.`}
+            : `, counted up to ${dayLabel(reading.completeThrough, timeZone)}.`}
           {reading.unavailableBuckets > 0
             ? ` ${reading.unavailableBuckets} of ${
                 reading.measuredBuckets + reading.unavailableBuckets
@@ -339,8 +357,10 @@ function ReadingCell({
 
 function SourceHealthTable({
   sources,
+  timeZone,
 }: {
   sources: ReadonlyArray<AnalyticsSourceHealth>;
+  timeZone: string;
 }) {
   if (sources.length === 0) {
     return (
@@ -375,12 +395,12 @@ function SourceHealthTable({
           <span role="cell">
             {source.completeThrough === null
               ? "Nothing yet"
-              : dayLabel(source.completeThrough)}
+              : dayLabel(source.completeThrough, timeZone)}
           </span>
           <span role="cell">
             {source.lastSuccessAt === null
               ? "Never"
-              : dayLabel(source.lastSuccessAt)}
+              : dayLabel(source.lastSuccessAt, timeZone)}
           </span>
         </div>
       ))}
@@ -461,6 +481,7 @@ export function AnalyticsDashboard({
   // ADR-0003 asks for Web Vitals beside the content they belong to. No source
   // collects them yet, so this part of the screen appears only once one does.
   const pageSpeed = content.items.filter((item) => item.vitals.length > 0);
+  const timeZone = overview.range.timeZone;
 
   return (
     <section className="analytics" aria-label="Visitor numbers">
@@ -470,6 +491,18 @@ export function AnalyticsDashboard({
         <p className="analytics-sample-note" role="note">
           These are made-up sample figures for local development. A published
           site shows only its own counted numbers.
+        </p>
+      ) : null}
+
+      {overview.range.containsIncompleteBucket ||
+      overview.range.clampedToRetention ? (
+        <p className="analytics-range-note">
+          {overview.range.containsIncompleteBucket
+            ? "Today is still being counted, so the newest figures will still rise. "
+            : ""}
+          {overview.range.clampedToRetention
+            ? "Part of this period is older than the figures that are kept, so it is left out."
+            : ""}
         </p>
       ) : null}
 
@@ -489,7 +522,11 @@ export function AnalyticsDashboard({
       </div>
 
       <h2>Page views each day</h2>
-      <PageViewChart days={traffic.days} periodDays={periodDays} />
+      <PageViewChart
+        days={traffic.days}
+        periodDays={periodDays}
+        timeZone={timeZone}
+      />
 
       <h2>Your most read pages</h2>
       {topPages.length === 0 ? (
@@ -551,6 +588,7 @@ export function AnalyticsDashboard({
                   <ReadingCell
                     key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
                     reading={reading}
+                    timeZone={timeZone}
                   />
                 ))}
               </dl>
@@ -569,12 +607,18 @@ export function AnalyticsDashboard({
           <div className="analytics-subject" key={item.subjectId}>
             <h3>{item.subjectId}</h3>
             <dl className="analytics-grid">
-              <ReadingCell reading={item.accepted} />
-              <ReadingCell reading={item.blocked} />
-              <ReadingCell reading={item.notificationsDelivered} />
-              <ReadingCell reading={item.notificationsFailed} />
-              <ReadingCell reading={item.impressions} />
-              <ReadingCell reading={item.conversionRate} />
+              <ReadingCell reading={item.accepted} timeZone={timeZone} />
+              <ReadingCell reading={item.blocked} timeZone={timeZone} />
+              <ReadingCell
+                reading={item.notificationsDelivered}
+                timeZone={timeZone}
+              />
+              <ReadingCell
+                reading={item.notificationsFailed}
+                timeZone={timeZone}
+              />
+              <ReadingCell reading={item.impressions} timeZone={timeZone} />
+              <ReadingCell reading={item.conversionRate} timeZone={timeZone} />
             </dl>
           </div>
         ))
@@ -592,6 +636,7 @@ export function AnalyticsDashboard({
             <ReadingCell
               key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
               reading={reading}
+              timeZone={timeZone}
             />
           ))}
         </dl>
@@ -618,6 +663,7 @@ export function AnalyticsDashboard({
                 <ReadingCell
                   key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
                   reading={reading}
+                  timeZone={timeZone}
                 />
               ))}
             </dl>
@@ -634,6 +680,7 @@ export function AnalyticsDashboard({
                     <ReadingCell
                       key={`${reading.metricKey}:${reading.comparabilitySignature ?? "none"}`}
                       reading={reading}
+                      timeZone={timeZone}
                     />
                   ))}
                 </dl>
@@ -651,7 +698,7 @@ export function AnalyticsDashboard({
           shown — it only means the newest figures are still on the way.
         </HelpTip>
       </h2>
-      <SourceHealthTable sources={health.sources} />
+      <SourceHealthTable sources={health.sources} timeZone={timeZone} />
       {health.disagreements.length === 0 ? null : (
         <div className="analytics-warning" role="note">
           <p>

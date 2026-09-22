@@ -907,18 +907,31 @@ export function createAnalyticsQueryApplication<Actor>({
               ),
             ),
           );
-          if (groups.length !== 1) return unavailableValue("not_measured");
+          // A day with no measurement, and a day two unlike sources both
+          // measured, are both reported the same way as every other absent
+          // reading: with the reason the source state gives.
+          if (groups.length !== 1) {
+            return unavailableReading(
+              analyticsMetricDefinition(metricKey),
+              scope,
+              { subjectId: null },
+            ).value;
+          }
           return buildReading(groups[0], scope, null).value;
         }
 
         const days: AnalyticsTrafficDay[] = [];
-        // Facts are stored in UTC day buckets, so the chart walks UTC days
-        // from the first whole day the range covers.
+        // Facts are stored in UTC day buckets, so the chart walks the UTC days
+        // the range covers. A day that has not begun is left out: it holds no
+        // measurement, and drawing it would promise one.
         let bucketStartUtc = utcDayStart(range.startUtc);
         if (Date.parse(bucketStartUtc) < Date.parse(range.startUtc)) {
           bucketStartUtc = addUtcDays(bucketStartUtc, 1);
         }
-        while (Date.parse(bucketStartUtc) < Date.parse(range.endUtc)) {
+        while (
+          Date.parse(bucketStartUtc) < Date.parse(range.endUtc) &&
+          Date.parse(bucketStartUtc) <= Date.parse(observedNow)
+        ) {
           days.push(
             Object.freeze({
               bucketStartUtc,

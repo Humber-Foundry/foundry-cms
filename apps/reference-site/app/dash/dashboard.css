@@ -3138,6 +3138,12 @@
   font-weight: 700;
 }
 
+.analytics-range-note {
+  margin: 0 0 1rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
 .analytics-sample-note {
   margin: 0 0 1.5rem;
   border: 1px solid var(--sand);

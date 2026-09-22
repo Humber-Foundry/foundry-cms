@@ -169,8 +169,49 @@ describe("the Visitors screen", () => {
 
     expect(markup).toContain("<svg");
     expect(markup).toContain('role="img"');
-    expect(markup).toContain("Busiest day: Jul 2, 42 page views.");
+    // The bucket starting 2026-07-02T00:00Z is 1 July in the site's own
+    // reporting zone, and the owner reads the day they had, not the UTC one.
+    expect(markup).toContain("Busiest day: Jul 1, 42 page views.");
     expect(markup).toContain("1 of these days have not been counted yet.");
+  });
+
+  it("adds no bar when every counted day had no page views", () => {
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          traffic: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range,
+            days: [trafficDay("1", 0), trafficDay("2", 0)],
+            sources: [],
+          },
+        })}
+      />,
+    );
+
+    expect(markup).toContain("had no page views");
+    expect(markup).not.toContain("Busiest day");
+  });
+
+  it("says when the period is still being counted", () => {
+    const markup = renderToStaticMarkup(
+      <AnalyticsDashboard
+        analytics={dashboard({
+          overview: {
+            schemaVersion: "foundry.analytics.v1",
+            siteId,
+            range: { ...range, containsIncompleteBucket: true },
+            metrics: [reading()],
+            referrers: [],
+            comparison: null,
+            sources: [],
+          },
+        })}
+      />,
+    );
+
+    expect(markup).toContain("Today is still being counted");
   });
 
   it("names the part that is not reporting instead of hiding the screen", () => {

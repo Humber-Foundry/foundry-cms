@@ -164,6 +164,30 @@ describe("what one page view records", () => {
     expect(point?.referrerValue).toBe("search");
   });
 
+  it("keeps an unusual referring host out of the read model", () => {
+    // A machine name with no dot, an address literal and a name with an
+    // underscore are all refused by the read model. Storing one would make
+    // the projector refuse the whole run, so each becomes a plain channel.
+    for (const referer of [
+      "http://localhost:3000/link",
+      "http://[2001:db8::1]/link",
+      "http://my_site.example.com/link",
+      "http://192.0.2.10/link",
+    ]) {
+      const point = webTrafficPointFor({
+        request: pageRequest("https://example.ca/about", { referer }),
+        response: htmlResponse(),
+        routes,
+      });
+
+      expect(point).toMatchObject({
+        referrerKey: "referrer_channel",
+        referrerValue: "referral",
+        arrival: true,
+      });
+    }
+  });
+
   it("counts a move inside the site as a page view but not an arrival", () => {
     const point = webTrafficPointFor({
       request: pageRequest("https://example.ca/about", {

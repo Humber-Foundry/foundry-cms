@@ -281,5 +281,5 @@ export function sampleAnalyticsDashboard({
       earliestFactInstant: null,
       disagreements: [],
     },
-  } as unknown as AnalyticsDashboardData;
+  };
 }

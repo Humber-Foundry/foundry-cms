@@ -492,15 +492,7 @@ async function runAnalyticsEngineSql({
   return data;
 }
 
-export async function queryAnalyticsEngine({
-  accountId,
-  apiToken,
-  dataset,
-  since,
-  until,
-  granularity = "day",
-  fetchImplementation = fetch,
-}: {
+type RollupQuery = Readonly<{
   accountId: string;
   apiToken: string;
   dataset: string;
@@ -508,38 +500,42 @@ export async function queryAnalyticsEngine({
   until: string;
   granularity?: AnalyticsEngineBucketGranularity;
   fetchImplementation?: typeof fetch;
-}): Promise<ReadonlyArray<AnalyticsEngineRow>> {
+}>;
+
+/** Builds one rollup statement, runs it, and hands back its rows. */
+async function queryRollup<Row>(
+  query: RollupQuery,
+  buildSql: (input: {
+    dataset: string;
+    since: string;
+    until: string;
+    granularity: AnalyticsEngineBucketGranularity;
+  }) => string,
+): Promise<ReadonlyArray<Row>> {
   const rows = await runAnalyticsEngineSql({
-    accountId,
-    apiToken,
-    sql: interactionRollupSql({ dataset, since, until, granularity }),
-    fetchImplementation,
+    accountId: query.accountId,
+    apiToken: query.apiToken,
+    sql: buildSql({
+      dataset: query.dataset,
+      since: query.since,
+      until: query.until,
+      granularity: query.granularity ?? "day",
+    }),
+    fetchImplementation: query.fetchImplementation,
   });
-  return rows as ReadonlyArray<AnalyticsEngineRow>;
+  return rows as ReadonlyArray<Row>;
 }
 
-export async function queryWebTraffic({
-  accountId,
-  apiToken,
-  dataset,
-  since,
-  until,
-  granularity = "day",
-  fetchImplementation = fetch,
-}: {
-  accountId: string;
-  apiToken: string;
-  dataset: string;
-  since: string;
-  until: string;
-  granularity?: AnalyticsEngineBucketGranularity;
-  fetchImplementation?: typeof fetch;
-}): Promise<ReadonlyArray<WebTrafficRow>> {
-  const rows = await runAnalyticsEngineSql({
-    accountId,
-    apiToken,
-    sql: webTrafficRollupSql({ dataset, since, until, granularity }),
-    fetchImplementation,
-  });
-  return rows as ReadonlyArray<WebTrafficRow>;
+/** The anonymous interactions a browser reported. */
+export function queryAnalyticsEngine(
+  query: RollupQuery,
+): Promise<ReadonlyArray<AnalyticsEngineRow>> {
+  return queryRollup<AnalyticsEngineRow>(query, interactionRollupSql);
+}
+
+/** The page views the Worker request path counted. */
+export function queryWebTraffic(
+  query: RollupQuery,
+): Promise<ReadonlyArray<WebTrafficRow>> {
+  return queryRollup<WebTrafficRow>(query, webTrafficRollupSql);
 }

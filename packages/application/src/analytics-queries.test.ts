@@ -1160,6 +1160,33 @@ describe("the daily traffic series behind the chart", () => {
     });
   });
 
+  it("names a source that is not reporting, for an uncounted day", async () => {
+    sourceStates = [
+      sourceState({ source: "analytics_engine", status: "unavailable" }),
+    ];
+
+    const traffic = await application().queries.traffic({
+      actor,
+      range: week,
+    });
+
+    expect(traffic.days[0].pageViews).toEqual({
+      state: "unavailable",
+      reason: "source_unavailable",
+    });
+  });
+
+  it("leaves out a day that has not begun", async () => {
+    const traffic = await application("2026-07-01T12:00:00.000Z").queries
+      .traffic({ actor, range: week });
+
+    expect(
+      traffic.days.every(
+        (day) => Date.parse(day.bucketStartUtc) <= Date.parse("2026-07-01T12:00:00.000Z"),
+      ),
+    ).toBe(true);
+  });
+
   it("refuses to add two unlike measurements of one day", async () => {
     facts = [
       fact({
