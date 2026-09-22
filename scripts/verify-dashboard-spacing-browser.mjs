@@ -8,7 +8,8 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 
 /** The minimum plain reading the owner's acceptance criteria set for #173:
  * no text closer than 8px to a border it sits inside, or to a sibling
- * control; no phone tap target under 44px high. */
+ * control; no phone tap target under 44px high. #226 adds one more rule to
+ * the same sweep: no destination scrolls sideways at either width. */
 const minimumTextGap = 8;
 const minimumTapTarget = 44;
 
@@ -218,6 +219,33 @@ const collectTightText = (minimumTextGap) => {
   return offenders.slice(0, 20);
 };
 
+/**
+ * Whether the page scrolls sideways, and what sticks out past the right edge
+ * if it does (#226).
+ *
+ * A dashboard screen must fit the width it is given. A sideways scrollbar
+ * hides part of every row and makes the screen feel broken. One pixel of
+ * slack is allowed for a fractional layout width the browser rounds up.
+ */
+const collectHorizontalOverflow = () => {
+  const root = document.documentElement;
+  const overflow = root.scrollWidth - root.clientWidth;
+  if (overflow <= 1) return null;
+  const limit = root.clientWidth;
+  const culprits = [];
+  for (const el of document.querySelectorAll("body *")) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    if (r.right <= limit + 1) continue;
+    let s = el.tagName.toLowerCase();
+    if (typeof el.className === "string" && el.className.trim() !== "") {
+      s += `.${el.className.trim().split(/\s+/u).join(".")}`;
+    }
+    culprits.push({ sel: s.slice(0, 120), right: Math.round(r.right) });
+  }
+  return { overflow: Math.round(overflow), viewport: limit, culprits: culprits.slice(0, 10) };
+};
+
 const collectSmallTapTargets = (minimumTapTarget) => {
   const targets = Array.from(
     document.querySelectorAll('a, button, input, select, textarea, [role="button"]'),
@@ -388,6 +416,13 @@ async function checkDestination(page, origin, name, href, viewportLabel) {
     );
   }
 
+  const sideways = await page.evaluate(collectHorizontalOverflow);
+  if (sideways !== null) {
+    throw new Error(
+      `dashboard_spacing_horizontal_scroll:${viewportLabel}:${name}:${JSON.stringify(sideways)}`,
+    );
+  }
+
   if (viewportLabel === "phone") {
     const small = await page.evaluate(collectSmallTapTargets, minimumTapTarget);
     if (small.length > 0) {
@@ -477,7 +512,7 @@ async function main() {
     }
 
     process.stdout.write(
-      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination).\n`,
+      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination: no text touching a border, no sideways scroll, no small tap target).\n`,
     );
   } finally {
     await browser?.close();

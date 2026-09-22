@@ -31,13 +31,47 @@
   --dash-ink: #17201d;
   --dash-ink-soft: #4a5651;
   --dash-accent: #14563d;
+  --dash-accent-deep: #0e3f2c;
   --dash-accent-tint: #e7f0ea;
+  /* The ink for a state that is written but not on the site yet. */
+  --dash-draft-ink: #7a5412;
   --dash-line: #d3dad5;
   --dash-surface: #ffffff;
   --dash-canvas: #f3f5f2;
 
-  --dash-gap: 1rem;
-  --dash-panel-gap: 2rem;
+  /* The warning colours, for a destructive button and for a state label
+   * that says something needs the owner's attention. The same two values
+   * older rules in this file already write by hand. */
+  --dash-warn-ink: #8a352f;
+  --dash-warn-tint: #fbe4e1;
+
+  /* Spacing scale ------------------------------------------------------
+   *
+   * One ladder of six steps for every gap, margin and padding in the
+   * dashboard. Pick the nearest step; never write a new length. The steps
+   * double often enough that two neighbouring steps read as different, so
+   * a screen built from them has a rhythm a person can see.
+   *
+   * --dash-space-1  0.25rem  inside a label, between a word and its icon
+   * --dash-space-2  0.5rem   between two small controls
+   * --dash-space-3  0.75rem  inside a row, between its lines
+   * --dash-space-4  1rem     between items in a list or a form
+   * --dash-space-5  1.5rem   padding inside a card
+   * --dash-space-6  2rem     between two sections of a screen
+   *
+   * Older rules in this file write their own lengths. Use the steps for new
+   * work and move a rule across when you are already editing it. */
+  --dash-space-1: 0.25rem;
+  --dash-space-2: 0.5rem;
+  --dash-space-3: 0.75rem;
+  --dash-space-4: 1rem;
+  --dash-space-5: 1.5rem;
+  --dash-space-6: 2rem;
+
+  /* The two long-standing names, kept so every existing rule still reads
+   * the same, and now taken from the scale above. */
+  --dash-gap: var(--dash-space-4);
+  --dash-panel-gap: var(--dash-space-6);
 
   /* Corners: --dash-radius on containers, --dash-field-radius below on text
    * fields. Older rules in this file set their own; use these for new work
@@ -201,6 +235,377 @@
   border: 1px dashed var(--dash-line);
   border-radius: var(--dash-radius);
   color: var(--dash-ink-soft);
+}
+
+/* Shared dashboard components (issue #226) --------------------------------
+ *
+ * One visual standard for every dashboard screen. The components in
+ * `components/dashboard-*.tsx` draw these classes, and no screen writes its
+ * own header, row, menu or empty box any more.
+ *
+ * Every length here comes from the spacing scale at the top of this file.
+ * Every size comes from the type scale at the top of this file. A rule that
+ * needs a length the scale does not hold is a sign the design is wrong, not
+ * that the scale needs another step. */
+
+/* Buttons -----------------------------------------------------------------
+ *
+ * Exactly three levels, and a screen never needs a fourth:
+ *
+ * - `dash-button dash-button-primary` — the one action the screen exists
+ *   for. One per screen.
+ * - `dash-button dash-button-plain` — every other action.
+ * - `dash-button dash-button-destructive` — an action that removes
+ *   something.
+ *
+ * `dash-button` alone draws nothing; always pair it with one level. Every
+ * level is the same height and the same corner, so two buttons side by side
+ * line up. Corners stay rounded: only a photo has square corners. */
+
+.dash-button {
+  display: inline-flex;
+  min-height: var(--dash-control-height);
+  align-items: center;
+  justify-content: center;
+  gap: var(--dash-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--dash-field-radius);
+  padding: 0 var(--dash-space-4);
+  font: inherit;
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.dash-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dash-button-primary {
+  border-color: var(--dash-accent);
+  background: var(--dash-accent);
+  color: var(--dash-surface);
+}
+
+.dash-button-primary:hover:not(:disabled),
+.dash-button-primary:focus-visible {
+  border-color: var(--dash-accent-deep);
+  background: var(--dash-accent-deep);
+}
+
+.dash-button-plain {
+  border-color: var(--dash-line);
+  background: var(--dash-field-bg);
+  color: var(--dash-accent);
+}
+
+.dash-button-plain:hover:not(:disabled),
+.dash-button-plain:focus-visible {
+  background: var(--dash-accent-tint);
+}
+
+.dash-button-destructive {
+  border-color: var(--dash-warn-ink);
+  background: var(--dash-surface);
+  color: var(--dash-warn-ink);
+}
+
+.dash-button-destructive:hover:not(:disabled),
+.dash-button-destructive:focus-visible {
+  background: var(--dash-warn-tint);
+}
+
+/* Page heading action ---------------------------------------------------
+ *
+ * `.page-heading` already lays its two children out at opposite ends, so
+ * this only keeps the button clear of the sentence beside it. */
+
+.page-heading-action {
+  display: flex;
+  gap: var(--dash-space-2);
+  align-items: center;
+}
+
+/* Back link -------------------------------------------------------------- */
+
+.dash-back-link {
+  display: inline-flex;
+  min-height: var(--dash-control-height);
+  align-items: center;
+  gap: var(--dash-space-2);
+  margin-bottom: var(--dash-space-3);
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dash-back-link:hover,
+.dash-back-link:focus-visible {
+  text-decoration: underline;
+}
+
+/* List and rows -----------------------------------------------------------
+ *
+ * A row is one link to the thing it names. The link draws a cover over the
+ * whole row, so a press anywhere on the row opens the thing. The action
+ * menu sits above that cover, so pressing it does not open the thing.
+ *
+ * Rows, not cards in a grid: a list of any length still fills every line. */
+
+.dash-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+  list-style: none;
+}
+
+.dash-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--dash-space-4);
+  align-items: center;
+  padding: var(--dash-space-3) var(--dash-space-4);
+}
+
+/* A list that shows states gives them a column of their own, so the state
+ * words start on the same line down the whole list and the eye can read the
+ * column at a glance. A state longer than that width widens its own row
+ * rather than wrapping. A list with no states never reserves the space. */
+.dash-row:has(.dash-row-state) {
+  grid-template-columns: minmax(0, 1fr) minmax(max-content, 10rem) auto;
+}
+
+.dash-row + .dash-row {
+  border-top: 1px solid var(--dash-line);
+}
+
+/* The list keeps its overflow visible, because the action menu opens below
+ * the row and a hidden overflow would cut the last row's menu off. The card
+ * corners are matched on the first and last row by hand instead, so a hover
+ * background never shows a square corner over the rounded border. */
+.dash-row:first-child {
+  border-top-left-radius: var(--dash-radius);
+  border-top-right-radius: var(--dash-radius);
+}
+
+.dash-row:last-child {
+  border-bottom-left-radius: var(--dash-radius);
+  border-bottom-right-radius: var(--dash-radius);
+}
+
+.dash-row:hover,
+.dash-row:has(.dash-row-link:focus-visible) {
+  background: var(--dash-accent-tint);
+}
+
+.dash-row-link {
+  display: grid;
+  min-height: var(--dash-control-height);
+  gap: var(--dash-space-1);
+  align-content: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash-row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* The focus ring is drawn on the cover, not on the words, so a keyboard
+ * user sees the whole row highlighted — the same area a mouse press hits. */
+.dash-row-link:focus-visible {
+  outline: none;
+}
+
+.dash-row-link:focus-visible::after {
+  outline: 2px solid var(--dash-accent);
+  outline-offset: -2px;
+}
+
+.dash-row-title {
+  color: var(--dash-accent);
+  font-size: var(--dash-text);
+  font-weight: 600;
+}
+
+.dash-row-note {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* The state is plain text, so it stays under the link cover and a press on
+ * it opens the row. The actions are controls, so they sit above the cover
+ * and a press on them does not. */
+.dash-row-actions {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 45rem) {
+  /* One column on a phone, so a long title never squeezes the state label
+   * into an unreadable sliver. The action menu stays on the first line,
+   * beside the title. */
+  .dash-row,
+  .dash-row:has(.dash-row-state) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--dash-space-2);
+  }
+
+  .dash-row-state {
+    grid-column: 1;
+  }
+}
+
+/* State label -------------------------------------------------------------
+ *
+ * One word, at the small text size, with a coloured dot before it. Colour
+ * carries the meaning so the row never needs a third type size. The dot is
+ * decoration: the word alone says the state, for anyone who cannot tell the
+ * colours apart. */
+
+.dash-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dash-space-2);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dash-state::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentcolor;
+}
+
+.dash-state-live {
+  color: var(--dash-accent);
+}
+
+.dash-state-draft {
+  color: var(--dash-draft-ink);
+}
+
+.dash-state-plain {
+  color: var(--dash-ink-soft);
+}
+
+.dash-state-problem {
+  color: var(--dash-warn-ink);
+}
+
+/* Action menu ------------------------------------------------------------- */
+
+.dash-action-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.dash-action-menu-button {
+  display: inline-flex;
+  min-width: var(--dash-control-height);
+  min-height: var(--dash-control-height);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-field-radius);
+  background: var(--dash-field-bg);
+  color: var(--dash-ink-soft);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dash-action-menu-button:hover,
+.dash-action-menu-button:focus-visible {
+  background: var(--dash-accent-tint);
+  color: var(--dash-accent);
+}
+
+.dash-action-menu-list {
+  position: absolute;
+  top: calc(100% + var(--dash-space-1));
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 11rem;
+  padding: var(--dash-space-1);
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+  box-shadow: 0 8px 24px rgb(23 32 29 / 12%);
+}
+
+.dash-action-menu-item {
+  display: flex;
+  min-height: var(--dash-control-height);
+  align-items: center;
+  border: 0;
+  border-radius: var(--dash-field-radius);
+  padding: 0 var(--dash-space-3);
+  background: transparent;
+  color: var(--dash-ink);
+  font: inherit;
+  font-size: var(--dash-text-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dash-action-menu-item:hover,
+.dash-action-menu-item:focus-visible {
+  background: var(--dash-accent-tint);
+}
+
+.dash-action-menu-item-destructive {
+  color: var(--dash-warn-ink);
+}
+
+.dash-action-menu-item-destructive:hover,
+.dash-action-menu-item-destructive:focus-visible {
+  background: var(--dash-warn-tint);
+}
+
+/* Empty state -------------------------------------------------------------
+ *
+ * A short heading, one sentence that says what to do next, and the control
+ * that does it. */
+
+.dash-empty {
+  display: grid;
+  gap: var(--dash-space-2);
+  justify-items: start;
+  padding: var(--dash-space-5);
+  border: 1px dashed var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+.dash-empty-title {
+  font-size: var(--dash-text);
+  font-weight: 600;
+}
+
+.dash-empty-text {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--dash-ink-soft);
+}
+
+.dash-empty-action {
+  margin-top: var(--dash-space-2);
 }
 
 /* Message inbox ----------------------------------------------------------
