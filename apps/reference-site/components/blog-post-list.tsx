@@ -16,13 +16,13 @@ import {
   blogHasPendingSitePublish,
   blogPostExecutionFailureNote,
   blogPostName,
-  blogPostPublishedLine,
   blogPostScheduleStanding,
   blogPostStanding,
   blogScreenDescription,
   changeNotConfirmedMessage,
   confirmArchiveWithdrawal,
   declineScheduleRequestCommand,
+  declineScheduleRequestLabel,
   openArchiveWithdrawalPreview,
   openInNewTab,
   pendingScheduleRequestNote,
@@ -258,7 +258,7 @@ export function BlogPostList({
                   );
                   actions.push({
                     id: "decline",
-                    label: "Decline the app's publish request",
+                    label: declineScheduleRequestLabel,
                     onSelect: () => {
                       void commands.sendBlogOperation(
                         decline.body,
@@ -346,13 +346,13 @@ export function BlogPostList({
                     },
                   });
                 }
-                // The date that matters for where the post stands: when a
-                // scheduled publish put it on the site, when it is due to
-                // go on, or otherwise when the draft was last saved.
+                // The date that matters for where the post stands: when the
+                // post is due to go on the site, or otherwise when the draft
+                // was last saved. The CMS holds no published time for a post,
+                // so a post on the site names its last save too. Each part is
+                // one sentence, so the line reads as sentences.
                 const noteParts = [
-                  blogPostPublishedLine(standing, summary) ??
-                    scheduleStanding.line ??
-                    `Last saved ${draftSaved}`,
+                  scheduleStanding.line ?? `Last saved ${draftSaved}.`,
                   executionFailure,
                   pendingRequest === null
                     ? null
@@ -366,7 +366,7 @@ export function BlogPostList({
                     key={post.id}
                     href={blogPostHref(post.id, revision.workspaceId)}
                     title={postName}
-                    note={noteParts.join(" · ")}
+                    note={noteParts.join(" ")}
                     state={
                       <DashboardStateLabel tone={standing.tone}>
                         {standing.label}

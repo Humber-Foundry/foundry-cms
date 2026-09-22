@@ -11,7 +11,6 @@ import {
   blogHasPendingSitePublish,
   blogPostExecutionFailureNote,
   blogPostLifecycleAction,
-  blogPostPublishedLine,
   blogPostScheduleStanding,
   confirmArchiveWithdrawal,
   declineScheduleRequestCommand,
@@ -19,7 +18,6 @@ import {
   openArchiveWithdrawalPreview,
   pendingScheduleRequestNote,
 } from "./blog-operations";
-import { formatDashboardMoment } from "../src/dashboard-time";
 
 describe("blog post lifecycle controls", () => {
   const postId = createBlogPostId(
@@ -237,23 +235,6 @@ describe("blog execution failure note", () => {
     expect(blogPostExecutionFailureNote(undefined)).toBeNull();
   });
 
-  it("names the time a scheduled publish finished, only while the post is live", () => {
-    const live = { label: "On your site", tone: "live" } as const;
-    const draft = { label: "Draft — not on your site", tone: "draft" } as const;
-    const finished = summary({ latestExecution: execution("completed") });
-    expect(blogPostPublishedLine(live, finished)).toBe(
-      `Published ${formatDashboardMoment("2026-11-01T08:31:00.000Z")}.`,
-    );
-    // A post taken off the site again keeps its old execution record; the
-    // record no longer says when the post went live, so nothing is said.
-    expect(blogPostPublishedLine(draft, finished)).toBeNull();
-    // A publish through the site-wide Publish button leaves no record.
-    expect(blogPostPublishedLine(live, summary({}))).toBeNull();
-    expect(
-      blogPostPublishedLine(live, summary({ latestExecution: execution("failed") })),
-    ).toBeNull();
-    expect(blogPostPublishedLine(live, undefined)).toBeNull();
-  });
 });
 
 describe("an app's pending schedule request", () => {

@@ -14,6 +14,7 @@
 
 import type {
   BlogPostOperationalSummary,
+  BlogPostScheduleProposal,
   ContentRevision,
 } from "@humber-foundry/application";
 import type {
@@ -23,7 +24,6 @@ import type {
 } from "@humber-foundry/site-definition";
 
 import { formatLocalScheduleTime } from "./schedule-time-format";
-import { formatDashboardMoment } from "../src/dashboard-time";
 import {
   sendContentRevisionAttempt,
   sendHumanMutationAttempt,
@@ -200,32 +200,15 @@ export function blogPostExecutionFailureNote(
     : "First publication failed; it is not live yet.";
 }
 
-/**
- * When a scheduled publish put this post on the site, in the owner's words.
- *
- * The CMS holds no published time for a post: `BlogPost` has none, and a
- * publish through the site-wide Publish button leaves no record. A scheduled
- * publish that finished does leave one, so that time is named while the post
- * is on the site. Once the post comes off the site again the record no longer
- * says when it went live, so nothing is said. `null` in every other case.
- */
-export function blogPostPublishedLine(
-  standing: Readonly<{ tone: BlogPostStateTone }>,
-  summary: BlogPostOperationalSummary | undefined,
-): string | null {
-  const execution = summary?.latestExecution ?? null;
-  if (standing.tone !== "live" || execution?.state !== "completed") {
-    return null;
-  }
-  return `Published ${formatDashboardMoment(execution.updatedAt)}.`;
-}
-
 /** The fields of a pending schedule request the two Blog screens read. */
-export type PendingScheduleRequest = Readonly<{
-  id: string;
-  localDateTime: string;
-  ianaTimeZone: string;
-}>;
+export type PendingScheduleRequest = Pick<
+  BlogPostScheduleProposal,
+  "id" | "localDateTime" | "ianaTimeZone"
+>;
+
+/** The words on the control that declines an app's schedule request. */
+export const declineScheduleRequestLabel =
+  "Decline the app's publish request";
 
 /**
  * The one sentence that says an app asked to publish a post, and when. A

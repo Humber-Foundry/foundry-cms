@@ -19,6 +19,7 @@ import {
   blogPostStanding,
   dateNotReadMessage,
   declineScheduleRequestCommand,
+  declineScheduleRequestLabel,
   openInNewTab,
   pendingScheduleRequestNote,
   previewNotOpenedMessage,
@@ -304,7 +305,7 @@ export function BlogPostScreen({
               void commands.sendBlogOperation(decline.body, decline.operation);
             }}
           >
-            Decline the app&apos;s publish request
+            {declineScheduleRequestLabel}
           </button>
         </div>
       )}

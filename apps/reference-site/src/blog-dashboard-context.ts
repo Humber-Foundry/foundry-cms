@@ -86,25 +86,30 @@ async function readBlogPostSummaries(
 /**
  * The same read, plus every archived post. Only the posts list draws archived
  * posts, so one post's own screen uses `loadBlogPostSummaries` and never asks
- * the store for a list it would throw away. Both reads share one environment
- * and one `catch`: without a store, both are empty.
+ * the store for a list it would throw away.
+ *
+ * The two reads share one environment, and each fails on its own: a store
+ * that cannot list archived posts still gives the summaries, and a store
+ * that is not configured at all gives an empty list and empty summaries.
  */
 export async function loadBlogPostOperationalContext(
   postIds: ReadonlyArray<BlogPostId>,
 ): Promise<BlogPostOperationalContext> {
+  let environment: HumanAccessEnvironment;
   try {
-    const environment = await loadHumanAccessEnvironment();
-    const [summaries, application] = await Promise.all([
-      readBlogPostSummaries(environment, postIds),
-      loadBlogPostOperationsApplication(environment),
-    ]);
-    return {
-      ...summaries,
-      archivedPosts: await application.queries.listArchivedPosts(
-        installedSiteDefinition.site.id,
-      ),
-    };
+    environment = await loadHumanAccessEnvironment();
   } catch {
     return { ...noBlogPostSummaries, archivedPosts: [] };
   }
+  const [summaries, archivedPosts] = await Promise.all([
+    readBlogPostSummaries(environment, postIds).catch(
+      () => noBlogPostSummaries,
+    ),
+    loadBlogPostOperationsApplication(environment)
+      .then((application) =>
+        application.queries.listArchivedPosts(installedSiteDefinition.site.id),
+      )
+      .catch((): ReadonlyArray<ArchivedBlogPostSummary> => []),
+  ]);
+  return { ...summaries, archivedPosts };
 }
