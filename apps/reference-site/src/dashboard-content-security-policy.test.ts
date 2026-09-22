@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { contentSecurityPolicyDirectives as directives } from "../../../scripts/lib/content-security-policy.mjs";
+import {
+  contentSecurityPolicyDirectives as directives,
+  dashboardPolicyShortfall,
+  namesAHost,
+} from "../../../scripts/lib/content-security-policy.mjs";
 
 import {
   dashboardContentSecurityPolicy,
@@ -40,10 +44,28 @@ describe("dashboardContentSecurityPolicy", () => {
 
   it("names no host outside the site's own origin", () => {
     for (const development of [false, true]) {
-      expect(dashboardContentSecurityPolicy({ development })).not.toMatch(
-        /https?:|\*/u,
-      );
+      const policy = directives(dashboardContentSecurityPolicy({ development }));
+      for (const values of policy.values()) {
+        expect(values.some(namesAHost)).toBe(false);
+      }
     }
+  });
+
+  it("is what the served-header checks expect, in both modes", () => {
+    for (const development of [false, true]) {
+      expect(
+        dashboardPolicyShortfall(dashboardContentSecurityPolicy({ development })),
+      ).toBeNull();
+    }
+    expect(dashboardPolicyShortfall(null)).toBe("no policy");
+    expect(dashboardPolicyShortfall("frame-src 'self'")).toBe(
+      "script-src lacks 'self'",
+    );
+    expect(
+      dashboardPolicyShortfall(
+        "script-src 'self' https://cdn.example; frame-src 'self'; object-src 'none'",
+      ),
+    ).toBe("script-src names a host");
   });
 
   it("adds eval only for the development server, which needs it", () => {

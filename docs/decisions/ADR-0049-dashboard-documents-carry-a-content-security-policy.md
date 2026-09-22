@@ -59,9 +59,9 @@ and no request to any host outside the site's origin. It then puts a
 third-party frame and script into the preview by hand and requires the
 browser to refuse both, with no request sent. The hosts it uses end in
 `.invalid`, a name that never resolves. `scripts/verify-worker-runtime.mjs`
-requires the built Worker to serve `/dash` with the policy and the public
-page without it, so the header is proven on the deployment path as well as
-on the development server.
+requires the built Worker to serve `/dash/design` with the policy and the
+public page without it, so the header is proven on the deployment path as
+well as on the development server.
 
 ## Consequences
 

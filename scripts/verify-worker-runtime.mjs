@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { contentSecurityPolicyDirectives } from "./lib/content-security-policy.mjs";
+import {
+  contentSecurityPolicyDirectives,
+  dashboardPolicyShortfall,
+} from "./lib/content-security-policy.mjs";
 import { assertReferencePage } from "./lib/reference-page.mjs";
 
 async function findAvailablePort() {
@@ -118,21 +121,15 @@ try {
   const designResponse = await fetch(`${origin}/dash/design`, {
     redirect: "manual",
   });
-  const dashboardPolicy = contentSecurityPolicyDirectives(
-    designResponse.headers.get("content-security-policy") ?? "",
-  );
-  for (const [name, expected] of [
-    ["script-src", "'self'"],
-    ["frame-src", "'self'"],
-    ["object-src", "'none'"],
-  ]) {
-    if (!(dashboardPolicy.get(name) ?? []).includes(expected)) {
-      throw new Error(
-        `The Worker served /dash/design without \`${name} ${expected}\` in ` +
-          "its Content-Security-Policy header.",
-      );
-    }
+  const designPolicy = designResponse.headers.get("content-security-policy");
+  const shortfall = dashboardPolicyShortfall(designPolicy);
+  if (shortfall !== null) {
+    throw new Error(
+      `The Worker served /dash/design with a Content-Security-Policy that ` +
+        `falls short: ${shortfall}.`,
+    );
   }
+  const dashboardPolicy = contentSecurityPolicyDirectives(designPolicy);
   if ((dashboardPolicy.get("script-src") ?? []).includes("'unsafe-eval'")) {
     throw new Error(
       "The Worker served /dash/design with 'unsafe-eval', which only the " +

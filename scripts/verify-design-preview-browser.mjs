@@ -21,7 +21,7 @@ import { resolve } from "node:path";
 
 import { chromium } from "playwright";
 
-import { contentSecurityPolicyDirectives } from "./lib/content-security-policy.mjs";
+import { dashboardPolicyShortfall } from "./lib/content-security-policy.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -86,22 +86,11 @@ function stopServer(child) {
 async function expectDashboardPolicy(origin, path) {
   const response = await fetch(`${origin}${path}`, { redirect: "manual" });
   const policy = response.headers.get("content-security-policy");
-  if (policy === null) {
-    throw new Error(`design_preview_no_policy:${path}:${response.status}`);
-  }
-  const parsed = contentSecurityPolicyDirectives(policy);
-  for (const [name, expected] of [
-    ["script-src", "'self'"],
-    ["frame-src", "'self'"],
-    ["object-src", "'none'"],
-  ]) {
-    const values = parsed.get(name);
-    if (values === undefined || !values.includes(expected)) {
-      throw new Error(`design_preview_policy_directive:${path}:${name}:${policy}`);
-    }
-    if (values.some((value) => /https?:|\*/u.test(value))) {
-      throw new Error(`design_preview_policy_names_a_host:${path}:${name}:${policy}`);
-    }
+  const shortfall = dashboardPolicyShortfall(policy);
+  if (shortfall !== null) {
+    throw new Error(
+      `design_preview_policy:${path}:${response.status}:${shortfall}:${policy}`,
+    );
   }
 }
 
@@ -109,7 +98,7 @@ async function expectDashboardPolicy(origin, path) {
  * The public site and the exact preview must carry no such policy: they
  * render the live challenge. The status does not matter here; the exact
  * preview needs a capability this script does not hold, and the check is
- * only that the policy stops at the dashboard's edge.
+ * only that no path outside `/dash` carries the policy.
  */
 async function expectNoPolicy(origin, path) {
   const response = await fetch(`${origin}${path}`, { redirect: "manual" });
@@ -173,7 +162,7 @@ function expectClean(record, step) {
 }
 
 /** What the document holds that could reach another host. */
-async function outsideReferences(page) {
+async function outsideReferences(page, origin) {
   return page.evaluate((own) => ({
     frames: [...document.querySelectorAll("iframe")].map(
       (frame) => frame.getAttribute("src") ?? "srcdoc",
@@ -181,7 +170,7 @@ async function outsideReferences(page) {
     scripts: [...document.querySelectorAll("script[src]")]
       .map((script) => script.src)
       .filter((src) => !src.startsWith(`${own}/`)),
-  }), page.url().replace(/\/dash\/design.*$/u, ""));
+  }), origin);
 }
 
 async function chooseOption(page, className, label, expectedAccent) {
@@ -274,7 +263,7 @@ async function main() {
     await page.waitForTimeout(500);
     expectClean(record, "after_two_changes");
 
-    const references = await outsideReferences(page);
+    const references = await outsideReferences(page, origin);
     if (references.frames.length !== 0 || references.scripts.length !== 0) {
       throw new Error(
         `design_preview_outside_reference:${JSON.stringify(references)}`,
@@ -341,7 +330,7 @@ async function main() {
       );
     }
 
-    console.log(`Design preview acceptance passed at ${origin}.`);
+    process.stdout.write(`Design preview acceptance passed at ${origin}.\n`);
   } finally {
     if (browser !== undefined) await browser.close();
     stopServer(server);
