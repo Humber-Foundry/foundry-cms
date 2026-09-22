@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
+import { environmentWithSenderDetails } from "./site-sender-details";
 
 const unsubscribePlaceholder =
   "https://example.org/newsletter/unsubscribe" +
@@ -110,6 +111,49 @@ describe("campaign channel configuration", () => {
       missingSettings: [],
       setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
     });
+  });
+
+  it("builds the footer from a stored sender detail, and from the installation for the rest", () => {
+    // The Owner saved two of the five values on Settings' Email tab. They win,
+    // and the three nobody saved still come from this installation's own
+    // settings, so an installation that stored nothing is unaffected
+    // (#240, ADR-0048).
+    const channel = channelFor(
+      environmentWithSenderDetails(settings, {
+        legalName: "Saved Society",
+        postalAddress: "22 Saved Road, Victoria, BC",
+        contactUrl: "",
+        unsubscribeUrl: "",
+        senderIdentityId: "",
+      }),
+    );
+
+    if (channel.state !== "configured") throw new Error("unreachable");
+    expect(channel.configuration.senderIdentityId).toBe("sender-primary");
+    expect(channel.configuration.complianceFooter.content).toBe(
+      "Saved Society · 22 Saved Road, Victoria, BC · " +
+        "Contact: https://example.org/contact · Newsletter preferences",
+    );
+  });
+
+  it("still refuses a send while the stored legal name is empty and the installation has none", () => {
+    const installationWithoutName = {
+      ...settings,
+      FOUNDRY_CAMPAIGN_LEGAL_NAME: "",
+    };
+    const result = channelFor(
+      environmentWithSenderDetails(installationWithoutName, {
+        legalName: "",
+        postalAddress: "22 Saved Road, Victoria, BC",
+        contactUrl: "",
+        unsubscribeUrl: "",
+        senderIdentityId: "",
+      }),
+    );
+
+    expect(result.state).toBe("not_configured");
+    if (result.state !== "not_configured") throw new Error("unreachable");
+    expect(result.missingSettings).toEqual(["FOUNDRY_CAMPAIGN_LEGAL_NAME"]);
   });
 
   it("never carries a setting value in what it reports as missing", () => {

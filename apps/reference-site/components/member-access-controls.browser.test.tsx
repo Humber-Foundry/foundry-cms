@@ -26,12 +26,11 @@ import {
 } from "./member-access-controls";
 
 /**
- * The real Settings page shares one `useHumanAccessMutation` between the
- * Users panel and the Technical detail retry controls through
- * `SettingsPageBody` (a Client Component the server page renders with plain
- * data). This test-only stand-in reproduces that same wiring without the
- * rest of the page, so the tests below exercise the actual shared-state
- * contract.
+ * Settings' Users tab shares one `useHumanAccessMutation` between the user
+ * table and the retry action under it, through `SettingsUsersBody` (a Client
+ * Component the server page renders with plain data). This test-only stand-in
+ * reproduces that same wiring without the rest of the page, so the tests below
+ * exercise the actual shared-state contract.
  */
 function TestSettingsScope({
   members,
@@ -188,21 +187,53 @@ describe("Settings Users panel and its shared access mutation state", () => {
     ).toEqual(["Make Owner", "Suspend", "Revoke"]);
   });
 
-  it("gives Owner, Editor, Active, Suspended and Revoked each their own help tip", async () => {
+  it("explains the role and the access state in the row, with no help tip", async () => {
+    const { host } = renderScope(
+      [
+        member(),
+        member({
+          id: "membership-editor" as HumanMembership["id"],
+          role: "editor",
+          status: "suspended",
+          email: "editor@example.com",
+        }),
+      ],
+      () => Response.json({ ok: true }),
+    );
+
+    const rows = Array.from(
+      host.querySelectorAll(".inventory-row:not(.inventory-head)"),
+    );
+    const ownerRow = rows.find((row) =>
+      row.textContent?.includes("owner@example.com"),
+    );
+    const editorRow = rows.find((row) =>
+      row.textContent?.includes("editor@example.com"),
+    );
+    expect(ownerRow!.textContent).toContain(
+      "Can change everything, including users, connections and sending email to the list.",
+    );
+    expect(ownerRow!.textContent).toContain("Can sign in now.");
+    expect(editorRow!.textContent).toContain(
+      "Can write and publish pages and posts, and read messages.",
+    );
+    expect(editorRow!.textContent).toContain(
+      "Cannot sign in. You can activate them again.",
+    );
+    expect(host.querySelector(".help-tip-trigger")).toBeNull();
+  });
+
+  it("puts the user table above the invite form", async () => {
     const { host } = renderScope([member()], () => Response.json({ ok: true }));
 
-    const labels = [
-      "What can an Owner do?",
-      "What can an Editor do?",
-      "What does Active mean?",
-      "What does Suspended mean?",
-      "What does Revoked mean?",
-    ];
-    for (const label of labels) {
-      expect(
-        host.querySelector(`.help-tip-trigger[aria-label="${label}"]`),
-      ).not.toBeNull();
-    }
+    const table = host.querySelector('[aria-label="Users"]');
+    const form = host.querySelector(".access-invite-form");
+    expect(table).not.toBeNull();
+    expect(form).not.toBeNull();
+    expect(
+      table!.compareDocumentPosition(form!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0);
   });
 
   it("asks for confirmation in a dashboard dialog before a role change, never window.confirm", async () => {
