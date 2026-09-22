@@ -168,6 +168,28 @@ async function checkConnectAnAgent(page, origin) {
     expectedText: "Back to Connected agents",
     expectedPath: "/dash/settings/agents",
   });
+
+  // The screen is opened to finish one task, so it also ends with Done, and
+  // Done lands on the same tab the back link names.
+  await page.goto(`${origin}/dash/settings/connect-agent`, {
+    waitUntil: "networkidle",
+  });
+  const done = page.getByRole("link", { name: "Done" });
+  await done.waitFor({ state: "visible", timeout: 10_000 });
+  // The Next dev server draws its own floating badge in the bottom corner,
+  // which is where Done sits on a phone. The badge is not part of the
+  // product, so take it out of the way before clicking.
+  await page.evaluate(() => document.querySelector("nextjs-portal")?.remove());
+  const doneBox = await done.boundingBox();
+  if (doneBox === null || doneBox.height < 44) {
+    throw new Error(
+      `dashboard_back_links_done_too_short:${doneBox?.height ?? "none"}`,
+    );
+  }
+  await done.click();
+  await page.waitForURL((url) => url.pathname === "/dash/settings/agents", {
+    timeout: 10_000,
+  });
 }
 
 async function main() {
@@ -239,7 +261,7 @@ async function main() {
     }
 
     process.stdout.write(
-      `Dashboard back-link acceptance passed at ${origin} (1440px and 390px): the page editor, New email, a saved email, and Connect an agent each show the shared back link and it returns to the named parent.\n`,
+      `Dashboard back-link acceptance passed at ${origin} (1440px and 390px): the page editor, New email, a saved email, and Connect an agent each show the shared back link and it returns to the named parent; Connect an agent also ends with Done, which returns to Connected agents.\n`,
     );
   } finally {
     await browser?.close();
