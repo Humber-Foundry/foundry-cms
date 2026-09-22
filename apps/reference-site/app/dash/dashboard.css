@@ -202,7 +202,8 @@
  * own border and keeps only a plain gap. A card (`.panel`, like the editor
  * card above) keeps its own border on every side instead — see the
  * exclusion note above. */
-.page-heading + section:not(.content-editor):not(.panel) {
+.page-heading + section:not(.content-editor):not(.panel),
+.dash-tabs + section:not(.content-editor):not(.panel) {
   margin-top: var(--dash-gap);
   padding-top: 0;
   border-top: 0;
@@ -1591,7 +1592,7 @@
 /* "Invite someone", under the table it adds a row to. The same size as the
  * body text around it, in the accent colour, so this section still reads with
  * two type sizes and colour carrying the hierarchy. */
-.access-invite-heading {
+.dashboard .access-invite-heading {
   margin: var(--dash-space-6) 0 var(--dash-space-3);
   color: var(--dash-accent);
   font-size: var(--dash-text);
@@ -1628,8 +1629,13 @@
   gap: var(--dash-space-2);
 }
 
+/* The field's name and its one line of help are the same small size, as the
+ * invite form's labels already are. The value the owner typed is the body
+ * size, so a field reads as two sizes and no more. */
 .sender-details-field-name {
-  font-weight: 600;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
 }
 
 .sender-details-field input,
