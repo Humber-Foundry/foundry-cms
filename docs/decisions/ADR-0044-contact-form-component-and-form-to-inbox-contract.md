@@ -94,10 +94,11 @@ without one. Messages prints that name. No screen has to show a form id.
 **Messages lists the forms the site has.** "Forms on your site" reads the
 declared forms and walks the **draft** definition's pages for `contactForm`
 blocks, so a block the owner has just placed is listed before the site is
-published. Messages names no workspace in its address: it reads whichever draft
-the person is editing. Taking a `?workspace=` value would let a stale link
-redirect and throw away the inbox cursor the screen already carries in
-`?older=`. Each row names the form, links to every page it appears on, and says
+published. Messages only looks at the site, so it starts no draft and names no
+workspace: it reads the draft the person is already editing, and the published
+site when there is none. Opening an inbox must write nothing, and taking a
+`?workspace=` value would let a stale link redirect and throw away the inbox
+cursor the screen already carries in `?older=`. Each row names the form, links to every page it appears on, and says
 how many messages it has brought in. A declared form on no page is listed and
 says so, because that is the reason an inbox stays empty.
 

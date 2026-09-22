@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-export const turnstileScript =
+const turnstileScript =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
 export function loadTurnstile(): Promise<void> {

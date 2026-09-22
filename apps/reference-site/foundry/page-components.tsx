@@ -21,6 +21,7 @@ import {
   type InlineTextRenderer,
   type PageComponentRenderer,
 } from "./page-component-renderers";
+import { sectionAnchor } from "@/src/section-anchor";
 import { AttentionNotes } from "../components/attention-notes";
 import { ContactForm } from "../components/contact-form";
 import { NewsletterSignupForm } from "../components/newsletter-signup-form";
@@ -323,7 +324,7 @@ const installedRegistrations = Object.freeze([
     return (
       <section
         className="contact-form-section"
-        id={section.id}
+        id={sectionAnchor(section)}
         aria-labelledby={`${section.id}_title`}
       >
         <ContactForm
