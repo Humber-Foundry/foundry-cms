@@ -11,6 +11,7 @@ import {
   messagesOverviewNumber,
   overviewActivityLimit,
   pagesOverviewNumber,
+  publicSiteAddress,
   recentSiteActivity,
   subscribersOverviewNumber,
   visitsOverviewNumber,
@@ -129,6 +130,15 @@ describe("the other key numbers", () => {
     expect(number.note).toContain("message store");
   });
 
+  it("names the screen that holds every figure it cannot show", () => {
+    expect(visitsOverviewNumber(null, 30).note).toContain("Visitors");
+    expect(visitsOverviewNumber(overviewWith([]), 30).note).toContain(
+      "Visitors",
+    );
+    expect(messagesOverviewNumber(null).note).toContain("Messages");
+    expect(subscribersOverviewNumber(null).note).toContain("Subscribers");
+  });
+
   it("counts people on the list and links to Subscribers", () => {
     expect(subscribersOverviewNumber(12).value).toBe("12");
     expect(subscribersOverviewNumber(12).href).toBe("/dash/subscribers");
@@ -141,6 +151,20 @@ describe("the other key numbers", () => {
     expect(number.value).toBe("4");
     expect(number.href).toBe("/dash/pages");
     expect(number.note).toBeNull();
+  });
+});
+
+describe("publicSiteAddress", () => {
+  it("reads the address a reader types out of the site's own origin", () => {
+    expect(publicSiteAddress("https://example.test")).toBe("example.test");
+    expect(publicSiteAddress("https://example.test:8443/x")).toBe(
+      "example.test:8443",
+    );
+  });
+
+  it("gives nothing rather than a broken address", () => {
+    expect(publicSiteAddress("")).toBeNull();
+    expect(publicSiteAddress("not a web address")).toBeNull();
   });
 });
 
@@ -178,7 +202,12 @@ describe("recentSiteActivity", () => {
     expect(items[0].label).toBe("Your draft was saved");
     expect(items[1].key).toBe("publication-p6");
     expect(items[0].time).toBe("on 2026-09-07T00:00:00.000Z");
-    expect(items.every((item) => item.href === editorHref)).toBe(true);
+    // The save opens the editor; a publish opens the editor at the panel
+    // that keeps the record of every publish.
+    expect(items[0].href).toBe(editorHref);
+    expect(items[1].href).toBe(
+      `${editorHref}#publication-history-heading`,
+    );
   });
 
   it("leaves out the save when the draft has never been changed", () => {

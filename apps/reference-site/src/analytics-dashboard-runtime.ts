@@ -219,10 +219,22 @@ type AnalyticsReadOptions = Readonly<{
  * `read` runs the queries the screen needs. `fromSample` takes the same
  * shape out of the sample dashboard, so a developer sees the same screen.
  */
-async function readAnalytics<Result>(
-  humanContext: HumanAccessRequestContext,
-  { now = () => new Date().toISOString(), createContext = createAnalyticsDashboardContext, periodDays = reportingPeriodDays[0] }: AnalyticsReadOptions,
-  failureName: string,
+async function readAnalytics<Result>({
+  humanContext,
+  options: {
+    now = () => new Date().toISOString(),
+    createContext = createAnalyticsDashboardContext,
+    periodDays = reportingPeriodDays[0],
+  },
+  failureName,
+  read,
+  fromSample,
+}: {
+  humanContext: HumanAccessRequestContext;
+  options: AnalyticsReadOptions;
+  /** What the server log calls this failure. */
+  failureName: string;
+  /** Runs the queries the screen needs. */
   read: (
     application: Awaited<ReturnType<typeof createAnalyticsDashboardContext>>,
     context: Readonly<{
@@ -230,9 +242,10 @@ async function readAnalytics<Result>(
       range: AnalyticsRangeRequest;
       periodDays: ReportingPeriodDays;
     }>,
-  ) => Promise<Result>,
-  fromSample: (sample: AnalyticsDashboardData) => Result,
-): Promise<Result | null> {
+  ) => Promise<Result>;
+  /** Takes the same shape out of the local development sample figures. */
+  fromSample: (sample: AnalyticsDashboardData) => Result;
+}): Promise<Result | null> {
   if (humanContext.state !== "authorized") return null;
   const actor = humanContext.identity;
   const observedNow = now();
@@ -290,11 +303,11 @@ export async function loadAnalyticsOverview(
   humanContext: HumanAccessRequestContext,
   options: AnalyticsReadOptions = {},
 ): Promise<AnalyticsOverviewSummary | null> {
-  return readAnalytics<AnalyticsOverviewSummary>(
+  return readAnalytics<AnalyticsOverviewSummary>({
     humanContext,
     options,
-    "analytics_overview_unavailable",
-    async (application, { actor, range, periodDays }) => ({
+    failureName: "analytics_overview_unavailable",
+    read: async (application, { actor, range, periodDays }) => ({
       periodDays,
       sample: false,
       overview: await application.queries.overview({
@@ -303,23 +316,23 @@ export async function loadAnalyticsOverview(
         comparison: "previous_period",
       }),
     }),
-    (sample) => ({
+    fromSample: (sample) => ({
       periodDays: sample.periodDays,
       sample: true,
       overview: sample.overview,
     }),
-  );
+  });
 }
 
 export async function loadAnalyticsDashboard(
   humanContext: HumanAccessRequestContext,
   options: AnalyticsReadOptions = {},
 ): Promise<AnalyticsDashboardData | null> {
-  return readAnalytics<AnalyticsDashboardData>(
+  return readAnalytics<AnalyticsDashboardData>({
     humanContext,
     options,
-    "analytics_dashboard_unavailable",
-    async (application, { actor, range, periodDays }) => {
+    failureName: "analytics_dashboard_unavailable",
+    read: async (application, { actor, range, periodDays }) => {
       const [overview, traffic, content, forms, audience, campaigns, health] =
         await Promise.all([
           application.queries.overview({
@@ -348,6 +361,6 @@ export async function loadAnalyticsDashboard(
         health,
       };
     },
-    (sample) => sample,
-  );
+    fromSample: (sample) => sample,
+  });
 }

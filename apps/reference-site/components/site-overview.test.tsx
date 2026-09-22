@@ -54,9 +54,7 @@ describe("SiteCard", () => {
 
   it("says whether the draft is published, in the owner's words", () => {
     expect(markupFor(false)).toContain("Your draft matches your live site");
-    expect(markupFor(true)).toContain(
-      "Draft changes waiting to be published",
-    );
+    expect(markupFor(true)).toContain("Your draft has unpublished changes");
   });
 });
 

@@ -33,6 +33,7 @@ import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
 import {
   messagesOverviewNumber,
   pagesOverviewNumber,
+  publicSiteAddress,
   recentSiteActivity,
   subscribersOverviewNumber,
   visitsOverviewNumber,
@@ -126,14 +127,21 @@ async function loadPendingBlogScheduleRequests(
 }
 
 /**
- * The address a reader types, taken from the site's own canonical origin.
- * A blank or malformed origin gives no address, and the card's View site
- * link then names the site only, rather than printing a broken address.
+ * Reads one store for one card, and turns a failure into `null` so the rest
+ * of Overview still renders. The failure is written to the server log under
+ * `name`, the same way `loadAnalyticsOverview` reports its own, so an
+ * operator sees the fault the owner is only told about in plain words.
  */
-function publicAddressOf(canonicalOrigin: string): string | null {
+async function readOrReport<Result>(
+  name: string,
+  read: () => Promise<Result>,
+): Promise<Result | null> {
   try {
-    return new URL(canonicalOrigin).host;
-  } catch {
+    return await read();
+  } catch (error) {
+    console.error(name, {
+      failure: error instanceof Error ? error.name : "unknown",
+    });
     return null;
   }
 }
@@ -163,9 +171,11 @@ export default async function DashboardOverviewPage({
   );
   const mutationToken = await loadMutationToken();
   // A store that cannot answer must not take the whole screen down with it.
-  // Each of these reads its own source; a failure means the number beside it
+  // Each of these reads its own source; a failure means the card beside it
   // says which source is missing.
-  const messages = await loadMessagesAttention(access).catch(() => null);
+  const messages = await readOrReport("overview_messages_unavailable", () =>
+    loadMessagesAttention(access),
+  );
   const previewsToReview = await loadPreviewsWaitingForReview({
     siteId: access.membership.siteId,
   });
@@ -187,34 +197,51 @@ export default async function DashboardOverviewPage({
   const pendingCampaignRequests =
     await loadOverviewCampaignScheduleRequests();
 
-  const analyticsOverview = await loadAnalyticsOverview(access, {
-    periodDays: overviewPeriodDays,
-  });
-  const subscriberCounts = await loadSubscriberStateCounts(access).catch(
-    () => null,
-  );
-  // `null` means the publish records could not be read. An empty list means
-  // nothing has been published yet. Recent activity says something different
-  // for each, so the two answers are kept apart.
-  const publications = await loadContentPublicationQueries()
-    .then((queries) => queries.listHistory())
-    .catch(() => null);
+  // Three stores that know nothing about each other, so they are read at the
+  // same time rather than one after another.
+  //
+  // `publications` is `null` when the publish records could not be read, and
+  // an empty list when nothing has been published yet. Recent activity says
+  // something different for each, so the two answers are kept apart.
+  const [analyticsOverview, subscriberCounts, publications] = await Promise.all([
+    loadAnalyticsOverview(access, { periodDays: overviewPeriodDays }),
+    readOrReport("overview_subscriber_counts_unavailable", () =>
+      loadSubscriberStateCounts(access),
+    ),
+    readOrReport("overview_publications_unavailable", async () =>
+      (await loadContentPublicationQueries()).listHistory(),
+    ),
+  ]);
 
   const workspaceQuery = `workspace=${encodeURIComponent(
     dashboardWorkspace.workspaceId,
   )}`;
-  // "Edit site" opens the page editor on the home page, in this person's own
-  // draft. `resolveEditorPage` reads the page from `?page=`.
+  // Two different home pages, on purpose. The picture shows the home page as
+  // it is published, because that is what a reader sees today. "Edit site"
+  // opens the draft's own home page, because that is what the owner changes.
+  // They carry the same id unless the draft replaced the page.
+  const publishedHomePage = homePage(definition);
+  const draftHomePage = homePage(contentRevision.definition);
+  // `resolveEditorPage` reads the page the editor opens from `?page=`.
   const editHref = `/dash/pages?${workspaceQuery}&page=${encodeURIComponent(
-    homePage(contentRevision.definition).id,
+    draftHomePage.id,
   )}`;
-  const publicAddress = publicAddressOf(definition.site.canonicalOrigin);
-  // 0 here is only ever used to decide whether to draw a message row. When
-  // the store could not answer, `messages` is null and the section says so
-  // instead of reporting that nothing is waiting.
+  const publicAddress = publicSiteAddress(definition.site.canonicalOrigin);
+  // 0 here only decides whether to draw a message row. When the store could
+  // not answer, `messages` is null and the section says so instead of
+  // reporting that nothing is waiting.
   const unreadMessages = messages?.unreadCount ?? 0;
   const heldMessages = messages?.heldForReview ?? 0;
-  const otherAttentionItems =
+  const nothingIsWaiting =
+    messages !== null &&
+    unreadMessages === 0 &&
+    heldMessages === 0 &&
+    previewsToReview.length === 0 &&
+    pendingScheduleRequests.length === 0 &&
+    pendingCampaignRequests.length === 0;
+  const attentionItemCount =
+    unreadMessages +
+    heldMessages +
     previewsToReview.length +
     pendingScheduleRequests.length +
     pendingCampaignRequests.length;
@@ -233,7 +260,7 @@ export default async function DashboardOverviewPage({
           <SitePreviewFrame layoutWidth={sitePreviewLayoutWidth}>
             <SiteRenderer
               definition={definition}
-              page={homePage(definition)}
+              page={publishedHomePage}
               editingSurface
             />
           </SitePreviewFrame>
@@ -272,15 +299,12 @@ export default async function DashboardOverviewPage({
             Open Messages to try again.
           </p>
         ) : null}
-        {unreadMessages === 0 && heldMessages === 0 && otherAttentionItems === 0 ? (
-          messages === null ? null : (
-            <p className="empty-state">
-              Nothing is waiting for you. New messages, anything held as
-              spam, and drafts or schedule requests an app made for you
-              appear here.
-            </p>
-          )
-        ) : (
+        {nothingIsWaiting ? (
+          <p className="empty-state">
+            Nothing is waiting for you. New messages, anything held as spam,
+            and drafts or schedule requests an app made for you appear here.
+          </p>
+        ) : attentionItemCount === 0 ? null : (
           <AttentionList
             items={[
               ...previewsToReview.map((preview) => ({

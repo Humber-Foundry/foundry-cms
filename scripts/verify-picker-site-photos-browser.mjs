@@ -117,15 +117,12 @@ async function main() {
 
     // Start a workspace and land on the page editor.
     await page.goto(`${origin}/dash`);
-    // The dashboard creates the draft workspace on the server, so Overview
-    // links straight into the page editor.
-    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
-    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
-
-    // Pages opens on the list of every page. Open the home page from it to
-    // reach the editor.
-    await page.locator(".pages-list-row").first().click();
-    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u);
+    // The dashboard creates the draft workspace on the server, so Overview's
+    // site card opens the home page in the editor straight away (#228).
+    await page.getByRole("link", { name: "Edit site" }).click();
+    await page.waitForURL(
+      /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u,
+    );
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
     // Give the site a built-in photo: a full-width image section defaults to a

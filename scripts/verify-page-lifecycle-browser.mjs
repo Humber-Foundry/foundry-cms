@@ -177,10 +177,16 @@ async function runJourney(origin, browser, viewport) {
   // different web addresses and each one puts the draft back as it found it.
   const slug = `our-services-${viewport.name}`;
 
-  // The dashboard creates the draft workspace on the server, so Overview
-  // links straight into Pages.
+  // The dashboard creates the draft workspace on the server. Overview's site
+  // card opens the home page in the editor (#228); this check works on the
+  // Pages list, which is the same address with no page named.
   await page.goto(`${origin}/dash`);
-  await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
+  await page.getByRole("link", { name: "Edit site" }).click();
+  await page.waitForURL(
+    /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u,
+  );
+  const workspace = new URL(page.url()).searchParams.get("workspace");
+  await page.goto(`${origin}/dash/pages?workspace=${workspace}`);
   await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
   const workspaceUrl = page.url();
   await shot("pages-list");

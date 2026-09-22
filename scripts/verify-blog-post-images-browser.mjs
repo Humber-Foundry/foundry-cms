@@ -175,10 +175,12 @@ async function main() {
 
     // Start a workspace.
     await page.goto(`${origin}/dash`);
-    // The dashboard creates the draft workspace on the server, so Overview
-    // links straight into the page editor.
-    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
-    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
+    // The dashboard creates the draft workspace on the server, so Overview's
+    // site card opens the page editor on the home page (#228).
+    await page.getByRole("link", { name: "Edit site" }).click();
+    await page.waitForURL(
+      /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u,
+    );
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
     // Upload three distinct photos so the gallery has one for each control.

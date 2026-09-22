@@ -63,7 +63,7 @@ export function SiteCard({
         <p className="dash-site-card-state">
           {hasDraftChanges ? (
             <DashboardStateLabel tone="draft">
-              Draft changes waiting to be published
+              Your draft has unpublished changes
             </DashboardStateLabel>
           ) : (
             <DashboardStateLabel tone="live">

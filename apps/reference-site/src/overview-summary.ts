@@ -88,7 +88,7 @@ export function visitsOverviewNumber(
     return {
       ...shared,
       value: null,
-      note: "Your site's visit counter is not reporting yet, so there is no figure for this period.",
+      note: "Your site's visit counter is not reporting yet. Visitors says what it counts.",
     };
   }
   const series = overview.metrics.filter(
@@ -98,7 +98,7 @@ export function visitsOverviewNumber(
     return {
       ...shared,
       value: null,
-      note: "Your site's visit counter has reported nothing for this period.",
+      note: "Your site's visit counter has reported nothing for this period. Open Visitors.",
     };
   }
   if (series.length > 1) {
@@ -120,7 +120,7 @@ export function visitsOverviewNumber(
   return {
     ...shared,
     value: null,
-    note: "Your site's visit counter has not reported for this period.",
+    note: "Your site's visit counter has not reported for this period. Open Visitors.",
   };
 }
 
@@ -137,7 +137,7 @@ export function messagesOverviewNumber(
     href: dashboardRoutes.messages,
     count: unreadCount,
     missingNote:
-      "Your message store could not be read just now, so there is no figure.",
+      "Your message store could not be read just now. Open Messages to try again.",
   });
 }
 
@@ -154,7 +154,7 @@ export function subscribersOverviewNumber(
     href: dashboardRoutes.subscribers,
     count: confirmedCount,
     missingNote:
-      "Your subscriber list could not be read just now, so there is no figure.",
+      "Your subscriber list could not be read just now. Open Subscribers to try again.",
   });
 }
 
@@ -172,6 +172,19 @@ export function pagesOverviewNumber(
     value: formatCount(publishedPageCount),
     note: null,
   };
+}
+
+/**
+ * The address a reader types, taken from the site's own canonical origin.
+ * A blank or malformed origin gives `null`, and the site card's View site
+ * link then names the site only, rather than printing a broken address.
+ */
+export function publicSiteAddress(canonicalOrigin: string): string | null {
+  try {
+    return new URL(canonicalOrigin).host;
+  } catch {
+    return null;
+  }
 }
 
 /** One line of "Recent activity". */
@@ -203,6 +216,13 @@ function publishLabel(status: ContentPublicationStatus): string {
 export const overviewActivityLimit = 5;
 
 /**
+ * The id of the Published history heading in
+ * `components/publication-history.tsx`. A publish line in Recent activity
+ * opens the editor at that panel.
+ */
+const publishedHistoryAnchor = "publication-history-heading";
+
+/**
  * The last few things that happened to the site: each publish attempt, and
  * the last save of the draft.
  *
@@ -229,6 +249,10 @@ export function recentSiteActivity({
   editorHref: string;
   formatMoment: (value: string) => string;
 }): ReadonlyArray<OverviewActivityItem> {
+  // A publish has no screen of its own. The record of every publish is the
+  // Published history panel inside the page editor, so a publish line opens
+  // the editor at that panel, and the save line opens the editor itself.
+  const publishedHistoryHref = `${editorHref}#${publishedHistoryAnchor}`;
   const entries: ReadonlyArray<{ at: string; item: OverviewActivityItem }> = [
     ...publications.map((entry) => ({
       at: entry.publication.updatedAt,
@@ -236,7 +260,7 @@ export function recentSiteActivity({
         key: `publication-${entry.publication.id}`,
         label: publishLabel(entry.publication.status),
         time: formatMoment(entry.publication.updatedAt),
-        href: editorHref,
+        href: publishedHistoryHref,
       },
     })),
     ...(draftRevision > 0

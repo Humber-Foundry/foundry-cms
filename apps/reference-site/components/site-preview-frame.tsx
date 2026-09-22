@@ -28,9 +28,12 @@ export function SitePreviewFrame({
   children: ReactNode;
 }) {
   const frame = useRef<HTMLDivElement>(null);
-  // A card in the dashboard grid is about this wide, so the first paint is
-  // already close and the picture does not jump when the width is measured.
-  const [scale, setScale] = useState(0.22);
+  // The width the frame usually gets, in pixels: a phone screen less the
+  // dashboard's own margins, which is also close to the picture column of
+  // the site card on a computer. It only sets the first paint, so the
+  // picture is already about the right size before the real width is
+  // measured; the measurement then corrects it.
+  const [scale, setScale] = useState(() => 340 / layoutWidth);
 
   useEffect(() => {
     const element = frame.current;
