@@ -9,6 +9,7 @@ import {
 } from "@humber-foundry/application";
 import { createSiteId } from "@humber-foundry/site-definition";
 
+import { contactFormEnvelope } from "../components/contact-form-envelope";
 import { installedPublicForms } from "../foundry/public-forms";
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
@@ -41,21 +42,25 @@ const inboxPlan = createPublicFormInboxPlan(
   })),
 );
 
-/** Exactly what `ContactForm` puts in the body of its send. */
+/**
+ * Exactly what `ContactForm` puts in the body of its send, built by the same
+ * function the form uses, so the two cannot drift apart.
+ */
 function envelopeFromTheForm(
-  fields: Readonly<Record<string, string>>,
+  typed: Readonly<{ name: string; email?: string; message: string }>,
   submissionId: string,
 ) {
-  return {
+  return contactFormEnvelope({
     schemaVersion: "1.0.0",
     submissionId,
-    fields,
+    name: typed.name,
+    email: typed.email ?? "",
+    message: typed.message,
     turnstileToken: "browser-token",
-    honeypot: "",
     // The visitor started typing a minute before they pressed the button, so
     // the message is not held as automated traffic.
     startedAt: "2026-07-27T19:59:00.000Z",
-  };
+  });
 }
 
 function application(createId: () => string) {
@@ -89,7 +94,10 @@ function application(createId: () => string) {
   });
 }
 
-async function accept(fields: Readonly<Record<string, string>>, id: string) {
+async function accept(
+  fields: Readonly<{ name: string; email?: string; message: string }>,
+  id: string,
+) {
   return application(() => id).commands.accept({
     formId: "contact",
     origin: canonicalOrigin,

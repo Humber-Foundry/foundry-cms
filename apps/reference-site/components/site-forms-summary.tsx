@@ -10,7 +10,7 @@ import {
  * "Forms on your site": one row for each form the site declares.
  *
  * Each row answers the owner's three questions — what the form is called,
- * where a visitor finds it, and how many messages it has brought in. A form
+ * where a visitor finds it, and how many messages it has received. A form
  * that sits on no page says so, because that is the reason an inbox stays
  * empty, and its row opens Pages so the owner can go and place it.
  *

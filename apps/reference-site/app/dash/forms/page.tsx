@@ -83,7 +83,7 @@ export default async function DashboardFormsPage({
       <section aria-labelledby="site-forms">
         <h2 id="site-forms">Forms on your site</h2>
         <p>
-          Where people can write to you, and what each form has brought in.
+          Where people can write to you, and how many messages each form has received.
         </p>
         <SiteFormsSummary forms={forms} />
       </section>

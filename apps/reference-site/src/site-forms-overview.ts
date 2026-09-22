@@ -9,7 +9,7 @@ import {
  * What Messages says about the forms the site has.
  *
  * Three facts answer the owner's question: what the form is called, where a
- * visitor can find it, and how many messages it has brought in. A form that is
+ * visitor can find it, and how many messages it has received. A form that is
  * declared but sits on no page is still listed, because a form nobody can see
  * is the reason an inbox stays empty. See ADR-0044.
  *
@@ -86,9 +86,9 @@ export function siteFormsOverview(
 }
 
 /**
- * The one line under a form's name: where a visitor finds it, and what it has
- * brought in. A form on no page says so plainly, because that is the reason an
- * inbox stays empty.
+ * The one line under a form's name: where a visitor finds it, and how many
+ * messages it has received. A form on no page says so plainly, because that is
+ * the reason an inbox stays empty.
  */
 export function formPlacementAndCountSentence(row: SiteFormOverviewRow): string {
   const count = formMessageCountSentence(row);
@@ -109,7 +109,7 @@ export function formRowDestination(row: SiteFormOverviewRow): string {
   return row.placements[0]?.pagePath ?? "/dash/pages";
 }
 
-/** The sentence that says how many messages one form has brought in. */
+/** The sentence that says how many messages one form has received. */
 export function formMessageCountSentence(row: SiteFormOverviewRow): string {
   if (row.messageCount === 0) {
     return "No messages yet.";

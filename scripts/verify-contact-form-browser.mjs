@@ -194,12 +194,12 @@ async function verifyMessagesListsTheForm(page, origin) {
   if (name.trim() !== "Contact form") {
     throw new Error(`contact_form_dashboard_name:${name}`);
   }
-  const note = (await row.locator(".dash-row-note").textContent()) ?? "";
-  if (!note.includes("message")) {
-    throw new Error(`contact_form_dashboard_no_count:${note}`);
-  }
-  if (!note.includes("Appears on")) {
-    throw new Error(`contact_form_dashboard_no_page_named:${note}`);
+  // The send above was answered by this script, not stored, so the count is
+  // still zero here. The stored count is read back in
+  // `apps/reference-site/src/contact-form-to-inbox.test.ts`.
+  const note = ((await row.locator(".dash-row-note").textContent()) ?? "").trim();
+  if (!/^Appears on .+ \(\/\)\. No messages yet\.$/u.test(note)) {
+    throw new Error(`contact_form_dashboard_note:${note}`);
   }
   if ((await row.locator(".dash-row-link").getAttribute("href")) !== "/") {
     throw new Error("contact_form_dashboard_wrong_page_link");

@@ -198,4 +198,3 @@ export const renderCallToActionPageComponent: PageComponentRenderer = ({
     </section>
   );
 };
-

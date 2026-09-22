@@ -40,25 +40,36 @@ export type PublicFormStatusEnvironment = Readonly<{
   FOUNDRY_TURNSTILE_SECRET?: string;
 }>;
 
+const notAvailable: PublicFormPublicStatus = Object.freeze({
+  available: false,
+  schemaVersion: null,
+  turnstileAction: null,
+  turnstileSiteKey: null,
+});
+
 export function publicFormPublicStatus(
   form: InstalledPublicFormDefinition | undefined,
   environment: PublicFormStatusEnvironment,
 ): PublicFormPublicStatus {
+  const siteKey = environment.FOUNDRY_TURNSTILE_SITE_KEY?.trim() ?? "";
   const available =
     form !== undefined &&
     environment.FOUNDRY_DB !== undefined &&
     environment.FOUNDRY_FORM_RATE_LIMITER !== undefined &&
     isHttpsUrl(environment.FOUNDRY_CANONICAL_ORIGIN) &&
-    isPresent(environment.FOUNDRY_TURNSTILE_SITE_KEY) &&
+    siteKey !== "" &&
     // The widget needs both halves of the pair. With the site key alone the
     // form would look ready and then refuse every message at the last moment.
     isPresent(environment.FOUNDRY_TURNSTILE_SECRET);
+  // `form` is checked again by name, because `available` is one boolean and
+  // does not tell the type checker which of its parts held.
+  if (!available || form === undefined) {
+    return notAvailable;
+  }
   return Object.freeze({
-    available,
-    schemaVersion: available ? form!.schemaVersion : null,
-    turnstileAction: available ? form!.turnstileAction : null,
-    turnstileSiteKey: available
-      ? (environment.FOUNDRY_TURNSTILE_SITE_KEY?.trim() ?? null)
-      : null,
+    available: true,
+    schemaVersion: form.schemaVersion,
+    turnstileAction: form.turnstileAction,
+    turnstileSiteKey: siteKey,
   });
 }

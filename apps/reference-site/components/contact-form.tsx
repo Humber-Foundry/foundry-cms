@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import { contactFormEnvelope } from "./contact-form-envelope";
 import { loadTurnstile } from "./turnstile";
 
 /**
@@ -177,19 +178,17 @@ export function ContactForm({
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          schemaVersion: contract.schemaVersion,
-          submissionId: crypto.randomUUID(),
-          // A blank address is left out rather than sent empty, so a stored
-          // message never carries an address nobody typed.
-          fields:
-            email.trim() === ""
-              ? { name, message }
-              : { name, email, message },
-          turnstileToken: token.current,
-          honeypot: "",
-          startedAt: startedAt.current,
-        }),
+        body: JSON.stringify(
+          contactFormEnvelope({
+            schemaVersion: contract.schemaVersion,
+            submissionId: crypto.randomUUID(),
+            name,
+            email,
+            message,
+            turnstileToken: token.current,
+            startedAt: startedAt.current,
+          }),
+        ),
       });
       if (response.status === 201) {
         setStatus({ state: "done" });

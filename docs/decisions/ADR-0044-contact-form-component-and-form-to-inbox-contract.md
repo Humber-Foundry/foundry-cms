@@ -76,7 +76,7 @@ answers `available`, `schemaVersion`, `turnstileAction` and `turnstileSiteKey`,
 and nothing else. The action name comes from the server because the server
 refuses a message whose check reports any other action: a block that carried
 its own action name would work only for a form named `contact`.
-This mirrors the newsletter signup form (ADR-0031's public status rule): a field
+This mirrors the newsletter signup form (`newsletter-signup-public-status.ts`): a field
 that looks ready and then refuses every message is worse than a plain sentence
 saying the form is not ready. The answer names no setting and carries no secret,
 so a visitor learns nothing about how the site is configured. An unknown form id
@@ -99,7 +99,7 @@ workspace: it reads the draft the person is already editing, and the published
 site when there is none. Opening an inbox must write nothing, and taking a
 `?workspace=` value would let a stale link redirect and throw away the inbox
 cursor the screen already carries in `?older=`. Each row names the form, says which pages it appears on and how many
-messages it has brought in, and opens the page it appears on. A declared form
+messages it has received, and opens the page it appears on. A declared form
 on no page is listed, says so, and opens Pages so the owner can go and place
 it: a form nobody can see is the reason an inbox stays empty.
 
@@ -135,6 +135,10 @@ writing down for every page component.
   browser and checks the exact request the route would receive, and
   `apps/reference-site/src/contact-form-to-inbox.test.ts` runs that same
   envelope through the real acceptance rules and the real store, then reads the
-  message back as the inbox reads it.
+  message back as the inbox reads it. Both build the envelope with
+  `components/contact-form-envelope.ts`, the one function the form itself
+  uses, so the halves cannot drift apart. No test drives a browser send into
+  the real route and then reads it in Messages; that needs the Cloudflare
+  bindings.
 - #236 rebuilds the inbox rows and the message view. This decision does not
   touch either.
