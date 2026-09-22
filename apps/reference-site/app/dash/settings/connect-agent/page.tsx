@@ -4,6 +4,7 @@ import { mcpSupportedScopes } from "@humber-foundry/application";
 
 import { CopyAddressButton } from "@/components/copy-address-button";
 import { DashboardBackLink } from "@/components/dashboard-back-link";
+import { DashboardDoneLink } from "@/components/dashboard-done-link";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { loadMutationToken } from "@/src/dashboard-page-context";
 import { requireAuthorizedSettingsAccess } from "@/src/settings-page-context";
@@ -172,6 +173,11 @@ export default async function ConnectAgentPage() {
           csrfToken={mutationToken}
         />
       </section>
+
+      {/* The owner opens this screen to finish one task, so it has an end:
+          Done returns to the Connected agents tab, where the new connection
+          is listed (#227). */}
+      <DashboardDoneLink href="/dash/settings/agents" />
     </main>
   );
 }
