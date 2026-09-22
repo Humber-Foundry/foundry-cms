@@ -1166,6 +1166,7 @@ export * from "./pages";
 export * from "./editable-fields";
 export * from "./component-composition";
 export * from "./page-component-registry";
+export * from "./colour-readability";
 export * from "./design-tokens";
 export * from "./design-presets";
 export * from "./blog";

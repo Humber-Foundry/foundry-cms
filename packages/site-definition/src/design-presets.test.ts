@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySiteDefinitionEdits,
+  contrastRatio,
   defaultSiteDesign,
   designContract,
   designEditsForDesign,
@@ -11,60 +12,6 @@ import {
   type DesignPreset,
   type SiteDesign,
 } from "./index";
-
-/**
- * Relative luminance and contrast ratio from WCAG 2.2. The Design module offers
- * colours the owner cannot inspect for readability, so the contract itself has
- * to guarantee every offered pair is legible.
- */
-function channelLuminance(channel: number): number {
-  const value = channel / 255;
-  return value <= 0.04045
-    ? value / 12.92
-    : ((value + 0.055) / 1.055) ** 2.4;
-}
-
-function relativeLuminance(hex: string): number {
-  const match = /^#([0-9a-f]{6})$/iu.exec(hex);
-  if (match === null) {
-    throw new TypeError(`not_a_six_digit_hex_colour:${hex}`);
-  }
-  const value = Number.parseInt(match[1]!, 16);
-  return (
-    0.2126 * channelLuminance((value >> 16) & 0xff) +
-    0.7152 * channelLuminance((value >> 8) & 0xff) +
-    0.0722 * channelLuminance(value & 0xff)
-  );
-}
-
-/**
- * `color-mix(in srgb, <first> <weight>%, <second>)`, worked out the same way a
- * browser works it out. `--design-band` is mixed from the accent and the paper,
- * so the band's colour exists nowhere to read: it has to be mixed here before
- * the text on it can be checked.
- */
-function mixInSrgb(first: string, weight: number, second: string): string {
-  const channels = (hex: string): number[] => {
-    const match = /^#([0-9a-f]{6})$/iu.exec(hex);
-    if (match === null) throw new TypeError(`not_a_six_digit_hex_colour:${hex}`);
-    const value = Number.parseInt(match[1]!, 16);
-    return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
-  };
-  const [firstChannels, secondChannels] = [channels(first), channels(second)];
-  const mixed = firstChannels.map((channel, index) =>
-    Math.round(channel * weight + secondChannels[index]! * (1 - weight)),
-  );
-  return `#${mixed.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-/** The weight `globals.css` mixes `--design-band` with. */
-const bandAccentWeight = 0.2;
-
-export function contrastRatio(first: string, second: string): number {
-  const a = relativeLuminance(first);
-  const b = relativeLuminance(second);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-}
 
 const accentOptions = designContract.tokens["colour.accent"].options;
 const neutralOptions = designContract.tokens["colour.neutral"].options;
@@ -166,31 +113,6 @@ describe("design token contract", () => {
         contrastRatio(preview.softInk, preview.card),
         `soft ink on card ${option.value}`,
       ).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it("keeps page text readable on the light band every accent mixes", () => {
-    // ADR-0040 mixes `--design-band` from the accent and the paper, and page
-    // components put ordinary page text on it. Every accent and page tone the
-    // owner can pair therefore owes the same reading guarantee.
-    for (const accent of accentOptions) {
-      for (const neutral of neutralOptions) {
-        if (accent.preview.kind !== "accent") continue;
-        if (neutral.preview.kind !== "neutral") continue;
-        const band = mixInSrgb(
-          accent.preview.colour,
-          bandAccentWeight,
-          neutral.preview.paper,
-        );
-        expect(
-          contrastRatio(neutral.preview.ink, band),
-          `ink on ${accent.value} band over ${neutral.value}`,
-        ).toBeGreaterThanOrEqual(7);
-        expect(
-          contrastRatio(neutral.preview.softInk, band),
-          `soft ink on ${accent.value} band over ${neutral.value}`,
-        ).toBeGreaterThanOrEqual(4.5);
-      }
     }
   });
 

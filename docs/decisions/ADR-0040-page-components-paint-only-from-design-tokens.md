@@ -120,18 +120,25 @@ hex value.
   the design contract in agreement, and now covers the `card` tone and the
   accent ink.
 - `packages/site-definition/src/design-presets.test.ts` holds ADR-0009's reading
-  guarantee over the new values: page text reaches WCAG AAA on the card surface
-  and on the light band as well as on the paper, and each accent's ink reaches
-  WCAG AA on both the accent and its deep shade.
+  guarantee over the new registered values: page text reaches WCAG AAA on the
+  card surface as well as on the paper, and each accent's ink reaches WCAG AA on
+  both the accent and its deep shade.
+- `design-stylesheet.test.ts` holds the same guarantee over the light band.
+  The band is mixed, so no colour exists to read: the test reads the mix weight
+  out of the stylesheet, mixes the band itself for all six accents against all
+  three page tones, and checks the text on each. Reading the weight rather than
+  copying it is what stops the stylesheet and the check drifting apart.
+  `packages/site-definition/src/colour-readability.ts` holds the arithmetic both
+  tests use, so there is one copy of it.
 
 ### 3. The rule reaches past `public.css`
 
-Three of the rules a page component paints with live in `globals.css`, because
+Some of the rules a page component paints with live in `globals.css`, because
 the same classes also render on the dashboard and the page-not-found screen
-where no design is set: `.eyebrow`, `.button` and `.button-primary`. Each reads
-a design token with the value it had before any design existed as the fallback,
-`var(--design-accent-ink, var(--white))`, and `page-component-stylesheet.test.ts`
-checks those three rules too.
+where no design is set: `.eyebrow`, `.button`, `.button-primary` and its hover.
+Each reads a design token with the value it had before any design existed as
+the fallback, `var(--design-accent-ink, var(--white))`, and
+`page-component-stylesheet.test.ts` checks those rules too.
 
 ### 4. An installation carries the same duty
 

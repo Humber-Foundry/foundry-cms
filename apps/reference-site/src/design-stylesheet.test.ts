@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  contrastRatio,
   designContract,
   designTokenAttributeName,
   designTokenKeys,
+  mixInSrgb,
 } from "@humber-foundry/site-definition";
 
 /**
@@ -51,7 +53,47 @@ function largestRem(declaration: string): number {
   return Math.max(...lengths);
 }
 
+/**
+ * How much accent the stylesheet mixes into `--design-band`, read out of the
+ * stylesheet itself. Copying the number here would let the stylesheet and the
+ * reading check disagree without either one failing.
+ */
+function bandAccentWeight(): number {
+  const match =
+    /--design-band:\s*color-mix\(in srgb, var\(--design-accent\) ([\d.]+)%, var\(--paper\)\)/u.exec(
+      stylesheet,
+    );
+  if (match === null) throw new Error("no_band_mix_in_stylesheet");
+  return Number.parseFloat(match[1]!) / 100;
+}
+
 describe("design stylesheet matches the design contract", () => {
+  it("keeps page text readable on the light band every accent mixes", () => {
+    // ADR-0040 mixes `--design-band` from the accent and the paper, and page
+    // components put ordinary page text on it. Every accent and page tone the
+    // owner can pair therefore owes ADR-0009's reading guarantee.
+    const weight = bandAccentWeight();
+    for (const accent of designContract.tokens["colour.accent"].options) {
+      for (const neutral of designContract.tokens["colour.neutral"].options) {
+        if (accent.preview.kind !== "accent") continue;
+        if (neutral.preview.kind !== "neutral") continue;
+        const band = mixInSrgb(
+          accent.preview.colour,
+          weight,
+          neutral.preview.paper,
+        );
+        expect(
+          contrastRatio(neutral.preview.ink, band),
+          `ink on ${accent.value} band over ${neutral.value}`,
+        ).toBeGreaterThanOrEqual(7);
+        expect(
+          contrastRatio(neutral.preview.softInk, band),
+          `soft ink on ${accent.value} band over ${neutral.value}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it("has one rule for every registered option of every token", () => {
     for (const key of designTokenKeys) {
       const attribute = designTokenAttributeName(key);

@@ -47,14 +47,20 @@ const paintingProperties = new Set([
   "border-block",
   "border-block-end",
   "border-block-start",
+  "border-block-color",
   "border-bottom",
+  "border-bottom-color",
   "border-color",
   "border-inline",
   "border-inline-end",
+  "border-inline-color",
   "border-inline-start",
   "border-left",
+  "border-left-color",
   "border-right",
+  "border-right-color",
   "border-top",
+  "border-top-color",
   "box-shadow",
   "caret-color",
   "color",
@@ -105,8 +111,11 @@ function declarations(css: string): ReadonlyArray<Declaration> {
     (comment) => comment.replaceAll(/[^\n]/gu, " "),
   );
   const found: Declaration[] = [];
+  // The terminator is a semicolon or the rule's closing brace: the last
+  // declaration in a rule may leave the semicolon out, and a rule that did
+  // would otherwise slip past every check below.
   for (const match of withoutComments.matchAll(
-    /([a-z-]+)\s*:\s*([^;{}]+);/gu,
+    /(--[a-z0-9-]+|[a-z-]+)\s*:\s*([^;{}]+)[;}]/gu,
   )) {
     found.push({
       property: match[1]!,
@@ -172,9 +181,7 @@ describe("the page component stylesheet paints only from design tokens", () => {
     const offenders = declarations(stylesheet)
       .filter(
         ({ property, value }) =>
-          property.startsWith("--") &&
-          (/#[0-9a-f]{3,8}\b/iu.test(value) ||
-            /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(/iu.test(value)),
+          property.startsWith("--") && holdsALiteralColour(value),
       )
       .map(place);
 
@@ -195,7 +202,7 @@ describe("the page component stylesheet paints only from design tokens", () => {
         open + 1,
         globalStylesheet.indexOf("}", open),
       );
-      for (const declaration of declarations(`${rule}\n`)) {
+      for (const declaration of declarations(`${rule}}`)) {
         if (!paintingProperties.has(declaration.property)) continue;
         const names = [
           ...declaration.value.matchAll(/var\(\s*(--[a-z0-9-]+)/giu),
