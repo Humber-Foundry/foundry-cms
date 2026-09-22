@@ -124,7 +124,7 @@ async function main() {
 
     // Pages opens on the list of every page. Open the home page from it to
     // reach the editor.
-    await page.locator(".pages-list-row").first().click();
+    await page.locator(".dash-row-link").first().click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u);
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
