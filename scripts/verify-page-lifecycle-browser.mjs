@@ -1,14 +1,19 @@
 /**
- * Live acceptance for creating, renaming, duplicating and deleting pages
- * (issue #159), and for the home page row offering no way to delete it
- * (issue #206).
+ * Live acceptance for the Pages screen: renaming, duplicating and deleting
+ * pages (issue #159), the home page offering no way to delete it (issues
+ * #206 and #229), and the rebuilt rows and action menus (issue #229).
  *
  * Runs the real dashboard and walks the whole journey a site owner walks to
- * get a second page: check that the home page row's Delete control is
- * disabled and explains why, make a page from the Pages list, edit it in the
- * canvas, point a navigation item at it with the page picker, follow that
- * link inside the canvas and land on the new page in the editor, open its
- * preview, then take the link away and delete the page.
+ * get a second page: read the list, check the home page's action menu holds
+ * no Delete, copy the home page to make a second one, edit it in the canvas,
+ * point a navigation item at it with the page picker, follow that link inside
+ * the canvas and land on the new page in the editor, open its preview, then
+ * take the link away and delete the page.
+ *
+ * The screen has no "New page" control. Pages are added by a connected agent
+ * through MCP `foundry.page.create` (ADR-0041), which
+ * `apps/reference-site/src/page-lifecycle-view.test.ts` drives, so the second
+ * page here is made by copying the home page.
  *
  * Following a link inside the canvas is the end-to-end check ADR-0024 left
  * for this ticket, because until now the reference site had one page and a
@@ -19,6 +24,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -29,6 +35,81 @@ const screenshotDir = resolve(repositoryRoot, ".shots/verify-page-lifecycle");
 
 /** The navigation item the journey borrows and then puts back as it was. */
 const navigationItemId = "nav_work";
+
+/**
+ * The Site Definition version this repository checks against.
+ *
+ * It is read from the generated validator's `$id`, which `verify:site-validator`
+ * keeps in step with the schema, so this journey never carries a version of
+ * its own that could fall behind.
+ */
+function schemaVersionOfThisRepository() {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "packages/site-definition/src/site-definition-validator.mjs",
+    ),
+    "utf8",
+  );
+  const found = /schemas\/site-definition\/(\d+\.\d+\.\d+)"/u.exec(source);
+  if (found === null) {
+    throw new Error("page_lifecycle_schema_version_unreadable");
+  }
+  return found[1];
+}
+
+/**
+ * Add one page the way a connected agent adds one.
+ *
+ * The dashboard has no "New page" control (ADR-0041). An agent adds a page by
+ * calling MCP `foundry.page.create`, which runs the application's own
+ * `createPage` command — the same command the revisions route runs for the
+ * `create_page` operation. So this journey posts that operation straight to
+ * the route, then reloads the Pages list to prove the page shows up there.
+ *
+ * The draft's current revision comes from the editor's own status chip,
+ * which already carries it as `data-revision`.
+ */
+async function addPageLikeAnAgent(page, input) {
+  const answer = await page.evaluate(async (wanted) => {
+    const tokenAnswer = await fetch("/api/foundry-cms/revisions", {
+      cache: "no-store",
+    });
+    const { mutationToken } = await tokenAnswer.json();
+    async function post() {
+      const response = await fetch("/api/foundry-cms/revisions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `agent_page:${crypto.randomUUID()}`,
+          "x-foundry-csrf": mutationToken,
+        },
+        body: JSON.stringify({
+          operation: "create_page",
+          workspaceId: wanted.workspaceId,
+          schemaVersion: wanted.schemaVersion,
+          baseRevision: wanted.baseRevision,
+          title: wanted.title,
+          slug: wanted.slug,
+          startingLayout: wanted.startingLayout,
+        }),
+      });
+      const text = await response.text();
+      let body = null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { unparsed: text.slice(0, 300) };
+      }
+      return { status: response.status, body };
+    }
+    return post();
+  }, input);
+  if (answer.status !== 201 || typeof answer.body?.pageId !== "string") {
+    throw new Error(`page_lifecycle_agent_create_refused:${JSON.stringify(answer)}`);
+  }
+  return answer.body.pageId;
+}
 
 async function availablePort() {
   return new Promise((resolvePort, reject) => {
@@ -131,6 +212,30 @@ async function toolbarButton(page, name) {
   return button;
 }
 
+/** Open one page row's action menu and answer the menu itself. */
+async function openRowMenu(page, pageTitle) {
+  const button = page.getByRole("button", { name: `Actions for ${pageTitle}` });
+  await button.waitFor({ state: "visible" });
+  if ((await button.getAttribute("aria-expanded")) !== "true") {
+    await button.click();
+  }
+  const menu = page.getByRole("menu", { name: `Actions for ${pageTitle}` });
+  await menu.waitFor({ state: "visible" });
+  return menu;
+}
+
+/** The words on one page row's action menu, in the order they are drawn. */
+async function rowMenuItems(page, pageTitle) {
+  const menu = await openRowMenu(page, pageTitle);
+  return menu.getByRole("menuitem").allInnerTexts();
+}
+
+/** Choose one item from a page row's action menu. */
+async function chooseRowAction(page, pageTitle, label) {
+  const menu = await openRowMenu(page, pageTitle);
+  await menu.getByRole("menuitem", { name: label, exact: true }).click();
+}
+
 /**
  * Every control in a dialog is a 44px tap target on a phone.
  *
@@ -141,9 +246,7 @@ async function toolbarButton(page, name) {
 async function assertTapTargets(locator, viewport, reason) {
   if (viewport.name !== "390") return;
   const heights = await locator
-    .locator(
-      'button, a, input:not([type="radio"]), .page-lifecycle-layouts label',
-    )
+    .locator('button, a, input:not([type="radio"])')
     .evaluateAll((elements) =>
       elements
         .filter((element) => element.getBoundingClientRect().height > 0)
@@ -154,7 +257,7 @@ async function assertTapTargets(locator, viewport, reason) {
   }
 }
 
-async function runJourney(origin, browser, viewport) {
+async function runJourney(origin, browser, viewport, schemaVersion) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   // Every answer the content route gives, so a failure can say what happened
@@ -185,60 +288,97 @@ async function runJourney(origin, browser, viewport) {
   const workspaceUrl = page.url();
   await shot("pages-list");
 
-  // --- The home page row offers no way to delete it ---------------------
-  const homeDeleteButton = page.getByRole("button", {
-    name: /^Delete Foundry Reference$/u,
-  });
-  if (!(await homeDeleteButton.isDisabled())) {
-    throw new Error("page_lifecycle_home_delete_not_disabled");
+  // --- The list reads as one row per page -------------------------------
+  const homeRow = page.locator(".dash-row").first();
+  const homeNote = await homeRow.locator(".dash-row-note").innerText();
+  if (homeNote.trim() !== "Address: /") {
+    throw new Error(`page_lifecycle_home_address_not_labelled:${homeNote}`);
   }
-  const homeDeleteTip = page.getByRole("button", {
-    name: "Why can't I delete the home page?",
-  });
-  await homeDeleteTip.waitFor({ state: "visible" });
-  await homeDeleteTip.click();
-  const homeDeleteExplanation = page.locator(".help-tip-panel");
-  await homeDeleteExplanation.waitFor({ state: "visible" });
-  const explanationText = await homeDeleteExplanation.innerText();
-  if (!explanationText.includes("The home page cannot be deleted")) {
-    throw new Error(`page_lifecycle_home_delete_not_explained:${explanationText}`);
+  const homeState = await homeRow.locator(".dash-state").innerText();
+  if (!["Published", "Draft changes", "Not published"].includes(homeState.trim())) {
+    throw new Error(`page_lifecycle_state_word_wrong:${homeState}`);
+  }
+
+  // --- No way to add a page by hand; the screen says who adds them -------
+  if ((await page.getByRole("button", { name: "New page" }).count()) !== 0) {
+    throw new Error("page_lifecycle_new_page_control_present");
+  }
+  const agentLink = page.getByRole("link", { name: "Connect an agent" });
+  await agentLink.waitFor({ state: "visible" });
+  const agentHref = await agentLink.getAttribute("href");
+  if (agentHref !== "/dash/settings/connect-agent") {
+    throw new Error(`page_lifecycle_agent_link_wrong:${String(agentHref)}`);
+  }
+
+  // --- The home page's action menu holds no Delete ----------------------
+  const homeActions = await rowMenuItems(page, "Foundry Reference");
+  if (
+    homeActions.map((item) => item.trim()).join(",") !== "Rename,Duplicate"
+  ) {
+    throw new Error(
+      `page_lifecycle_home_menu_wrong:${JSON.stringify(homeActions)}`,
+    );
+  }
+  if ((await page.locator(".help-tip-trigger").count()) !== 0) {
+    throw new Error("page_lifecycle_home_row_still_has_help_tip");
+  }
+  const disabledControls = await page
+    .locator(".dash-row button:disabled, .dash-action-menu-list button:disabled")
+    .count();
+  if (disabledControls !== 0) {
+    throw new Error(`page_lifecycle_disabled_row_control:${disabledControls}`);
   }
   await assertTapTargets(
-    page.locator(".pages-list-row-actions").first(),
+    page.locator(".dash-action-menu-list").first(),
     viewport,
-    "page_lifecycle_home_row_control_short",
+    "page_lifecycle_home_menu_control_short",
   );
-  await shot("pages-list-home-delete-explained");
-  // Close the tip so it does not sit open over the rest of the journey.
-  await homeDeleteTip.click();
+  await shot("pages-list-home-menu");
+  await page.keyboard.press("Escape");
 
-  // --- Create -----------------------------------------------------------
-  await page.getByRole("button", { name: "New page" }).click();
+  // --- A connected agent adds a page, and the list shows it -------------
   const dialog = page.locator(".page-lifecycle-dialog");
-  await dialog.waitFor({ state: "visible" });
-  await page.locator("#page-lifecycle-name").fill("Our services");
-  // The web address follows the page name until the owner types their own.
-  const suggested = await page.locator("#page-lifecycle-address").inputValue();
-  if (suggested !== "our-services") {
-    throw new Error(`page_lifecycle_address_not_suggested:${suggested}`);
+  // The editor's status chip carries the draft's revision number, which the
+  // create operation is measured against. Opening the home page to read it
+  // changes nothing.
+  await page.locator(".dash-row-link").first().click();
+  await page.waitForURL(/[?&]page=/u);
+  const revisionChip = page.locator(".state-label[data-revision]").first();
+  await revisionChip.waitFor({ state: "attached", timeout: 20_000 });
+  const baseRevision = Number(await revisionChip.getAttribute("data-revision"));
+  if (!Number.isSafeInteger(baseRevision) || baseRevision < 0) {
+    throw new Error(`page_lifecycle_revision_unreadable:${baseRevision}`);
   }
-  await page.locator("#page-lifecycle-address").fill(slug);
-  await page.locator('input[name="startingLayout"][value="introduction"]').check();
-  await assertTapTargets(dialog, viewport, "page_lifecycle_new_control_short");
-  await shot("new-page-dialog");
+  await page.goto(workspaceUrl);
 
-  // A successful create sends the browser straight to the new page in the
-  // editor, so the answer is read from the address rather than from the
-  // response body, which the navigation discards.
-  await page.getByRole("button", { name: "Create page" }).click();
-  await page.waitForURL(/[?&]page=page_[0-9a-f]{20}$/u);
-  const pageId = new URL(page.url()).searchParams.get("page");
-  if (pageId === null || !/^page_[0-9a-f]{20}$/u.test(pageId)) {
-    throw new Error(`page_lifecycle_page_id_not_minted:${String(pageId)}`);
+  const pageId = await addPageLikeAnAgent(page, {
+    workspaceId: new URL(workspaceUrl).searchParams.get("workspace"),
+    schemaVersion,
+    baseRevision,
+    title: "Our services",
+    slug,
+    startingLayout: "introduction",
+  });
+  if (!/^page_[0-9a-f]{20}$/u.test(pageId)) {
+    throw new Error(`page_lifecycle_page_id_not_minted:${pageId}`);
   }
-  if (pageId === "home") {
-    throw new Error("page_lifecycle_page_id_is_home");
+
+  await page.goto(workspaceUrl);
+  const agentRow = page.locator(".dash-row", { hasText: "Our services" });
+  await agentRow.waitFor({ state: "visible", timeout: 20_000 });
+  const agentRowNote = await agentRow.locator(".dash-row-note").innerText();
+  if (agentRowNote.trim() !== `Address: /${slug}`) {
+    throw new Error(`page_lifecycle_agent_row_address:${agentRowNote}`);
   }
+  const agentRowState = await agentRow.locator(".dash-state").innerText();
+  if (agentRowState.trim() !== "Not published") {
+    throw new Error(`page_lifecycle_agent_row_state:${agentRowState}`);
+  }
+  await shot("pages-list-with-agent-page");
+
+  // The row opens that page in the editor.
+  await agentRow.locator(".dash-row-link").click();
+  await page.waitForURL(new RegExp(`page=${pageId}`, "u"));
   await shot("new-page-in-editor");
 
   // --- Edit it in the canvas -------------------------------------------
@@ -311,10 +451,7 @@ async function runJourney(origin, browser, viewport) {
   // Loading the list afresh also leaves Edit mode, because the editor always
   // opens in browse mode.
   await page.goto(workspaceUrl);
-  const deleteButton = page.getByRole("button", {
-    name: "Delete Our services",
-  });
-  await deleteButton.click();
+  await chooseRowAction(page, "Our services", "Delete");
   await dialog.waitFor({ state: "visible" });
   const blockers = dialog.locator(".page-lifecycle-blockers a");
   if ((await blockers.count()) === 0) {
@@ -335,11 +472,11 @@ async function runJourney(origin, browser, viewport) {
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   // --- Duplicate, rename, then take the copy away ----------------------
-  await page.getByRole("button", { name: "Duplicate Our services" }).click();
+  await chooseRowAction(page, "Our services", "Duplicate");
   await dialog.waitFor({ state: "visible" });
   const copyName = await page.locator("#page-lifecycle-name").inputValue();
   if (copyName !== "Our services copy") {
-    throw new Error(`page_lifecycle_copy_not_named:${copyName}`);
+    throw new Error(`page_lifecycle_second_copy_not_named:${copyName}`);
   }
   await page.locator("#page-lifecycle-address").fill(`${slug}-copy`);
   await assertTapTargets(dialog, viewport, "page_lifecycle_copy_control_short");
@@ -352,7 +489,7 @@ async function runJourney(origin, browser, viewport) {
   }
 
   await page.goto(workspaceUrl);
-  await page.getByRole("button", { name: "Rename Our services copy" }).click();
+  await chooseRowAction(page, "Our services copy", "Rename");
   await dialog.waitFor({ state: "visible" });
   await page.locator("#page-lifecycle-name").fill("Old news");
   await page.locator("#page-lifecycle-address").fill(`${slug}-old`);
@@ -366,7 +503,7 @@ async function runJourney(origin, browser, viewport) {
   }
   await page.waitForFunction(
     (address) =>
-      [...document.querySelectorAll(".pages-list-row")].some(
+      [...document.querySelectorAll(".dash-row")].some(
         (row) =>
           (row.textContent ?? "").includes("Old news") &&
           (row.textContent ?? "").includes(address),
@@ -376,7 +513,7 @@ async function runJourney(origin, browser, viewport) {
   );
 
   const copyDeleted = savedRevision(page);
-  await page.getByRole("button", { name: "Delete Old news" }).click();
+  await chooseRowAction(page, "Old news", "Delete");
   await dialog.waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Delete page" }).click();
   if ((await copyDeleted.then(() => true, () => false)) === false) {
@@ -386,8 +523,8 @@ async function runJourney(origin, browser, viewport) {
   }
   await page.waitForFunction(
     () =>
-      document.querySelectorAll(".pages-list-row").length > 0 &&
-      ![...document.querySelectorAll(".pages-list-row")].some((row) =>
+      document.querySelectorAll(".dash-row").length > 0 &&
+      ![...document.querySelectorAll(".dash-row")].some((row) =>
         (row.textContent ?? "").includes("Old news"),
       ),
     null,
@@ -474,7 +611,7 @@ async function runJourney(origin, browser, viewport) {
   await (await unlinked).json();
 
   await page.goto(workspaceUrl);
-  await page.getByRole("button", { name: "Delete Our services" }).click();
+  await chooseRowAction(page, "Our services", "Delete");
   await dialog.waitFor({ state: "visible" });
   if ((await dialog.locator(".page-lifecycle-blockers a").count()) !== 0) {
     throw new Error("page_lifecycle_delete_still_blocked");
@@ -497,11 +634,11 @@ async function runJourney(origin, browser, viewport) {
   }
   await page.waitForFunction(
     () =>
-      document.querySelectorAll(".pages-list-title").length > 0 &&
-      ![...document.querySelectorAll(".pages-list-title")].every((title) =>
+      document.querySelectorAll(".dash-row-title").length > 0 &&
+      ![...document.querySelectorAll(".dash-row-title")].every((title) =>
         (title.textContent ?? "").includes("Our services"),
       ) &&
-      ![...document.querySelectorAll(".pages-list-title")].some((title) =>
+      ![...document.querySelectorAll(".dash-row-title")].some((title) =>
         (title.textContent ?? "").includes("Our services"),
       ),
     null,
@@ -524,6 +661,7 @@ function homePageIdOf(body) {
 
 async function main() {
   await mkdir(screenshotDir, { recursive: true });
+  const schemaVersion = schemaVersionOfThisRepository();
   const port = await availablePort();
   const origin = `http://127.0.0.1:${port}`;
   const logs = [];
@@ -566,17 +704,26 @@ async function main() {
       { width: 1440, height: 900, name: "1440" },
       { width: 390, height: 844, name: "390" },
     ]) {
-      await runJourney(origin, browser, viewport);
+      await runJourney(origin, browser, viewport, schemaVersion);
     }
     process.stdout.write(
-      `Page lifecycle browser acceptance passed at ${origin}: created a page ` +
-        `from the Pages list with a minted id, edited it in the canvas, ` +
-        `pointed a navigation item at it, saw the delete refused while that ` +
-        `link pointed at it, duplicated the page and renamed and deleted the ` +
-        `copy, followed the navigation link inside the canvas to land on the ` +
-        `page in the editor, opened its preview, then took the link away and ` +
-        `deleted the page, at 1440px and 390px. Screenshots: ${screenshotDir}\n`,
+      `Page lifecycle browser acceptance passed at ${origin}: read the ` +
+        `labelled address and the state on each row, found no "New page" ` +
+        `control and the Connect an agent link, found no Delete in the home ` +
+        `page's action menu, added a page the way a connected agent does and ` +
+        `found it in the list, edited it in the canvas, pointed a ` +
+        `navigation item at ` +
+        `it, saw the delete refused while that link pointed at it, ` +
+        `duplicated the page and renamed and deleted the copy, followed the ` +
+        `navigation link inside the canvas to land on the page in the ` +
+        `editor, opened its preview, then took the link away and deleted ` +
+        `the page, at 1440px and 390px. Screenshots: ${screenshotDir}\n`,
     );
+  } catch (error) {
+    // The dashboard's own log says what the server refused and why. Without
+    // it a failure here reads only as "the button was not there".
+    process.stderr.write(`server log tail:\n${logs.join("").slice(-4000)}\n`);
+    throw error;
   } finally {
     await browser?.close();
     stopServer(server);

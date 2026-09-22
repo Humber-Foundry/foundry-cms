@@ -3,61 +3,68 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  pageStartingLayouts,
-  suggestPageSlug,
-} from "@humber-foundry/site-definition";
-
-import {
   sendContentRevisionAttempt,
   type ContentRevisionAttempt,
 } from "@/src/content-revision-client";
 import {
   editorPageHref,
   editorPagePublishedStateLabels,
+  editorPagePublishedStateTones,
 } from "@/src/editor-page-selection";
 import type { PageActionSummary } from "@/src/page-lifecycle-view";
-import { HelpTip } from "./help-tip";
+import {
+  DashboardActionMenu,
+  type DashboardAction,
+} from "./dashboard-action-menu";
+import { DashboardList, DashboardListRow } from "./dashboard-list";
+import { DashboardStateLabel } from "./dashboard-state-label";
 
 /** Which dialog is open, and the page it is about. */
-type OpenDialog =
-  | Readonly<{ kind: "new" }>
-  | Readonly<{ kind: "rename" | "duplicate" | "delete"; page: PageActionSummary }>;
+type OpenDialog = Readonly<{
+  kind: "rename" | "duplicate" | "delete";
+  page: PageActionSummary;
+}>;
 
 type FormState = Readonly<{
   title: string;
   slug: string;
-  startingLayout: string;
-  /**
-   * `true` once the owner has typed in the web address themselves. Until then
-   * the address follows the page name, so most owners never touch it.
-   */
-  slugEdited: boolean;
 }>;
 
-const emptyForm: FormState = {
-  title: "",
-  slug: "",
-  startingLayout: pageStartingLayouts[0]!.id,
-  slugEdited: false,
-};
+const emptyForm: FormState = { title: "", slug: "" };
 
 const dialogTitles: Readonly<Record<OpenDialog["kind"], string>> = {
-  new: "New page",
   rename: "Rename this page",
   duplicate: "Duplicate this page",
   delete: "Delete this page?",
 };
 
 const submitLabels: Readonly<Record<OpenDialog["kind"], string>> = {
-  new: "Create page",
   rename: "Save changes",
   duplicate: "Duplicate page",
   delete: "Delete page",
 };
 
 /**
- * Every page of the draft, with the controls that create, rename, duplicate
- * and delete one.
+ * The boxes each dialog draws, so a refusal that names one of them is shown
+ * beside that box instead of as a sentence over the whole dialog.
+ *
+ * The delete dialog draws no box at all, so every refusal it gets is a loose
+ * one and reads as a sentence.
+ */
+const dialogFields: Readonly<
+  Record<OpenDialog["kind"], ReadonlyArray<string>>
+> = {
+  rename: ["title", "slug"],
+  duplicate: ["title", "slug"],
+  delete: [],
+};
+
+/**
+ * Every page of the draft, with the controls that rename, duplicate and
+ * delete one.
+ *
+ * Pages are added by a connected agent through MCP `foundry.page.create`, not
+ * from this screen. See ADR-0041.
  *
  * Each control sends one page operation to the revisions route, which runs the
  * application operation. Nothing here decides whether an operation is allowed:
@@ -103,23 +110,11 @@ export function PageLifecycleList({
     setMessage(null);
     setFieldErrors({});
     setBusy(false);
-    if (next.kind === "new") {
-      setForm(emptyForm);
-    } else if (next.kind === "duplicate") {
-      setForm({
-        title: next.page.duplicateTitle,
-        slug: next.page.duplicateSlug,
-        startingLayout: emptyForm.startingLayout,
-        slugEdited: true,
-      });
-    } else {
-      setForm({
-        title: next.page.title,
-        slug: next.page.slug,
-        startingLayout: emptyForm.startingLayout,
-        slugEdited: true,
-      });
-    }
+    setForm(
+      next.kind === "duplicate"
+        ? { title: next.page.duplicateTitle, slug: next.page.duplicateSlug }
+        : { title: next.page.title, slug: next.page.slug },
+    );
     setOpen(next);
   }
 
@@ -139,25 +134,8 @@ export function PageLifecycleList({
     setOpen(null);
   }
 
-  function changeTitle(title: string) {
-    setForm((current) => ({
-      ...current,
-      title,
-      slug: current.slugEdited ? current.slug : suggestPageSlug(title),
-    }));
-  }
-
   function bodyFor(current: OpenDialog): string {
     const common = { workspaceId, schemaVersion, baseRevision };
-    if (current.kind === "new") {
-      return JSON.stringify({
-        operation: "create_page",
-        ...common,
-        title: form.title,
-        slug: form.slug,
-        startingLayout: form.startingLayout,
-      });
-    }
     if (current.kind === "delete") {
       return JSON.stringify({
         operation: "delete_page",
@@ -196,11 +174,10 @@ export function PageLifecycleList({
         pendingAttempt.current = null;
         const createdPageId =
           typeof body?.pageId === "string" ? body.pageId : undefined;
-        // A new page opens in the editor straight away. A rename or a delete
+        // A copy opens in the editor straight away. A rename or a delete
         // comes back to the list, which then shows what changed.
         window.location.assign(
-          (current.kind === "new" || current.kind === "duplicate") &&
-            createdPageId !== undefined
+          current.kind === "duplicate" && createdPageId !== undefined
             ? editorPageHref(workspaceUrl, createdPageId)
             : workspaceUrl,
         );
@@ -214,14 +191,21 @@ export function PageLifecycleList({
         pendingAttempt.current = null;
         const fields = body.fields as Record<string, string>;
         setFieldErrors(fields);
-        const named = ["title", "slug", "startingLayout"];
+        // A refusal that names a box this dialog draws is shown beside that
+        // box, and the dialog says nothing over the top of it. A refusal that
+        // names anything else has no box to sit beside, so its own sentence —
+        // which names what was wrong — is shown instead. An empty list names
+        // nothing at all, so the dialog falls back to the general sentence.
+        const drawn = dialogFields[current.kind];
         const loose = Object.entries(fields).filter(
-          ([key]) => !named.includes(key),
+          ([key]) => !drawn.includes(key),
         );
         setMessage(
           loose.length > 0
             ? loose.map(([, sentence]) => sentence).join(" ")
-            : "Check the boxes marked below.",
+            : Object.keys(fields).length > 0
+              ? null
+              : refusalSentence(result.response.status, body),
         );
         setBusy(false);
         return;
@@ -248,68 +232,29 @@ export function PageLifecycleList({
 
   return (
     <>
-      <div className="pages-list-actions">
-        <button
-          type="button"
-          className="button"
-          onClick={() => start({ kind: "new" })}
-        >
-          New page
-        </button>
-      </div>
-      <ul className="pages-list-rows">
+      <DashboardList label="Your pages">
         {pages.map((page) => (
-          <li key={page.id}>
-            <a
-              className="pages-list-row"
-              href={editorPageHref(workspaceUrl, page.id)}
-            >
-              <span className="pages-list-title">
-                {page.title}
-                {page.isHome ? (
-                  <span className="pages-list-home">Home page</span>
-                ) : null}
-              </span>
-              <span className="pages-list-address">{page.path}</span>
-              <span className="pages-list-state">
+          <DashboardListRow
+            key={page.id}
+            href={editorPageHref(workspaceUrl, page.id)}
+            title={page.title}
+            note={`Address: ${page.path}`}
+            state={
+              <DashboardStateLabel
+                tone={editorPagePublishedStateTones[page.publishedState]}
+              >
                 {editorPagePublishedStateLabels[page.publishedState]}
-              </span>
-            </a>
-            <div className="pages-list-row-actions">
-              <button
-                type="button"
-                aria-label={`Rename ${page.title}`}
-                onClick={() => start({ kind: "rename", page })}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                aria-label={`Duplicate ${page.title}`}
-                onClick={() => start({ kind: "duplicate", page })}
-              >
-                Duplicate
-              </button>
-              <span className="pages-list-delete-group">
-                <button
-                  type="button"
-                  aria-label={`Delete ${page.title}`}
-                  onClick={() => start({ kind: "delete", page })}
-                  disabled={page.isHome}
-                >
-                  Delete
-                </button>
-                {page.isHome ? (
-                  <HelpTip label="Why can't I delete the home page?">
-                    The home page cannot be deleted. Every site needs a home
-                    page.
-                  </HelpTip>
-                ) : null}
-              </span>
-            </div>
-          </li>
+              </DashboardStateLabel>
+            }
+            actions={
+              <DashboardActionMenu
+                label={`Actions for ${page.title}`}
+                actions={rowActions(page, start)}
+              />
+            }
+          />
         ))}
-      </ul>
+      </DashboardList>
 
       <dialog
         className="page-lifecycle-dialog"
@@ -346,7 +291,12 @@ export function PageLifecycleList({
                         ? undefined
                         : "page-lifecycle-name-error"
                     }
-                    onChange={(event) => changeTitle(event.target.value)}
+                    onChange={(event) =>
+                      setForm((state) => ({
+                        ...state,
+                        title: event.target.value,
+                      }))
+                    }
                   />
                   {fieldErrors.title === undefined ? null : (
                     <span id="page-lifecycle-name-error" role="alert">
@@ -372,7 +322,6 @@ export function PageLifecycleList({
                       setForm((state) => ({
                         ...state,
                         slug: event.target.value,
-                        slugEdited: true,
                       }))
                     }
                   />
@@ -386,34 +335,6 @@ export function PageLifecycleList({
                   )}
                 </p>
               </>
-            ) : null}
-            {current.kind === "new" ? (
-              <fieldset className="page-lifecycle-layouts">
-                <legend>Start with</legend>
-                {pageStartingLayouts.map((layout) => (
-                  <label key={layout.id}>
-                    <input
-                      type="radio"
-                      name="startingLayout"
-                      value={layout.id}
-                      checked={form.startingLayout === layout.id}
-                      onChange={() =>
-                        setForm((state) => ({
-                          ...state,
-                          startingLayout: layout.id,
-                        }))
-                      }
-                    />
-                    <span>
-                      <strong>{layout.label}</strong>
-                      {layout.description}
-                    </span>
-                  </label>
-                ))}
-                {fieldErrors.startingLayout === undefined ? null : (
-                  <span role="alert">{fieldErrors.startingLayout}</span>
-                )}
-              </fieldset>
             ) : null}
             {slugChangeWarning ? (
               <p className="page-lifecycle-warning" role="status">
@@ -448,15 +369,45 @@ export function PageLifecycleList({
   );
 }
 
+/**
+ * The actions one page's menu holds.
+ *
+ * The home page's menu holds no Delete. Every site needs a home page, so a
+ * delete could never succeed, and a control the owner cannot press is worse
+ * than no control at all. Delete sits last and is drawn in the warning
+ * colour, because it removes something.
+ */
+function rowActions(
+  page: PageActionSummary,
+  start: (next: OpenDialog) => void,
+): ReadonlyArray<DashboardAction> {
+  const actions: DashboardAction[] = [
+    {
+      id: "rename",
+      label: "Rename",
+      onSelect: () => start({ kind: "rename", page }),
+    },
+    {
+      id: "duplicate",
+      label: "Duplicate",
+      onSelect: () => start({ kind: "duplicate", page }),
+    },
+  ];
+  if (!page.isHome) {
+    actions.push({
+      id: "delete",
+      label: "Delete",
+      tone: "destructive",
+      onSelect: () => start({ kind: "delete", page }),
+    });
+  }
+  return actions;
+}
+
 /** What a delete does, or what must change before it can happen. */
 function DeleteExplanation({ page }: { page: PageActionSummary }) {
-  if (page.isHome) {
-    return (
-      <p>
-        The home page cannot be deleted. Every site needs a home page.
-      </p>
-    );
-  }
+  // The home page has no Delete in its menu, so this dialog never opens for
+  // it and needs no sentence about it.
   if (page.blockedBy.length > 0) {
     return (
       <>
