@@ -2,39 +2,28 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type {
-  ContentRevision,
-  MediaAsset,
-} from "@humber-foundry/application";
-import { renderedMediaOccurrenceIds } from "@humber-foundry/application";
-import { createMediaOccurrenceId } from "@humber-foundry/application";
-import { requireRenderedMediaOccurrenceId } from "@humber-foundry/application";
-import { homePage } from "@humber-foundry/site-definition";
+import type { MediaAsset } from "@humber-foundry/application";
 
+import { DashboardEmptyState } from "./dashboard-empty-state";
 import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
-import { MediaOccurrence } from "./media-occurrence";
-import { MediaPicker } from "./media-picker";
 import { createMediaCatalogFence } from "./media-catalog-fence";
 import {
   mediaAccessRefreshDelayMs,
   mediaAccessRequestBody,
   parseMediaCatalogGrant,
 } from "./media-catalog-grant";
-import { placeFor } from "./media-places";
+import {
+  mediaThumbnailUrl,
+  photoSizeLabel,
+  photoUsage,
+  photoUsageBadges,
+} from "./media-gallery-item";
 import { createMediaUploadAttempt, isAcceptedPhoto } from "./media-upload";
 import {
-  cropBaseRevisionForEdit,
-  cropForCatalogRefresh,
-  cropForOccurrence,
-  cropForSelectedRevision,
   mediaAssetSelection,
   mediaAssetSelectionForCatalog,
   mediaDeleteFailureMessage,
-  mediaOccurrenceAttemptAfterFailure,
-  mediaOccurrenceMutationsEnabled,
-  mergeMediaOccurrenceState,
-  type MediaOccurrenceState,
   upsertMediaAsset,
 } from "./media-manager-state";
 import {
@@ -44,7 +33,7 @@ import {
 import { sendMediaMutationAttempt } from "../src/media-mutation-client";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
-import type { SiteImageTile } from "../src/site-used-photos";
+import type { SiteImageTile, SitePhotoUsage } from "../src/site-used-photos";
 
 class MediaMutationRequestError extends Error {
   constructor(
@@ -56,79 +45,59 @@ class MediaMutationRequestError extends Error {
   }
 }
 
+/**
+ * The photo library.
+ *
+ * Photos is a library and nothing else: upload a photo, look at it, see where
+ * it is used, and delete one that is used nowhere. A photo is put on a page in
+ * the page editor, at the photo itself, or through the MCP photo tool. See
+ * ADR-0043.
+ */
 export function MediaManager({
   csrfToken,
   workspaceId,
   initialAssets,
-  initialOccurrences,
   siteImages = [],
+  usage,
   usedAssetIds,
-  contentRevision,
-  contentStale = false,
-  onRevisionSaved = () => undefined,
-  onContentStale = () => undefined,
-  onAccessGranted = () => undefined,
 }: {
   csrfToken: string;
   workspaceId: string;
   initialAssets: ReadonlyArray<MediaAsset>;
-  initialOccurrences: ReadonlyArray<MediaOccurrenceState>;
   /** Photos the site shows that are not library assets (built-in/external). */
   siteImages?: ReadonlyArray<SiteImageTile>;
-  /** Gallery assets the published site or the draft references. */
-  usedAssetIds?: ReadonlySet<string>;
-  contentRevision?: ContentRevision;
-  contentStale?: boolean;
-  onRevisionSaved?(revision: ContentRevision, previewUrl: string): void;
-  onContentStale?(): void;
-  onAccessGranted?(accessToken: string): void;
+  /** Where each photo is used, one line per use. */
+  usage: SitePhotoUsage;
+  /**
+   * Every photo the published site or the draft references. Both values are
+   * required: without them every photo would read as used nowhere and the
+   * deletion guard would let a photo the site needs be deleted.
+   */
+  usedAssetIds: ReadonlySet<string>;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
-  const [occurrences, setOccurrences] = useState([...initialOccurrences]);
-  // Placing or cropping a photo advances the draft's content revision. The
-  // next mutation must carry that new revision, not the one the page was
-  // rendered with — otherwise every second change is rejected as a conflict
-  // until a full reload.
-  const [activeContentRevision, setActiveContentRevision] =
-    useState(contentRevision);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string>(
     initialAssets[0]?.assetId ?? "",
   );
-  const [occurrenceId, setOccurrenceId] = useState("occurrence_home_hero");
-  const [crop, setCrop] = useState(() =>
-    cropForOccurrence(initialOccurrences, "occurrence_home_hero"),
-  );
-  const [previewUrl, setPreviewUrl] = useState<string>();
-  // The place the photo picker is open for, or null when it is closed.
-  const [pickerPlaceId, setPickerPlaceId] = useState<string | null>(null);
   const [uploadPending, setUploadPending] = useState(false);
   // What is being uploaded right now, or null when nothing is.
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(
     null,
   );
-  const [mediaAccessToken, setMediaAccessToken] = useState<string>();
   // Unlocks a thumbnail of any photo, including one not on the page.
   const [mediaLibraryToken, setMediaLibraryToken] = useState<string>();
   const [accessGeneration, setAccessGeneration] = useState(0);
   const mutationTokenRef = useRef(csrfToken);
   const selectedAssetId = useRef(selectedAsset);
-  const selectedOccurrenceId = useRef(occurrenceId);
   const uploadAttempt = useRef<MediaUploadAttempt | null>(null);
   const accessAttempt = useRef<{
     workspaceId: string;
     idempotencyKey: string;
   } | null>(null);
-  const replaceAttempt = useRef<JsonAttempt | null>(null);
-  const cropAttempt = useRef<JsonAttempt | null>(null);
-  const cropBaseRevision = useRef<number | null>(null);
   const deleteAttempt = useRef<JsonAttempt | null>(null);
   const catalogFence = useRef(createMediaCatalogFence()).current;
-  const occurrenceMutationsEnabled = mediaOccurrenceMutationsEnabled(
-    contentStale,
-    activeContentRevision,
-  );
 
   type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
 
@@ -156,38 +125,19 @@ export function MediaManager({
         if (!result.response.ok) throw new Error("media_access_grant_failed");
         const grant = parseMediaCatalogGrant(result.body);
         const grantedAssets = grant.assets;
-        const grantedOccurrences = grant.occurrences;
         if (accessAttempt.current?.idempotencyKey === idempotencyKey) {
           accessAttempt.current = null;
         }
         mutationTokenRef.current = result.mutationToken;
-        setMediaAccessToken(grant.accessToken);
         setMediaLibraryToken(grant.libraryToken);
-        onAccessGranted(grant.accessToken);
         if (catalogFence.isCurrent(catalogSnapshot)) {
-          const mergedOccurrences = mergeMediaOccurrenceState(
-            grantedOccurrences,
-            activeContentRevision === undefined
-              ? []
-              : homePage(activeContentRevision.definition).media ?? [],
-          );
           setAssets([...grantedAssets]);
-          setOccurrences([...mergedOccurrences]);
-          setCrop((current) =>
-            cropForCatalogRefresh(
-              current,
-              cropBaseRevision.current,
-              mergedOccurrences,
-              selectedOccurrenceId.current,
-            ),
-          );
           const catalogSelection = mediaAssetSelectionForCatalog(
             selectedAssetId.current,
             grantedAssets,
             deleteAttempt.current,
           );
           if (catalogSelection.assetId !== selectedAssetId.current) {
-            replaceAttempt.current = catalogSelection.replaceAttempt;
             deleteAttempt.current = catalogSelection.deleteAttempt;
             selectedAssetId.current = catalogSelection.assetId;
             setSelectedAsset(catalogSelection.assetId);
@@ -225,25 +175,9 @@ export function MediaManager({
 
   function selectAsset(assetId: string) {
     const selection = mediaAssetSelection(assetId);
-    replaceAttempt.current = selection.replaceAttempt;
     deleteAttempt.current = selection.deleteAttempt;
     selectedAssetId.current = selection.assetId;
     setSelectedAsset(selection.assetId);
-  }
-
-  /**
-   * Moving to another place clears replaceAttempt, cropAttempt and
-   * cropBaseRevision, so a retry cannot send the previous place's work to the
-   * new one.
-   */
-  function selectPlace(nextOccurrenceId: string) {
-    if (nextOccurrenceId === selectedOccurrenceId.current) return;
-    replaceAttempt.current = null;
-    cropAttempt.current = null;
-    cropBaseRevision.current = null;
-    selectedOccurrenceId.current = nextOccurrenceId;
-    setOccurrenceId(nextOccurrenceId);
-    setCrop(cropForOccurrence(occurrences, nextOccurrenceId));
   }
 
   async function mutateJson(attempt: JsonAttempt) {
@@ -257,15 +191,6 @@ export function MediaManager({
     });
     mutationTokenRef.current = result.mutationToken;
     if (!result.response.ok) {
-      if (
-        result.response.status === 409 &&
-        typeof result.body === "object" &&
-        result.body !== null &&
-        "error" in result.body &&
-        result.body.error === "content_revision_stale"
-      ) {
-        onContentStale();
-      }
       throw new MediaMutationRequestError(result.response, result.body);
     }
     return result.body;
@@ -310,7 +235,7 @@ export function MediaManager({
       setAssets((current) => [...upsertMediaAsset(current, asset)]);
       selectAsset(asset.assetId);
       setMessage(
-        `“${uploadName}” is in your photo library. To put it on the site, use one of the two places below.`,
+        `“${uploadName}” is in your photo library. To put it on a page, open the page and change the photo there.`,
       );
     } catch {
       if (uploadAttempt.current !== null) {
@@ -330,136 +255,27 @@ export function MediaManager({
     }
   }
 
-  /**
-   * Puts a photo in one place. The caller may name the photo, because a
-   * photo chosen in the picker is not in `selectedAsset` state yet when the
-   * placement starts.
-   */
-  async function usePhotoInPlace(
-    targetOccurrenceId: string,
-    assetId: string = selectedAsset,
-  ) {
-    if (!occurrenceMutationsEnabled) return;
-    selectPlace(targetOccurrenceId);
-    const current = occurrences.find(
-      (occurrence) => occurrence.occurrenceId === targetOccurrenceId,
-    );
-    beginCatalogMutation();
-    setBusy(true);
-    try {
-      if (activeContentRevision === undefined) return;
-      replaceAttempt.current ??= {
-        idempotencyKey: crypto.randomUUID(),
-        body: {
-          operation: "replace",
-          occurrenceId: targetOccurrenceId,
-          assetId,
-          baseRevision: current?.revision ?? 0,
-          workspaceId: activeContentRevision.workspaceId,
-          contentBaseRevision: activeContentRevision.revision,
-        },
-      };
-      const result = (await mutateJson(replaceAttempt.current)) as {
-        occurrence: MediaOccurrenceState;
-        contentRevision: ContentRevision;
-        previewUrl: string;
-      };
-      const revision = result.occurrence;
-      setOccurrences((items) => [
-        ...items.filter(
-          (item) => item.occurrenceId !== targetOccurrenceId,
-        ),
-        revision,
-      ]);
-      const nextCrop = cropForSelectedRevision(
-        selectedOccurrenceId.current,
-        revision,
-      );
-      if (nextCrop !== undefined) setCrop(nextCrop);
-      replaceAttempt.current = null;
-      cropBaseRevision.current = null;
-      setActiveContentRevision(result.contentRevision);
-      onRevisionSaved(result.contentRevision, result.previewUrl);
-      setPreviewUrl(result.previewUrl);
-      setMessage(
-        `Done — “${placeFor(targetOccurrenceId).name}” now shows the selected photo.`,
-      );
-    } catch (error) {
-      replaceAttempt.current = mediaOccurrenceAttemptAfterFailure(
-        replaceAttempt.current,
-        error instanceof MediaMutationRequestError
-          ? error.response.status
-          : undefined,
-        error instanceof MediaMutationRequestError ? error.body : undefined,
-      );
-      setMessage("That place changed elsewhere or could not be updated. Try again.");
-    } finally {
-      finishCatalogMutation();
-      setBusy(false);
-    }
-  }
-
-  async function cropSelected() {
-    const current = occurrences.find(
-      (occurrence) => occurrence.occurrenceId === occurrenceId,
-    );
-    if (
-      current === undefined ||
-      activeContentRevision === undefined ||
-      !occurrenceMutationsEnabled
-    ) {
-      return;
-    }
-    beginCatalogMutation();
-    setBusy(true);
-    try {
-      cropAttempt.current ??= {
-        idempotencyKey: crypto.randomUUID(),
-        body: {
-          operation: "crop",
-          occurrenceId,
-          baseRevision:
-            cropBaseRevision.current ?? current.revision,
-          crop,
-          workspaceId: activeContentRevision.workspaceId,
-          contentBaseRevision: activeContentRevision.revision,
-        },
-      };
-      const result = (await mutateJson(cropAttempt.current)) as {
-        occurrence: MediaOccurrenceState;
-        contentRevision: ContentRevision;
-        previewUrl: string;
-      };
-      const revision = result.occurrence;
-      setOccurrences((items) => [
-        ...items.filter((item) => item.occurrenceId !== occurrenceId),
-        revision,
-      ]);
-      cropAttempt.current = null;
-      cropBaseRevision.current = null;
-      setActiveContentRevision(result.contentRevision);
-      onRevisionSaved(result.contentRevision, result.previewUrl);
-      setPreviewUrl(result.previewUrl);
-      setMessage("Crop saved. The original photo is unchanged.");
-    } catch (error) {
-      const nextAttempt = mediaOccurrenceAttemptAfterFailure(
-        cropAttempt.current,
-        error instanceof MediaMutationRequestError
-          ? error.response.status
-          : undefined,
-        error instanceof MediaMutationRequestError ? error.body : undefined,
-      );
-      cropAttempt.current = nextAttempt;
-      if (nextAttempt === null) cropBaseRevision.current = null;
-      setMessage("The crop could not be saved. Try again.");
-    } finally {
-      finishCatalogMutation();
-      setBusy(false);
-    }
-  }
+  const deletionFinishing =
+    deleteAttempt.current !== null &&
+    !assets.some((asset) => asset.assetId === selectedAsset);
+  const selectedPhoto = assets.find((asset) => asset.assetId === selectedAsset);
+  // Where the selected photo is used. A use that no line names still counts,
+  // so the guard below never deletes a photo the site needs.
+  const selectedUse = photoUsage(selectedAsset, usage, usedAssetIds);
+  const refusalMessage =
+    selectedUse.state === "named"
+      ? `This photo cannot be deleted. It is used on ${selectedUse.lines.join("; ")}. Change the photo ${selectedUse.lines.length === 1 ? "there" : "in each place"} first.`
+      : "This photo cannot be deleted. Your site still uses it. Change it where it is used first.";
 
   async function deleteSelected() {
     if (selectedAsset === "") return;
+    // The library refuses a photo the site still uses, and says where it is
+    // used. The server refuses it as well; this refusal is the one the owner
+    // reads.
+    if (selectedUse.state !== "unused") {
+      setMessage(refusalMessage);
+      return;
+    }
     beginCatalogMutation();
     setBusy(true);
     try {
@@ -490,13 +306,6 @@ export function MediaManager({
     }
   }
 
-  const deletionFinishing =
-    deleteAttempt.current !== null &&
-    !assets.some((asset) => asset.assetId === selectedAsset);
-  const selectedInUse = occurrences.some(
-    (occurrence) => occurrence.assetId === selectedAsset,
-  );
-
   return (
     <section
       className="content-editor media-library"
@@ -506,8 +315,8 @@ export function MediaManager({
         <div>
           <h2 id="media-heading">All photos</h2>
           <p>
-            Every photo your site uses, and every one you have uploaded. Photos
-            are stored privately; drop a new one in to add it to the library.
+            Photos are stored privately. To put one on a page, open that page
+            and change the photo there.
           </p>
         </div>
       </div>
@@ -523,12 +332,13 @@ export function MediaManager({
         <>
           <MediaGallery
             assets={assets}
-            occurrences={occurrences}
+            usage={usage}
             siteImages={siteImages}
             usedAssetIds={usedAssetIds}
             libraryToken={mediaLibraryToken}
             selectedAssetId={selectedAsset}
             disabled={busy}
+            showUnusedPhotos
             deletingMessage={
               deletionFinishing
                 ? "Finishing deletion of the last photo…"
@@ -536,207 +346,64 @@ export function MediaManager({
             }
             onSelect={selectAsset}
           />
-          <div className="media-asset-actions">
-            <button
-              className="copy-button"
-              type="button"
-              disabled={busy || selectedAsset === "" || selectedInUse}
-              title={
-                selectedInUse
-                  ? "This photo is on the page. Put a different photo in its place first."
-                  : undefined
-              }
-              onClick={() => void deleteSelected()}
-            >
-              Delete selected photo
-            </button>
-            {selectedInUse ? (
-              <span className="media-asset-hint">
-                The selected photo is on the page, so it cannot be deleted.
-              </span>
-            ) : null}
-          </div>
-          <h3 className="media-places-heading">Where photos appear</h3>
-          <p className="media-places-intro">
-            The page has two photo places. Select a photo above, then place it.
-          </p>
-          <div className="media-places">
-            {renderedMediaOccurrenceIds.map((id) => {
-              const occurrence = occurrences.find(
-                (candidate) => candidate.occurrenceId === id,
-              );
-              const asset =
-                occurrence === undefined
-                  ? undefined
-                  : assets.find(
-                      (candidate) => candidate.assetId === occurrence.assetId,
-                    );
-              const place = placeFor(id);
-              return (
-                <article className="media-place" key={id}>
-                  <h4>{place.name}</h4>
-                  <p>{place.detail}</p>
-                  {occurrence !== undefined &&
-                  asset !== undefined &&
-                  mediaAccessToken !== undefined ? (
-                    <MediaOccurrence
-                      className="media-manager-preview"
-                      occurrence={{
-                        occurrenceId: requireRenderedMediaOccurrenceId(
-                          createMediaOccurrenceId(occurrence.occurrenceId),
-                        ),
-                        revision: occurrence.revision,
-                        asset: {
-                          assetId: asset.assetId,
-                          width: asset.width,
-                          height: asset.height,
-                          contentType: asset.contentType,
-                        },
-                        crop: occurrence.crop,
-                      }}
-                      accessToken={mediaAccessToken}
-                    />
-                  ) : (
-                    <p className="media-place-empty">No photo here yet.</p>
+          {selectedPhoto === undefined ? null : (
+            <article className="media-photo-detail">
+              {mediaLibraryToken === undefined ? (
+                <span
+                  className="media-photo-detail-frame"
+                  aria-hidden="true"
+                />
+              ) : (
+                <img
+                  alt=""
+                  className="media-photo-detail-frame"
+                  decoding="async"
+                  src={mediaThumbnailUrl(
+                    selectedPhoto.assetId,
+                    mediaLibraryToken,
                   )}
+                />
+              )}
+              <div className="media-photo-detail-body">
+                <h3>{selectedPhoto.fileName}</h3>
+                <p className="media-photo-detail-meta">
+                  {selectedPhoto.width}×{selectedPhoto.height} ·{" "}
+                  {photoSizeLabel(selectedPhoto.byteLength)}
+                </p>
+                {selectedUse.state === "named" ? (
+                  <>
+                    <p className="media-photo-uses">Used on:</p>
+                    <ul className="media-photo-uses">
+                      {selectedUse.lines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="media-photo-uses">
+                    {photoUsageBadges(selectedUse)[0]}
+                  </p>
+                )}
+                <div className="media-asset-actions">
                   <button
-                    className="button button-primary"
+                    className="dash-button dash-button-destructive"
                     type="button"
-                    disabled={
-                      busy ||
-                      !occurrenceMutationsEnabled ||
-                      selectedAsset === "" ||
-                      !assets.some(
-                        (candidate) => candidate.assetId === selectedAsset,
-                      )
-                    }
-                    onClick={() => void usePhotoInPlace(id)}
+                    disabled={busy}
+                    onClick={() => void deleteSelected()}
                   >
-                    Use the selected photo here
+                    Delete selected photo
                   </button>
-                  {/* The picker is the one place an owner can upload a photo
-                   * and put it here in the same step. */}
-                  <button
-                    className="copy-button media-place-picker"
-                    type="button"
-                    disabled={busy || !occurrenceMutationsEnabled}
-                    onClick={() => setPickerPlaceId(id)}
-                  >
-                    Choose or upload a photo…
-                  </button>
-                  {occurrence === undefined ? null : (
-                    <details
-                      className="media-crop-editor"
-                      onToggle={(event) => {
-                        if (event.currentTarget.open) selectPlace(id);
-                      }}
-                    >
-                      <summary>Adjust crop</summary>
-                      <p>
-                        Values from 0 to 1 select the part of the photo that
-                        shows. The original file never changes.
-                      </p>
-                      <div className="media-crop-fields">
-                        {(["x", "y", "width", "height"] as const).map(
-                          (field) => (
-                            <label key={field}>
-                              {field}
-                              <input
-                                type="number"
-                                disabled={busy || occurrenceId !== id}
-                                min={
-                                  field === "width" || field === "height"
-                                    ? 0.01
-                                    : 0
-                                }
-                                max={1}
-                                step={0.01}
-                                value={occurrenceId === id ? crop[field] : ""}
-                                onChange={(event) => {
-                                  cropAttempt.current = null;
-                                  const currentRevision =
-                                    occurrences.find(
-                                      (candidate) =>
-                                        candidate.occurrenceId ===
-                                        occurrenceId,
-                                    )?.revision ?? 0;
-                                  cropBaseRevision.current =
-                                    cropBaseRevisionForEdit(
-                                      cropBaseRevision.current,
-                                      currentRevision,
-                                    );
-                                  setCrop((current) => ({
-                                    ...current,
-                                    [field]: Number(event.target.value),
-                                  }));
-                                }}
-                              />
-                            </label>
-                          ),
-                        )}
-                      </div>
-                      <button
-                        className="copy-button"
-                        type="button"
-                        disabled={
-                          busy ||
-                          occurrenceId !== id ||
-                          !occurrenceMutationsEnabled
-                        }
-                        onClick={() => void cropSelected()}
-                      >
-                        Save crop
-                      </button>
-                    </details>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-          {previewUrl === undefined ? null : (
-            <p>
-              <a
-                href={`${previewUrl}&accessToken=${encodeURIComponent(
-                  mediaAccessToken ?? "",
-                )}`}
-              >
-                See the draft site with these photos ↗
-              </a>
-            </p>
+                </div>
+              </div>
+            </article>
           )}
         </>
       ) : (
-        <p className="media-empty">
-          No photos yet. Upload one above and it appears here.
-        </p>
+        <DashboardEmptyState title="No photos yet">
+          Upload a photo above and it appears here.
+        </DashboardEmptyState>
       )}
-      {contentStale ? (
-        <p>
-          This draft is based on an older version of the site, so photos
-          cannot be placed or cropped right now. Start a fresh draft first;
-          uploading and deleting photos still works.
-        </p>
-      ) : null}
       <p role="status" aria-live="polite">{message}</p>
-      <MediaPicker
-        open={pickerPlaceId !== null}
-        // The picker keeps its own token and refreshes a stale one itself, so
-        // it starts from the token this page was rendered with.
-        csrfToken={csrfToken}
-        workspaceId={workspaceId}
-        title={
-          pickerPlaceId === null
-            ? undefined
-            : `Choose or upload a photo for “${placeFor(pickerPlaceId).name}”`
-        }
-        confirmLabel="Use this photo here"
-        onChoose={(photo) => {
-          if (pickerPlaceId === null) return;
-          selectAsset(photo.assetId);
-          void usePhotoInPlace(pickerPlaceId, photo.assetId);
-        }}
-        onClose={() => setPickerPlaceId(null)}
-      />
     </section>
   );
 }

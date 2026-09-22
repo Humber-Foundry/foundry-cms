@@ -5,7 +5,8 @@ import {
   chosenSiteImage,
   mediaThumbnailUrl,
   photoSizeLabel,
-  photoUsageNames,
+  photoUsage,
+  photoUsageBadges,
 } from "./media-gallery-item";
 
 describe("photo size label", () => {
@@ -37,33 +38,36 @@ describe("photo size label", () => {
 });
 
 describe("photo usage", () => {
-  const occurrences = [
-    { occurrenceId: "occurrence_home_hero", revision: 1, assetId: "asset_a", crop: null },
-    { occurrenceId: "occurrence_home_detail", revision: 1, assetId: "asset_b", crop: null },
-    { occurrenceId: "occurrence_home_hero", revision: 2, assetId: "asset_b", crop: null },
-  ];
-  const placeName = (id: string) =>
-    id === "occurrence_home_hero" ? "Top of the page" : "Further down the page";
+  const usage = new Map([
+    ["asset_used", ["About — Top of the page", "Home — Full-width image"]],
+  ]);
 
-  it("names every place a photo is used", () => {
-    expect(photoUsageNames(occurrences, "asset_b", placeName)).toEqual([
-      "Further down the page",
-      "Top of the page",
+  it("reads a line for every place the photo is used", () => {
+    const used = photoUsage("asset_used", usage, new Set(["asset_used"]));
+
+    expect(used.state).toBe("named");
+    expect(photoUsageBadges(used)).toEqual([
+      "Used on: About — Top of the page",
+      "Used on: Home — Full-width image",
     ]);
   });
 
-  it("returns no names for a photo that is not on the page", () => {
-    expect(photoUsageNames(occurrences, "asset_unused", placeName)).toEqual([]);
+  it("says the site uses a photo even when no line names the place", () => {
+    const used = photoUsage("asset_nested", usage, new Set(["asset_nested"]));
+
+    expect(used.state).toBe("unnamed");
+    expect(photoUsageBadges(used)).toEqual(["Used on your site"]);
   });
 
-  it("never repeats a place a photo fills twice", () => {
-    expect(
-      photoUsageNames(
-        [occurrences[0], occurrences[0]],
-        "asset_a",
-        placeName,
-      ),
-    ).toEqual(["Top of the page"]);
+  it("says a photo nothing uses is not used yet", () => {
+    const used = photoUsage("asset_spare", usage, new Set(["asset_used"]));
+
+    expect(used.state).toBe("unused");
+    expect(photoUsageBadges(used)).toEqual(["Not used yet"]);
+  });
+
+  it("treats a photo as unused when the screen was given no usage at all", () => {
+    expect(photoUsage("asset_spare").state).toBe("unused");
   });
 });
 
