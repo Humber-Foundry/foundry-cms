@@ -40,6 +40,19 @@ export function photoUsageNames(
 }
 
 /**
+ * One line telling the owner where a photo is used: the page it is on and the
+ * place on that page, such as "About — Top of the page". The Photos page
+ * shows "Used on: " in front of it.
+ */
+export function photoUsageLabel(pageTitle: string, placeName: string): string {
+  const page = pageTitle.trim();
+  const place = placeName.trim();
+  if (page === "") return place;
+  if (place === "") return page;
+  return `${page} — ${place}`;
+}
+
+/**
  * The small copy of a photo, for a gallery tile. It is unlocked by the
  * library capability, which names no asset, because the gallery shows every
  * photo in the library.

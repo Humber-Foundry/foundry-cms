@@ -6,6 +6,8 @@ import {
   siteDefinitionMediaAssetIds,
 } from "@humber-foundry/site-definition";
 
+import { photoUsageLabel } from "@/components/media-gallery-item";
+import { placeNameFor } from "@/components/media-places";
 import { installedPageComponentRegistry } from "@/foundry/page-components";
 
 /**
@@ -81,4 +83,111 @@ export function siteUsedAssetIds(
     for (const id of siteDefinitionMediaAssetIds(definition)) ids.add(id);
   }
   return ids;
+}
+
+/**
+ * Where each photo is used, as lines the owner reads: "About — Top of the
+ * page". Photos shows them under the photo, after the words "Used on:".
+ *
+ * Every page contributes, not only the home page, so a photo placed on any
+ * page names that page here. See ADR-0026 and ADR-0043.
+ */
+export type SitePhotoUsage = ReadonlyMap<string, ReadonlyArray<string>>;
+
+function addUse(
+  into: Map<string, Set<string>>,
+  assetId: string,
+  line: string,
+): void {
+  const lines = into.get(assetId) ?? new Set<string>();
+  lines.add(line);
+  into.set(assetId, lines);
+}
+
+/** Every gallery asset id an arbitrary value holds, however deeply nested. */
+function collectAssetIds(value: unknown, into: Set<string>): void {
+  if (typeof value === "string") {
+    const assetId = mediaAssetIdFromPublishedPath(value);
+    if (assetId !== null) into.add(assetId);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectAssetIds(item, into);
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) collectAssetIds(item, into);
+  }
+}
+
+function collectPageUses(
+  definition: SiteDefinition,
+  into: Map<string, Set<string>>,
+): void {
+  for (const page of definition.pages) {
+    // A photo placed in one of the page's two photo slots.
+    for (const occurrence of page.media ?? []) {
+      addUse(
+        into,
+        occurrence.asset.assetId,
+        photoUsageLabel(page.title, placeNameFor(occurrence.occurrenceId)),
+      );
+    }
+    // A photo chosen for a section's image field. The place is the section's
+    // own name, because that is what the owner sees on the page.
+    for (const section of page.sections) {
+      if (section.type !== "registered") continue;
+      const registration =
+        installedPageComponentRegistry.components[section.component];
+      if (registration === undefined) continue;
+      const imageFields = Object.entries(registration.fields).filter(
+        ([, field]) => field.control === "image",
+      );
+      for (const [key, field] of imageFields) {
+        const value = (section.props as Record<string, unknown>)[key];
+        if (typeof value !== "string") continue;
+        const assetId = mediaAssetIdFromPublishedPath(value);
+        if (assetId === null) continue;
+        // One image field per section needs no field name; more than one
+        // does, so the owner can tell which photo is which.
+        const placeName =
+          imageFields.length > 1
+            ? `${registration.label}: ${field.label}`
+            : registration.label;
+        addUse(into, assetId, photoUsageLabel(page.title, placeName));
+      }
+    }
+  }
+}
+
+function collectPostUses(
+  definition: SiteDefinition,
+  into: Map<string, Set<string>>,
+): void {
+  // Only a published post counts, the same rule `siteDefinitionMediaAssetIds`
+  // follows, so an unpublished post's photos are not called used. See ADR-0013.
+  for (const post of definition.blog?.posts ?? []) {
+    if (post.targetVisibility !== "public") continue;
+    const ids = new Set<string>();
+    collectAssetIds(post.mainImage, ids);
+    collectAssetIds(post.seo?.shareImage, ids);
+    collectAssetIds(post.body, ids);
+    for (const assetId of ids) {
+      addUse(into, assetId, photoUsageLabel(post.title, "Blog post"));
+    }
+  }
+}
+
+export function sitePhotoUsage(
+  ...definitions: ReadonlyArray<SiteDefinition | undefined>
+): SitePhotoUsage {
+  const uses = new Map<string, Set<string>>();
+  for (const definition of definitions) {
+    if (definition === undefined) continue;
+    collectPageUses(definition, uses);
+    collectPostUses(definition, uses);
+  }
+  return new Map(
+    [...uses].map(([assetId, lines]) => [assetId, [...lines].sort()]),
+  );
 }

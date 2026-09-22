@@ -44,3 +44,4 @@
 | [ADR-0037](ADR-0037-mcp-photo-tools.md) | An agent adds a photo by sending its bytes, and places it through the media library's own commands | Accepted | 2026-09-20 |
 | [ADR-0038](ADR-0038-blog-schedule-request-visibility-and-decline.md) | The dashboard shows an app's schedule request, and a person's decline is its own immutable record | Accepted | 2026-09-20 |
 | [ADR-0039](ADR-0039-mcp-campaign-lifecycle-tools.md) | An agent reads where a newsletter stands and can ask for a send time, and only a person ever sends one | Accepted | 2026-09-20 |
+| [ADR-0043](ADR-0043-photos-is-a-library-and-placement-belongs-to-the-editor.md) | Photos is a library, and a photo is placed where it is seen | Accepted | 2026-09-21 |

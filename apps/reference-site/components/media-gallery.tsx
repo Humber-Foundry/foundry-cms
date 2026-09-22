@@ -4,24 +4,18 @@ import { useEffect, useState } from "react";
 
 import type { MediaAsset } from "@humber-foundry/application";
 
-import {
-  mediaThumbnailUrl,
-  photoSizeLabel,
-  photoUsageNames,
-} from "./media-gallery-item";
-import type { MediaOccurrenceState } from "./media-manager-state";
-import { placeNameFor } from "./media-places";
+import { mediaThumbnailUrl, photoSizeLabel } from "./media-gallery-item";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
-import type { SiteImageTile } from "../src/site-used-photos";
+import type { SiteImageTile, SitePhotoUsage } from "../src/site-used-photos";
 
 /**
  * The photo library as a grid of tiles. The Photos page and the photo picker
  * both render this component, so a tile looks and behaves the same in each.
  *
- * Each tile carries the thumbnail, the file name, the size, and a badge when
- * the photo is on the page. This component does not decide what a selection
- * means. It reports the choice and shows which tile is chosen.
+ * Each tile carries the thumbnail, the file name, the size, and one line for
+ * every place the photo is used. This component does not decide what a
+ * selection means. It reports the choice and shows which tile is chosen.
  */
 
 /**
@@ -34,18 +28,23 @@ const galleryTileHeight = 132;
 
 export function MediaGallery({
   assets,
-  occurrences,
+  usage,
   siteImages = [],
   selectableSiteImages = false,
   usedAssetIds,
   libraryToken,
   selectedAssetId,
   disabled = false,
+  showUnusedPhotos = false,
   deletingMessage,
   onSelect,
 }: {
   assets: ReadonlyArray<MediaAsset>;
-  occurrences: ReadonlyArray<MediaOccurrenceState>;
+  /**
+   * Where each photo is used, one line per use, such as
+   * "About — Top of the page". A photo with no line is used nowhere.
+   */
+  usage?: SitePhotoUsage;
   /**
    * Photos the site displays that are not library assets — built-in and
    * external images. They render as read-only "on the page" tiles so the
@@ -68,6 +67,12 @@ export function MediaGallery({
   libraryToken: string | undefined;
   selectedAssetId: string;
   disabled?: boolean;
+  /**
+   * Whether a photo used nowhere says so. The Photos page says it, because
+   * the owner is looking after the library there; the picker does not, because
+   * a photo's uses do not matter while choosing one.
+   */
+  showUnusedPhotos?: boolean;
   /** What to say about a deletion that has not finished yet. */
   deletingMessage?: string;
   onSelect(assetId: string): void;
@@ -89,17 +94,17 @@ export function MediaGallery({
         <li className="media-gallery-deleting">{deletingMessage}</li>
       )}
       {assets.map((asset) => {
-        const usedIn = photoUsageNames(
-          occurrences,
-          asset.assetId,
-          placeNameFor,
-        );
-        const badge =
+        const usedIn = usage?.get(asset.assetId) ?? [];
+        // A photo can be used in a way no line names — inside a list of cards,
+        // for one — so the plain "used" badge is the honest answer there.
+        const badges =
           usedIn.length > 0
-            ? `On the page: ${usedIn.join(" and ")}`
+            ? usedIn.map((line) => `Used on: ${line}`)
             : usedAssetIds?.has(asset.assetId)
-              ? "On the page"
-              : null;
+              ? ["Used on your site"]
+              : showUnusedPhotos
+                ? ["Not used yet"]
+                : [];
         return (
           <li key={asset.assetId}>
             <button
@@ -137,9 +142,18 @@ export function MediaGallery({
               <span className="media-gallery-meta">
                 {asset.width}×{asset.height} · {photoSizeLabel(asset.byteLength)}
               </span>
-              {badge !== null ? (
-                <span className="media-gallery-badge">{badge}</span>
-              ) : null}
+              {badges.map((badge) => (
+                <span
+                  className={
+                    badge === "Not used yet"
+                      ? "media-gallery-badge media-gallery-badge-unused"
+                      : "media-gallery-badge"
+                  }
+                  key={badge}
+                >
+                  {badge}
+                </span>
+              ))}
             </button>
           </li>
         );
@@ -157,7 +171,7 @@ export function MediaGallery({
             </span>
             <span className="media-gallery-name">{image.name}</span>
             <span className="media-gallery-meta">Built-in site image</span>
-            <span className="media-gallery-badge">On the page</span>
+            <span className="media-gallery-badge">Used on your site</span>
           </>
         );
         return (

@@ -2,31 +2,53 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("media manager layout", () => {
-  it("locks selection controls while a mutation owns retry state", async () => {
+  it("locks the delete action while a mutation is in flight", async () => {
     const component = await readFile(
       new URL("./media-manager.tsx", import.meta.url),
       "utf8",
     );
 
-    // Placing a photo is blocked while a mutation owns retry state.
     expect(component).toMatch(
-      /disabled=\{\s*busy\s*\|\|[\s\S]*?\}\s*onClick=\{\(\) => void usePhotoInPlace/su,
-    );
-    // The per-place crop inputs lock the same way.
-    expect(component).toMatch(
-      /disabled=\{busy \|\| occurrenceId !== id\}/su,
+      /disabled=\{busy\}\s*onClick=\{\(\) => void deleteSelected\(\)\}/su,
     );
   });
 
-  it("constrains uncropped occurrence images to the dashboard width", async () => {
-    const [stylesheet, component] = await Promise.all([
-      readFile(new URL("../app/dash/dashboard.css", import.meta.url), "utf8"),
+  it("holds no photo placement and no crop editor", async () => {
+    // Photos is a library only. A photo is put on a page in the page editor,
+    // at the photo itself, and through MCP `foundry.media.place`. See
+    // ADR-0043 and issue #232.
+    const [component, stylesheet] = await Promise.all([
       readFile(new URL("./media-manager.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/dash/dashboard.css", import.meta.url), "utf8"),
     ]);
 
-    expect(component).toContain('className="media-manager-preview"');
+    for (const gone of [
+      "Where photos appear",
+      "Use the selected photo here",
+      "media-place",
+      "media-crop",
+      "MediaPicker",
+      "usePhotoInPlace",
+    ]) {
+      expect(component).not.toContain(gone);
+    }
+    expect(stylesheet).not.toContain(".media-place");
+    expect(stylesheet).not.toContain(".media-crop");
+  });
+
+  it("puts the selected photo's file facts and uses beside a larger copy", async () => {
+    const [component, stylesheet] = await Promise.all([
+      readFile(new URL("./media-manager.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/dash/dashboard.css", import.meta.url), "utf8"),
+    ]);
+
+    expect(component).toContain('className="media-photo-detail"');
+    // Square corners are for photos, so the larger copy carries no radius.
     expect(stylesheet).toMatch(
-      /\.media-manager-preview img\s*\{[^}]*max-width:\s*100%;[^}]*\}/su,
+      /\.media-photo-detail-frame\s*\{(?:(?!\})[\s\S])*object-fit:\s*cover;[\s\S]*?\}/su,
+    );
+    expect(stylesheet).not.toMatch(
+      /\.media-photo-detail-frame\s*\{(?:(?!\})[\s\S])*border-radius/su,
     );
   });
 });

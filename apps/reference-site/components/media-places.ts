@@ -1,16 +1,23 @@
-/** Where a photo can appear on the page, in the owner's words. */
+/** Where a photo can appear on a page, in the owner's words. */
 export type MediaPlace = Readonly<{ name: string; detail: string }>;
 
-const places: Readonly<Record<string, MediaPlace>> = {
-  occurrence_home_hero: {
+/**
+ * The two photo slots every page has. The slot is the last part of the
+ * occurrence id, so any page's ids read here, not only the home page's two.
+ * See ADR-0026.
+ */
+const slots: Readonly<Record<string, MediaPlace>> = {
+  hero: {
     name: "Top of the page",
     detail: "The large photo visitors see first.",
   },
-  occurrence_home_detail: {
+  detail: {
     name: "Further down the page",
     detail: "The smaller photo beside the text.",
   },
 };
+
+const pageMediaOccurrencePattern = /^occurrence_.+_(hero|detail)$/u;
 
 /**
  * The place with this id, or a stand-in built from the id itself. Occurrence
@@ -18,7 +25,13 @@ const places: Readonly<Record<string, MediaPlace>> = {
  * possible; showing the raw id beats showing nothing.
  */
 export function placeFor(occurrenceId: string): MediaPlace {
-  return places[occurrenceId] ?? { name: occurrenceId, detail: "" };
+  const slot = pageMediaOccurrencePattern.exec(occurrenceId)?.[1];
+  return (
+    (slot === undefined ? undefined : slots[slot]) ?? {
+      name: occurrenceId,
+      detail: "",
+    }
+  );
 }
 
 /** The name of the place with this id. */
