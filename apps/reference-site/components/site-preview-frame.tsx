@@ -1,0 +1,72 @@
+"use client";
+
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+/**
+ * A small picture of the site, drawn from the site itself.
+ *
+ * The page inside is laid out at a desktop width and then shrunk to whatever
+ * room the card has, so the picture shows the site the way a reader on a
+ * computer sees it rather than a squeezed phone layout. `zoom` shrinks the
+ * laid-out box as well as the paint, so the frame's own height follows.
+ *
+ * `/dash/design` scales its large live preview the same way. That one fills a
+ * column beside the controls and is scrolled; this one is a fixed picture in
+ * a card, cropped at the bottom by its frame.
+ *
+ * The picture is not a second copy of the site to read or operate. It is
+ * hidden from assistive technology and takes no keyboard focus; the card's
+ * own address link opens the real site.
+ */
+export function SitePreviewFrame({
+  layoutWidth,
+  children,
+}: {
+  /** The width the site is laid out at before it is shrunk, in pixels. */
+  layoutWidth: number;
+  /** The rendered site. Built on the server and passed in. */
+  children: ReactNode;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  // The width the frame usually gets, in pixels: a phone screen less the
+  // dashboard's own margins, which is also close to the picture column of
+  // the site card on a computer. It only sets the first paint, so the
+  // picture is already about the right size before the real width is
+  // measured; the measurement then corrects it.
+  const [scale, setScale] = useState(() => 340 / layoutWidth);
+
+  useEffect(() => {
+    const element = frame.current;
+    if (element === null) return;
+    const measure = () => {
+      const width = element.getBoundingClientRect().width;
+      // Never larger than life: a frame wider than the layout would blow
+      // the page up rather than show it at its own size.
+      if (width > 0) setScale(Math.min(1, width / layoutWidth));
+    };
+    measure();
+    // A browser without ResizeObserver still gets the first measurement.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [layoutWidth]);
+
+  return (
+    <div className="dash-site-preview" ref={frame}>
+      <div
+        className="dash-site-preview-page"
+        style={
+          {
+            "--dash-preview-scale": scale,
+            "--dash-preview-width": `${layoutWidth}px`,
+          } as CSSProperties
+        }
+        aria-hidden="true"
+        inert
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
