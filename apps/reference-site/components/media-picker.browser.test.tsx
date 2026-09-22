@@ -147,7 +147,7 @@ describe("photo picker browser acceptance", () => {
     expect(text).toContain("harbour.jpg");
     expect(text).toContain("1600×900");
     expect(text).toContain("2.3 MB");
-    expect(text).toContain("On the page: Top of the page");
+    expect(text).toContain("Used on your site");
   });
 
   it("hands the caller the photo it picked", async () => {

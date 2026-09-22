@@ -214,21 +214,52 @@ export function senderDetailProblems(
 }
 
 /**
+ * The values to store when the Owner saves, given what he typed and what is
+ * stored now.
+ *
+ * A field left empty means "keep what I already have". Keeping means the
+ * stored value where there is one, so a save that changes one address cannot
+ * erase a value saved earlier. A field that was never stored stays empty here,
+ * which is what leaves the environment variable of the same name in use.
+ */
+export function senderDetailsAfterEdit(
+  typed: SiteSenderDetails,
+  stored: SiteSenderDetails | null,
+): SiteSenderDetails {
+  return senderDetailsBy((field) => {
+    const value = typed[field].trim();
+    return value === "" ? (stored?.[field].trim() ?? "") : value;
+  });
+}
+
+/**
  * One plain sentence about the sender details, for the Email tab.
  *
  * It names what is missing rather than reporting a state, because "not
- * configured" tells an owner nothing he can act on. It is built from the same
- * problems a save refuses on, so the screen and the save always agree.
+ * configured" tells an owner nothing he can act on. The named problems are the
+ * same ones a save refuses on, so the screen and the save always agree.
+ *
+ * `sendGateOpen` is what the campaign send itself answers. It covers two
+ * settings the Owner does not edit here — which sender the email comes from,
+ * and the footer's version mark — so this never says the details are set while
+ * a send would still be refused.
  */
 export function senderDetailsStateSentence(
   problems: ReadonlyArray<SenderDetailProblem>,
+  sendGateOpen: boolean,
 ): string {
-  if (problems.length === 0) {
-    return "Your sender details are set. Every email carries them at the bottom.";
+  if (problems.length > 0) {
+    return `Email cannot be sent yet. ${problems
+      .map((problem) => problem.message)
+      .join(" ")}`;
   }
-  return `Email cannot be sent yet. ${problems
-    .map((problem) => problem.message)
-    .join(" ")}`;
+  if (!sendGateOpen) {
+    return (
+      "Email cannot be sent yet. Everything you can set here is set, so ask " +
+      "whoever set this site up to finish the email settings."
+    );
+  }
+  return "Your sender details are set. Every email carries them at the bottom.";
 }
 
 /**

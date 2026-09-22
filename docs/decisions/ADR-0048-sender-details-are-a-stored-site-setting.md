@@ -88,10 +88,16 @@ refuses a save, whole, when any of these is true:
 - either address is not an absolute `https://` address with no user name or
   password in it.
 
+A field left empty means "keep what I already have". `senderDetailsAfterEdit`
+turns that into the value stored before, where there is one, and leaves the
+field empty where there is not, so the environment variable stays in use.
+Without this a save that changes one address would erase every value saved
+earlier.
+
 Judging the effective values is what makes "leave a field empty to keep what
-the installation already uses" true. Judging the typed values alone would
-refuse a save that changes one address while the name still comes from the
-installation's own setting.
+you already have" true. Judging the typed values alone would refuse a save
+that changes one address while the name still comes from the installation's
+own setting.
 
 The refusal names the value that is wrong, in the owner's own words. A
 half-valid set is never written, because a footer built from one is sent to
@@ -99,7 +105,10 @@ every reader.
 
 Settings' Email tab writes its state line from the same problems
 (`senderDetailsStateSentence`), so what the screen says is missing and what a
-save refuses on can never disagree.
+save refuses on can never disagree. The state line also reads the send's own
+answer (`CampaignSenderReadiness`), which covers the sending address and the
+footer's version mark. Those two are not edited here, so without that check
+the screen could say the details are set while a campaign was still refused.
 
 The sending address (`senderIdentityId`) may be left empty in the form. Empty
 means "keep what the installation already uses", which is the same rule as

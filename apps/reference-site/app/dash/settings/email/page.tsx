@@ -36,6 +36,12 @@ export default async function DashboardSettingsEmailPage() {
   const senderDetails = await loadSenderDetailsForEditing();
   const tab = settingsTab.email;
   const health = ownerNotifications.health;
+  // What the send itself answers. It covers the two settings the Owner does
+  // not edit here, so the state line below never says the details are set
+  // while a campaign would still be refused.
+  const sendGateOpen = campaignContext.senderDetails.state !== "not_configured";
+  const senderDetailsReady =
+    senderDetails.problems.length === 0 && sendGateOpen;
 
   return (
     <main className="dashboard-main" id="main">
@@ -58,13 +64,13 @@ export default async function DashboardSettingsEmailPage() {
         </p>
         <p
           className={
-            senderDetails.problems.length === 0
+            senderDetailsReady
               ? "connection-status connection-status-connected"
               : "connection-status connection-status-missing"
           }
-          role={senderDetails.problems.length === 0 ? undefined : "alert"}
+          role={senderDetailsReady ? undefined : "alert"}
         >
-          {senderDetailsStateSentence(senderDetails.problems)}
+          {senderDetailsStateSentence(senderDetails.problems, sendGateOpen)}
         </p>
         <SenderDetailsForm
           values={senderDetails.values}

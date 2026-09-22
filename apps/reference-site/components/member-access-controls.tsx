@@ -500,6 +500,12 @@ export function MemberAccessPanel({
           );
         })}
       </div>
+      {/* One status line for every access change on this screen, between the
+          table and the invite form, so the result of a row action and the
+          result of an invite are both next to the control that caused it. */}
+      <p role="status" aria-live="polite">
+        {mutation.message}
+      </p>
       <h3 className="access-invite-heading">Invite someone</h3>
       <form onSubmit={invite} className="access-invite-form">
         <label>
@@ -521,9 +527,6 @@ export function MemberAccessPanel({
           Invite user
         </button>
       </form>
-      <p role="status" aria-live="polite">
-        {mutation.message}
-      </p>
       <MemberActionConfirmDialog
         pendingAction={pendingAction}
         confirmation={confirmation}

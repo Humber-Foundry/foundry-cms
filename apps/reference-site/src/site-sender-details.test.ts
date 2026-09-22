@@ -6,6 +6,7 @@ import {
   environmentWithSenderDetails,
   readSenderDetails,
   senderDetailProblems,
+  senderDetailsAfterEdit,
   senderDetailsFromEnvironment,
   senderDetailsStateSentence,
   type SiteSenderDetails,
@@ -135,12 +136,48 @@ describe("sender details", () => {
   });
 
   it("writes one plain sentence that names what is missing", () => {
-    expect(senderDetailsStateSentence([])).toBe(
+    expect(senderDetailsStateSentence([], true)).toBe(
       "Your sender details are set. Every email carries them at the bottom.",
     );
     expect(
-      senderDetailsStateSentence(senderDetailProblems(stored())),
+      senderDetailsStateSentence(senderDetailProblems(stored()), true),
     ).toContain("Email cannot be sent yet. Add the name");
+  });
+
+  it("never says the details are set while a send would still be refused", () => {
+    // The sending address and the footer's version mark are not edited on
+    // this screen, so the send's own answer decides too.
+    expect(senderDetailsStateSentence([], false)).toContain(
+      "Email cannot be sent yet.",
+    );
+  });
+
+  it("keeps a value saved earlier when its field is left empty", () => {
+    const savedBefore = stored({
+      legalName: "Saved Name",
+      senderIdentityId: "sender_saved",
+    });
+    const typed = stored({ unsubscribeUrl: "https://saved.example/stop" });
+
+    expect(senderDetailsAfterEdit(typed, savedBefore)).toEqual({
+      legalName: "Saved Name",
+      postalAddress: "",
+      contactUrl: "",
+      unsubscribeUrl: "https://saved.example/stop",
+      senderIdentityId: "sender_saved",
+    });
+  });
+
+  it("leaves a field that was never saved empty, so the installation still decides", () => {
+    expect(
+      senderDetailsAfterEdit(stored({ legalName: "Saved Name" }), null),
+    ).toEqual({
+      legalName: "Saved Name",
+      postalAddress: "",
+      contactUrl: "",
+      unsubscribeUrl: "",
+      senderIdentityId: "",
+    });
   });
 
   it("accepts a full set", () => {

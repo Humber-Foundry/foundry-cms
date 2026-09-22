@@ -8,6 +8,7 @@ import {
 import {
   effectiveSenderDetails,
   senderDetailProblems,
+  senderDetailsAfterEdit,
   type SenderDetailProblem,
   type SiteSenderDetails,
 } from "./site-sender-details";
@@ -81,13 +82,20 @@ export async function saveSenderDetails({
   savedAt: string;
 }): Promise<SenderDetailsSaveRefusal> {
   const environment = await loadHumanAccessEnvironment();
+  const siteId = installedSite.application.siteId;
+  // A field left empty keeps what the Owner already has: the value saved
+  // before where there is one, and the environment variable of the same name
+  // where there is not. Writing the typed values straight through would erase
+  // a value saved earlier whenever he edits only one field.
+  const stored = await readStoredSenderDetails(environment, siteId);
+  const toStore = senderDetailsAfterEdit(details, stored);
   const problems = senderDetailProblems(
-    effectiveSenderDetails(environment, details),
+    effectiveSenderDetails(environment, toStore),
   );
   if (problems.length > 0) return problems;
   await siteSenderDetailsStore(environment).save({
-    siteId: installedSite.application.siteId,
-    details,
+    siteId,
+    details: toStore,
     savedBy,
     savedAt,
   });

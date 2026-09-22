@@ -4,8 +4,6 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
-import type { ContentRevision } from "@humber-foundry/application";
-
 import { MediaManager } from "./media-manager";
 
 const inUsePhoto = {
@@ -33,21 +31,21 @@ const sparePhoto = {
   height: 800,
 };
 
-const heroOccurrence = {
-  occurrenceId: "occurrence_home_hero",
-  revision: 1,
-  assetId: "asset_harbour",
-  crop: null,
-};
+/**
+ * The harbour photo is on two pages; the spare photo is on none. A built-in
+ * site photo has no asset id, so its lines are keyed by its own address.
+ */
+const usage = new Map([
+  [
+    "asset_harbour",
+    ["About — Top of the page", "Foundry Reference — Full-width image"],
+  ],
+  ["/foundry-gathering.svg", ["About — Full-width image"]],
+]);
 
-const contentRevision = {
-  workspaceId: "workspace_owner",
-  revision: 4,
-  definition: { pages: [{ slug: "", media: [] }] },
-  inputs: {},
-  createdAt: "2026-08-01T00:00:00.000Z",
-  createdBy: "membership-owner",
-} as unknown as ContentRevision;
+/** The library's own tiles, apart from the read-only built-in site photos. */
+const libraryTiles =
+  ".media-gallery .media-gallery-tile:not(.media-gallery-tile-site)";
 
 async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   const deadline = Date.now() + 5_000;
@@ -74,7 +72,7 @@ function galleryTileImages(count: number): Promise<string[]> {
     }, 5_000);
     const observer = new MutationObserver(() => {
       const images = document.querySelectorAll<HTMLImageElement>(
-        ".media-gallery .media-gallery-tile img",
+        ".media-gallery .media-gallery-tile:not(.media-gallery-tile-site) img",
       );
       if (images.length < count) return;
       clearTimeout(deadline);
@@ -111,8 +109,11 @@ describe("photo library browser acceptance", () => {
           csrfToken: "csrf",
           workspaceId: "workspace_owner",
           initialAssets: [],
-          initialOccurrences: [],
-          contentRevision,
+          siteImages: [
+            { src: "/foundry-gathering.svg", name: "foundry-gathering.svg" },
+          ],
+          usage,
+          usedAssetIds: new Set(["asset_harbour"]),
         }),
       );
     });
@@ -122,7 +123,7 @@ describe("photo library browser acceptance", () => {
   function grantWith(assets: ReadonlyArray<unknown>) {
     return {
       assets,
-      occurrences: [heroOccurrence],
+      occurrences: [],
       accessToken: "signed-media-access",
       accessTokenExpiresAt: Math.floor(Date.now() / 1_000) + 600,
       libraryToken: "signed-media-library",
@@ -144,35 +145,74 @@ describe("photo library browser acceptance", () => {
       "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
       "/api/foundry-cms/media?assetId=asset_spare&libraryToken=signed-media-library&variant=thumbnail",
     ]);
-    const tiles = host.querySelectorAll(
-      ".media-gallery .media-gallery-tile",
-    );
-    expect(tiles[0].textContent).toContain("On the page: Top of the page");
-    expect(tiles[1].textContent).not.toContain("On the page");
+    const tiles = host.querySelectorAll(libraryTiles);
     expect(tiles[1].textContent).toContain("4 KB");
   });
 
-  it("guards deletion of a photo that is on the page", async () => {
+  it("names every page and place a photo is used on, across pages", async () => {
+    const host = renderLibrary(() =>
+      Response.json(grantWith([inUsePhoto, sparePhoto])),
+    );
+    const tiles = await waitFor(() => {
+      const found = host.querySelectorAll<HTMLElement>(libraryTiles);
+      return found.length === 2 ? found : undefined;
+    });
+
+    expect(tiles[0].textContent).toContain("Used on: About — Top of the page");
+    expect(tiles[0].textContent).toContain(
+      "Used on: Foundry Reference — Full-width image",
+    );
+    expect(tiles[1].textContent).toContain("Not used yet");
+    // A built-in site photo names its page and place too.
+    const siteTile = host.querySelector(".media-gallery-tile-site");
+    expect(siteTile?.textContent).toContain("Used on: About — Full-width image");
+  });
+
+  it("holds no way to place a photo — that belongs to the page editor", async () => {
     const host = renderLibrary(() =>
       Response.json(grantWith([inUsePhoto, sparePhoto])),
     );
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
+      return found.length === 2 ? found : undefined;
+    });
+
+    expect(host.textContent).not.toContain("Where photos appear");
+    expect(host.textContent).not.toContain("Use the selected photo here");
+    expect(host.textContent).not.toContain("Choose or upload a photo");
+    expect(host.querySelector("dialog.media-picker")).toBeNull();
+  });
+
+  it("refuses to delete a photo that is in use and names every use", async () => {
+    let deleted: unknown;
+    const host = renderLibrary((init) => {
+      if (typeof init.body === "string") {
+        const command = JSON.parse(init.body) as { operation: string };
+        if (command.operation === "delete") {
+          deleted = command;
+          return new Response(null, { status: 204 });
+        }
+      }
+      return Response.json(grantWith([inUsePhoto, sparePhoto]));
+    });
+    await waitFor(() => {
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
     await userEvent.click(page.getByRole("button", { name: "harbour.jpg" }));
-
-    const deleteButton = page.getByRole("button", {
-      name: "Delete selected photo",
-    });
-    await expect.element(deleteButton).toBeDisabled();
-    expect(host.textContent).toContain(
-      "The selected photo is on the page, so it cannot be deleted.",
+    await userEvent.click(
+      page.getByRole("button", { name: "Delete selected photo" }),
     );
+
+    expect(deleted).toBeUndefined();
+    expect(host.textContent).toContain("This photo cannot be deleted.");
+    expect(host.textContent).toContain("Change the photo in each place first.");
+    expect(host.textContent).toContain("About — Top of the page");
+    expect(host.textContent).toContain("Foundry Reference — Full-width image");
   });
 
-  it("deletes a photo that is not on the page", async () => {
+  it("deletes a photo that is used nowhere", async () => {
     let deleted: unknown;
     let remaining = [inUsePhoto, sparePhoto];
     const host = renderLibrary((init) => {
@@ -187,7 +227,7 @@ describe("photo library browser acceptance", () => {
       return Response.json(grantWith(remaining));
     });
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 2 ? found : undefined;
     });
 
@@ -201,65 +241,9 @@ describe("photo library browser acceptance", () => {
       assetId: "asset_spare",
     });
     await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
+      const found = host.querySelectorAll(libraryTiles);
       return found.length === 1 ? found : undefined;
     });
     expect(host.textContent).toContain("Photo deleted.");
-  });
-
-  it("opens the shared picker to put a photo in one place", async () => {
-    const placed: unknown[] = [];
-    const host = renderLibrary((init) => {
-      if (typeof init.body === "string") {
-        const command = JSON.parse(init.body) as { operation: string };
-        if (command.operation === "replace") {
-          placed.push(command);
-          return Response.json(
-            {
-              occurrence: { ...heroOccurrence, revision: 2, assetId: "asset_spare" },
-              contentRevision: { ...contentRevision, revision: 5 },
-              previewUrl: "/__foundry/preview/workspace_owner/5?token=x",
-            },
-            { status: 201 },
-          );
-        }
-      }
-      return Response.json(grantWith([inUsePhoto, sparePhoto]));
-    });
-    await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery-tile");
-      return found.length === 2 ? found : undefined;
-    });
-
-    await userEvent.click(
-      page.getByRole("button", { name: "Choose or upload a photo…" }).first(),
-    );
-    const dialog = await waitFor(() => {
-      const element = host.querySelector<HTMLDialogElement>("dialog.media-picker");
-      return element?.open === true ? element : undefined;
-    });
-    expect(dialog.textContent).toContain(
-      "Choose or upload a photo for “Top of the page”",
-    );
-
-    await waitFor(() => {
-      const found = dialog.querySelectorAll(".media-gallery-tile");
-      return found.length === 2 ? found : undefined;
-    });
-    const spareTile = [...dialog.querySelectorAll<HTMLButtonElement>(
-      ".media-gallery-tile",
-    )].find((tile) => tile.textContent?.includes("spare.png"));
-    expect(spareTile).toBeDefined();
-    await userEvent.click(spareTile!);
-    await userEvent.click(
-      page.getByRole("button", { name: "Use this photo here" }),
-    );
-
-    await waitFor(() => (placed.length === 1 ? placed : undefined));
-    expect(placed[0]).toMatchObject({
-      operation: "replace",
-      occurrenceId: "occurrence_home_hero",
-      assetId: "asset_spare",
-    });
   });
 });
