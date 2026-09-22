@@ -308,6 +308,9 @@ const destinations = [
   ["Subscribers", "/dash/subscribers"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
+  ["Settings: Connected agents", "/dash/settings/agents"],
+  ["Settings: Email", "/dash/settings/email"],
+  ["Settings: Site", "/dash/settings/site"],
   ["Connect an agent", "/dash/settings/connect-agent"],
 ];
 

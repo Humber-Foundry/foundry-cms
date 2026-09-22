@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { mcpSupportedScopes } from "@humber-foundry/application";
 
 import { CopyAddressButton } from "@/components/copy-address-button";
+import { DashboardBackLink } from "@/components/dashboard-back-link";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import {
   loadMutationToken,
@@ -81,6 +82,13 @@ export default async function ConnectAgentPage() {
 
   return (
     <main className="dashboard-main" id="main">
+      {/* This screen is reached from Settings' Connected agents tab, so it
+          names that tab rather than Settings as a whole (#240). #227 adds the
+          rest of the dashboard's back links. */}
+      <DashboardBackLink
+        href="/dash/settings/agents"
+        label="Back to Connected agents"
+      />
       <div className="page-heading">
         <div>
           <h1>Connect an AI agent</h1>
