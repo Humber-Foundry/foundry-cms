@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
+import { DashboardPageHeader } from "@/components/dashboard-page-header";
 import { SettingsPageBody } from "@/components/settings-page-body";
 import {
   loadCampaignRequestContext,
@@ -47,12 +48,10 @@ export default async function DashboardSettingsPage() {
 
   return (
     <main className="dashboard-main" id="main">
-      <div className="page-heading">
-        <div>
-          <h1>Settings</h1>
-          <p>Who can sign in, which agents are connected, and site details.</p>
-        </div>
-      </div>
+      <DashboardPageHeader
+        title="Settings"
+        description="Who can sign in, which agents are connected, and site details."
+      />
 
       <SettingsPageBody
         members={members}
