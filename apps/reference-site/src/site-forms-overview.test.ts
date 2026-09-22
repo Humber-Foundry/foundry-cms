@@ -13,7 +13,8 @@ import { installedPublicForms } from "../foundry/public-forms";
 import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   formMessageCountSentence,
-  formNotPlacedNotice,
+  formPlacementAndCountSentence,
+  formRowDestination,
   siteFormsOverview,
 } from "./site-forms-overview";
 
@@ -76,15 +77,22 @@ describe("the forms on your site", () => {
   it("says plainly when a declared form is on no page", () => {
     const [row] = siteFormsOverview(emptySite, installedPublicForms);
     expect(row!.placements).toEqual([]);
-    expect(formNotPlacedNotice(row!)).toContain("on no page");
-    expect(formNotPlacedNotice(row!)).toContain(
-      "Add the contact form block to a page",
+    expect(formPlacementAndCountSentence(row!)).toBe(
+      "On no page, so nobody can send a message. No messages yet.",
     );
+    // The row still opens somewhere useful: the screen where a page is
+    // edited, so the owner can go and place the form.
+    expect(formRowDestination(row!)).toBe("/dash/pages");
   });
 
-  it("says nothing extra once the form is on a page", () => {
-    const [row] = siteFormsOverview(placedSite, installedPublicForms);
-    expect(formNotPlacedNotice(row!)).toBeNull();
+  it("names the page and its address once the form is on a page", () => {
+    const [row] = siteFormsOverview(placedSite, installedPublicForms, {
+      contact: 2,
+    });
+    expect(formPlacementAndCountSentence(row!)).toBe(
+      `Appears on ${homePage(placedSite).title} (/). 2 messages received.`,
+    );
+    expect(formRowDestination(row!)).toBe("/");
   });
 
   it("names each page once, however many blocks that page holds", () => {

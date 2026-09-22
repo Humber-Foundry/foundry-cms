@@ -86,14 +86,27 @@ export function siteFormsOverview(
 }
 
 /**
- * The sentence shown when a form is on no page, or `null` when it is placed.
- * A placed form is shown as a link to each page instead, so the owner can go
- * and look at it.
+ * The one line under a form's name: where a visitor finds it, and what it has
+ * brought in. A form on no page says so plainly, because that is the reason an
+ * inbox stays empty.
  */
-export function formNotPlacedNotice(row: SiteFormOverviewRow): string | null {
-  return row.placements.length === 0
-    ? "This form is on no page, so nobody can send a message. Add the contact form block to a page."
-    : null;
+export function formPlacementAndCountSentence(row: SiteFormOverviewRow): string {
+  const count = formMessageCountSentence(row);
+  if (row.placements.length === 0) {
+    return `On no page, so nobody can send a message. ${count}`;
+  }
+  const pages = row.placements
+    .map((placement) => `${placement.pageTitle} (${placement.pagePath})`)
+    .join(", ");
+  return `Appears on ${pages}. ${count}`;
+}
+
+/**
+ * Where a form's row goes when it is pressed: the page it appears on, or the
+ * Pages screen when it is on none, so the owner can go and place it.
+ */
+export function formRowDestination(row: SiteFormOverviewRow): string {
+  return row.placements[0]?.pagePath ?? "/dash/pages";
 }
 
 /** The sentence that says how many messages one form has brought in. */

@@ -1,6 +1,8 @@
+import { DashboardEmptyState } from "@/components/dashboard-empty-state";
+import { DashboardList, DashboardListRow } from "@/components/dashboard-list";
 import {
-  formMessageCountSentence,
-  formNotPlacedNotice,
+  formPlacementAndCountSentence,
+  formRowDestination,
   type SiteFormOverviewRow,
 } from "@/src/site-forms-overview";
 
@@ -10,7 +12,10 @@ import {
  * Each row answers the owner's three questions — what the form is called,
  * where a visitor finds it, and how many messages it has brought in. A form
  * that sits on no page says so, because that is the reason an inbox stays
- * empty. See ADR-0044.
+ * empty, and its row opens Pages so the owner can go and place it.
+ *
+ * It uses the shared dashboard list, so a form reads like every other thing
+ * the owner can open. See ADR-0044.
  */
 export function SiteFormsSummary({
   forms,
@@ -19,45 +24,22 @@ export function SiteFormsSummary({
 }) {
   if (forms.length === 0) {
     return (
-      <p className="empty-state">
-        Your site has no forms yet, so nobody can send you a message.
-      </p>
+      <DashboardEmptyState title="No forms yet">
+        Your site has no forms, so nobody can write to you. Add a contact form
+        block to a page.
+      </DashboardEmptyState>
     );
   }
   return (
-    <ul className="site-form-list">
-      {forms.map((form) => {
-        const notPlaced = formNotPlacedNotice(form);
-        return (
-          <li className="site-form-item" key={form.formId}>
-            <span className="site-form-name">{form.name}</span>
-            <span className="site-form-detail">
-              {notPlaced === null ? (
-                <>
-                  Appears on{" "}
-                  {form.placements.map((placement, index) => (
-                    <span key={placement.pagePath}>
-                      {index === 0 ? null : ", "}
-                      <a
-                        className="site-form-page"
-                        href={placement.pagePath}
-                      >
-                        {placement.pageTitle}
-                      </a>{" "}
-                      ({placement.pagePath})
-                    </span>
-                  ))}
-                  . {formMessageCountSentence(form)}
-                </>
-              ) : (
-                <>
-                  {notPlaced} {formMessageCountSentence(form)}
-                </>
-              )}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+    <DashboardList label="Forms on your site">
+      {forms.map((form) => (
+        <DashboardListRow
+          key={form.formId}
+          href={formRowDestination(form)}
+          title={form.name}
+          note={formPlacementAndCountSentence(form)}
+        />
+      ))}
+    </DashboardList>
   );
 }

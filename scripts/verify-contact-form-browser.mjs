@@ -186,21 +186,22 @@ async function verifyVisitorCanSendAMessage(page, origin, sends) {
 async function verifyMessagesListsTheForm(page, origin) {
   await page.goto(`${origin}/dash/forms`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Forms on your site" }).waitFor();
-  const row = page.locator(".site-form-item").first();
+  const row = page
+    .locator('ul[aria-label="Forms on your site"] .dash-row')
+    .first();
   await row.waitFor();
-  const name = (await row.locator(".site-form-name").textContent()) ?? "";
+  const name = (await row.locator(".dash-row-title").textContent()) ?? "";
   if (name.trim() !== "Contact form") {
     throw new Error(`contact_form_dashboard_name:${name}`);
   }
-  const detail = (await row.locator(".site-form-detail").textContent()) ?? "";
-  if (!detail.includes("message")) {
-    throw new Error(`contact_form_dashboard_no_count:${detail}`);
+  const note = (await row.locator(".dash-row-note").textContent()) ?? "";
+  if (!note.includes("message")) {
+    throw new Error(`contact_form_dashboard_no_count:${note}`);
   }
-  const placement = row.locator(".site-form-page").first();
-  if ((await placement.count()) !== 1) {
-    throw new Error("contact_form_dashboard_no_page_named");
+  if (!note.includes("Appears on")) {
+    throw new Error(`contact_form_dashboard_no_page_named:${note}`);
   }
-  if ((await placement.getAttribute("href")) !== "/") {
+  if ((await row.locator(".dash-row-link").getAttribute("href")) !== "/") {
     throw new Error("contact_form_dashboard_wrong_page_link");
   }
 }
