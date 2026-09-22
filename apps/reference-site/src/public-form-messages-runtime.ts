@@ -141,7 +141,7 @@ export async function loadPublicFormInbox(
 }
 
 /**
- * How many messages each form has brought in, by form id. Messages shows this
+ * How many messages each form has received, by form id. Messages shows this
  * next to each form the site declares. It reads counts only, never a message.
  */
 export async function loadFormMessageCounts(

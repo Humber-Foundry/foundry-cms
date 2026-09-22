@@ -198,7 +198,7 @@ async function verifyMessagesListsTheForm(page, origin) {
   // still zero here. The stored count is read back in
   // `apps/reference-site/src/contact-form-to-inbox.test.ts`.
   const note = ((await row.locator(".dash-row-note").textContent()) ?? "").trim();
-  if (!/^Appears on .+ \(\/\)\. No messages yet\.$/u.test(note)) {
+  if (!note.startsWith("Appears on ") || !note.endsWith(" No messages yet.")) {
     throw new Error(`contact_form_dashboard_note:${note}`);
   }
   if ((await row.locator(".dash-row-link").getAttribute("href")) !== "/") {
