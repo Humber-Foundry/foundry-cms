@@ -13,6 +13,7 @@ import {
   addUtcDays,
   analyticsCompositeKey,
   analyticsMetricDefinition,
+  metricMeasuredBy,
   type AnalyticsMetricDefinition,
   type AnalyticsMetricKey,
   analyticsSchemaVersion,
@@ -267,7 +268,9 @@ function assertValidMeasurement(
     throw new AnalyticsProjectionError(code, measurement.metricKey);
   };
 
-  if (definition.source !== source) refuse("source_does_not_own_metric");
+  if (!metricMeasuredBy(definition, source)) {
+    refuse("source_does_not_own_metric");
+  }
   if (!definition.subjectTypes.includes(measurement.subjectType)) {
     refuse("subject_type_not_declared");
   }
