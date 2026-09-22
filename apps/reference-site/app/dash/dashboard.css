@@ -2132,8 +2132,6 @@
   margin-bottom: 0;
   gap: 0.35rem;
   color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-  font-weight: 600;
   white-space: nowrap;
 }
 

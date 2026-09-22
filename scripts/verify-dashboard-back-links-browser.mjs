@@ -73,6 +73,19 @@ function stopServer(child) {
 }
 
 /**
+ * Every control is at least 44px high on a phone, the shared back link
+ * included wherever a screen restyles it, and Done.
+ */
+async function assertControlHeight(locator, name) {
+  const box = await locator.boundingBox();
+  if (box === null || box.height < 44) {
+    throw new Error(
+      `dashboard_back_links_control_too_short:${name}:${box?.height ?? "none"}`,
+    );
+  }
+}
+
+/**
  * Asserts the current screen shows a back link (`.dash-back-link`, the shared
  * component's own class) with the expected words, and that following it lands
  * on the parent address given.
@@ -86,14 +99,7 @@ async function checkBackLink(page, { screen, expectedText, expectedPath }) {
       `dashboard_back_links_wrong_words:${screen}:got "${text}", wanted it to include "${expectedText}"`,
     );
   }
-  // Every control is at least 44px high on a phone, the shared back link
-  // included, wherever a screen restyles it.
-  const box = await link.boundingBox();
-  if (box === null || box.height < 44) {
-    throw new Error(
-      `dashboard_back_links_too_short:${screen}:${box?.height ?? "none"}`,
-    );
-  }
+  await assertControlHeight(link, `${screen} back link`);
   await link.click();
   await page.waitForURL(
     (url) => url.pathname === expectedPath,
@@ -188,12 +194,7 @@ async function checkConnectAnAgent(page, origin) {
   // which is where Done sits on a phone. The badge is not part of the
   // product, so take it out of the way before clicking.
   await page.evaluate(() => document.querySelector("nextjs-portal")?.remove());
-  const doneBox = await done.boundingBox();
-  if (doneBox === null || doneBox.height < 44) {
-    throw new Error(
-      `dashboard_back_links_done_too_short:${doneBox?.height ?? "none"}`,
-    );
-  }
+  await assertControlHeight(done, "Connect an agent Done");
   await done.click();
   await page.waitForURL((url) => url.pathname === "/dash/settings/agents", {
     timeout: 10_000,
