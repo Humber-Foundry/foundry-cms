@@ -127,7 +127,14 @@ export function CampaignEmailPreview({
           ))}
         </div>
       </div>
-      <div className="email-preview-frame">
+      {/* On a narrow screen this box scrolls sideways, so it is a tab stop
+        * with a name: a keyboard can reach it and the arrow keys move it. */}
+      <div
+        className="email-preview-frame"
+        role="region"
+        aria-label="Email preview area"
+        tabIndex={0}
+      >
         <iframe
           ref={frame}
           title="The email as it will arrive"

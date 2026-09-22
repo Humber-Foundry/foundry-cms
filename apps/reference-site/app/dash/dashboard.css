@@ -1540,6 +1540,12 @@
   justify-content: safe center;
 }
 
+/* The box is a tab stop, so a keyboard shows where it is. */
+.email-preview-frame:focus-visible {
+  outline: 2px solid var(--dash-accent);
+  outline-offset: 2px;
+}
+
 .email-preview-page {
   flex: 0 0 auto;
   border: 1px solid var(--dash-line);
