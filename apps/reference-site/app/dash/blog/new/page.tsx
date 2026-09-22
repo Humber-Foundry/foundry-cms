@@ -54,7 +54,7 @@ export default async function NewBlogPostPage({
       />
       <DashboardPageHeader
         title="New post"
-        description="Write it here. It stays a private draft until you publish it."
+        description="Write your post here; it stays a private draft until you publish it."
       />
       <NewBlogPostScreen
         revision={dashboardWorkspace.contentRevision}

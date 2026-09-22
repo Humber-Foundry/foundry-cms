@@ -56,12 +56,11 @@ export async function loadBlogPostSummaries(
       postIds,
     );
     const pendingProposalsByPostId = new Map(
-      [...summaries.entries()]
-        .filter(([, summary]) => summary.pendingScheduleProposal !== null)
-        .map(([postId, summary]) => [
-          postId,
-          summary.pendingScheduleProposal!,
-        ]),
+      [...summaries.entries()].flatMap(([postId, summary]) =>
+        summary.pendingScheduleProposal === null
+          ? []
+          : [[postId, summary.pendingScheduleProposal] as const],
+      ),
     );
     return {
       summaries,

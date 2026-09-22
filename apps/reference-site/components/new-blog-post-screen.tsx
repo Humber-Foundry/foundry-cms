@@ -4,6 +4,7 @@ import type { ContentRevision } from "@humber-foundry/application";
 
 import { BlogCommandFeedback } from "./blog-command-feedback";
 import { blogListHref } from "./blog-links";
+import { revisionCommandBase } from "./blog-operations";
 import { BlogPostComposer } from "./blog-post-composer";
 import type { SiteImageTile } from "../src/site-used-photos";
 import { useBlogCommands } from "./use-blog-commands";
@@ -45,9 +46,7 @@ export function NewBlogPostScreen({
           void commands.sendRevisionCommand(
             {
               operation: "create_blog_post",
-              workspaceId: revision.workspaceId,
-              schemaVersion: revision.definition.schemaVersion,
-              baseRevision: revision.revision,
+              ...revisionCommandBase(revision),
               post: { id: crypto.randomUUID(), ...post },
             },
             "create-blog-post",

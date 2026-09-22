@@ -20,6 +20,7 @@ import {
   formatLocalScheduleTime,
   openInNewTab,
   previewNotOpenedMessage,
+  revisionCommandBase,
   scheduleNeedsApprovalMessage,
 } from "./blog-operations";
 import { BlogPostComposer } from "./blog-post-composer";
@@ -109,11 +110,11 @@ export function BlogPostScreen({
     returnTo: blogPostHref(post.id, revision.workspaceId),
   });
   // The exact content revision this browser session has opened a preview
-  // for. Scheduling asserts to the server that a human inspected the
-  // preview (the same claim the site-wide Publish button already makes —
-  // see `approveRevision` in content-editor.tsx) so that assertion has to
-  // be backed by an actual preview open in this session, not just a
-  // previously-approved state that might be stale or belong to someone else.
+  // for. Scheduling tells the server that a human inspected the preview. The
+  // site-wide Publish button makes the same claim; see `approveRevision` in
+  // content-editor.tsx. So the claim has to be backed by a preview opened in
+  // this session. An earlier approval is not enough: it may be stale, or it
+  // may belong to someone else.
   const [previewedRevision, setPreviewedRevision] = useState<number | null>(
     null,
   );
@@ -122,6 +123,7 @@ export function BlogPostScreen({
   const executionFailure = blogPostExecutionFailureNote(summary);
   const pendingRequest = summary?.pendingScheduleProposal ?? null;
   const listHref = blogListHref(revision.workspaceId);
+  const command = revisionCommandBase(revision);
   // A change is on its way to the server. Every control on this screen waits
   // for the answer, so a second command cannot start on top of the first.
   const changeInFlight = commands.busy || commands.pendingAttempt !== null;
@@ -257,9 +259,7 @@ export function BlogPostScreen({
               void commands.sendRevisionCommand(
                 {
                   operation: lifecycleAction.operation,
-                  workspaceId: revision.workspaceId,
-                  schemaVersion: revision.definition.schemaVersion,
-                  baseRevision: revision.revision,
+                  ...command,
                   postId: post.id,
                 },
                 lifecycleAction.operation,
@@ -279,15 +279,37 @@ export function BlogPostScreen({
         </p>
       )}
       {pendingRequest === null ? null : (
-        <p className="composer-hint">
-          {pendingScheduleRequestAgentName ?? "An app"} asked to publish this at{" "}
-          {formatLocalScheduleTime(
-            pendingRequest.localDateTime,
-            pendingRequest.ianaTimeZone,
-          )}
-          . Use “Schedule this post” below to publish it then, or decline the
-          request on the posts list.
-        </p>
+        // Overview links a request straight to this screen, so the answer to
+        // it is here too: schedule the post below, or decline the request.
+        <div className="dash-post-standing">
+          <p className="composer-hint">
+            {pendingScheduleRequestAgentName ?? "An app"} asked to publish this
+            at{" "}
+            {formatLocalScheduleTime(
+              pendingRequest.localDateTime,
+              pendingRequest.ianaTimeZone,
+            )}
+            . Use “Schedule this post” below to publish it then, or decline the
+            request.
+          </p>
+          <button
+            type="button"
+            className="dash-button dash-button-plain"
+            disabled={changeInFlight}
+            onClick={() => {
+              void commands.sendBlogOperation(
+                {
+                  operation: "decline_schedule_proposal",
+                  postId: post.id,
+                  proposalId: pendingRequest.id,
+                },
+                "decline-blog-post-schedule-proposal",
+              );
+            }}
+          >
+            Decline the app&apos;s publish request
+          </button>
+        </div>
       )}
       {!scheduleStanding.canSchedule ? null : (
         <div className="dash-post-schedule">
@@ -318,9 +340,7 @@ export function BlogPostScreen({
           void commands.sendRevisionCommand(
             {
               operation: "edit_blog_post",
-              workspaceId: revision.workspaceId,
-              schemaVersion: revision.definition.schemaVersion,
-              baseRevision: revision.revision,
+              ...command,
               postId: post.id,
               post: edited,
             },

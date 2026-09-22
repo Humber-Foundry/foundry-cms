@@ -98,7 +98,10 @@ describe("one blog post's own screen", () => {
     document.body.replaceChildren();
   });
 
-  function render() {
+  function render(
+    postSummary: BlogPostOperationalSummary = summary(),
+    pendingScheduleRequestAgentName: string | null = null,
+  ) {
     const host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
@@ -110,8 +113,8 @@ describe("one blog post's own screen", () => {
           csrfToken: "csrf-token",
           siteImages: [],
           verifiedPublicPostIds: [],
-          summary: summary(),
-          pendingScheduleRequestAgentName: null,
+          summary: postSummary,
+          pendingScheduleRequestAgentName,
         }),
       );
     });
@@ -158,6 +161,59 @@ describe("one blog post's own screen", () => {
       'input[name="title"]',
     );
     expect(title?.value).toBe("Tide notes");
+  });
+
+  it("names the app's publish request and declines it from this screen", async () => {
+    const submitted: Array<{ url: string; body: string }> = [];
+    stubPublishingReadiness((url, init) => {
+      submitted.push({ url, body: String(init?.body) });
+      // A non-2xx result is enough to check the request the button sent
+      // without the success path's page load, which this test cannot follow.
+      return Response.json(
+        { error: "schedule_proposal_not_found" },
+        { status: 422 },
+      );
+    });
+
+    render(
+      {
+        ...summary(),
+        pendingScheduleProposal: {
+          id: "proposal-0001",
+          siteId: referenceSiteDefinition.site.id,
+          postId,
+          workspaceId,
+          contentRevision: 4,
+          postRevisionId: "post-revision-1",
+          authorityVersion: 1,
+          localDateTime: "2026-10-01T09:00",
+          ianaTimeZone: "America/Vancouver",
+          utcOffsetChoice: "-07:00",
+          executeAtUtc: "2026-10-01T16:00:00.000Z",
+          timeZoneDatabaseVersion: "2026a",
+          createdBy: createContentActorId("mcp-connection-agent"),
+          proposalAuditId: "audit-0001",
+          createdAt: "2026-09-20T00:00:00.000Z",
+        },
+      },
+      "Draft Assistant",
+    );
+
+    await expect
+      .element(page.getByText(/Draft Assistant asked to publish this at/u))
+      .toBeInTheDocument();
+
+    await userEvent.click(
+      page.getByRole("button", { name: "Decline the app's publish request" }),
+    );
+
+    await waitFor(() => submitted.length > 0);
+    expect(submitted[0]!.url).toBe("/api/foundry-cms/blog-operations");
+    expect(JSON.parse(submitted[0]!.body)).toMatchObject({
+      operation: "decline_schedule_proposal",
+      postId,
+      proposalId: "proposal-0001",
+    });
   });
 
   it("offers the schedule only after a preview was opened in this session", async () => {

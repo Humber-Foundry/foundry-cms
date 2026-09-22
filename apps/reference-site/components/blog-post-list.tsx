@@ -25,6 +25,7 @@ import {
   openArchiveWithdrawalPreview,
   openInNewTab,
   previewNotOpenedMessage,
+  revisionCommandBase,
   type ArchiveWithdrawalLocation,
 } from "./blog-operations";
 import { PublishingConnectionStatus } from "./connection-status";
@@ -231,7 +232,7 @@ export function BlogPostList({
             action={newPostButton}
           >
             {archivedPosts.length === 0
-              ? "Write your first post. It stays a private draft until you publish it."
+              ? "Write your first post to start your blog; it stays a private draft until you publish it."
               : "Write a new post, or restore an archived one below."}
           </DashboardEmptyState>
         ) : (
@@ -247,6 +248,7 @@ export function BlogPostList({
                 const pendingRequestAgentName =
                   pendingScheduleRequestAgentNames.get(post.id) ?? "An app";
                 const actions: DashboardAction[] = [];
+                const command = revisionCommandBase(revision);
                 if (pendingRequest !== null) {
                   actions.push({
                     id: "decline",
@@ -270,13 +272,7 @@ export function BlogPostList({
                     label,
                     onSelect: () => {
                       void commands.sendRevisionCommand(
-                        {
-                          operation,
-                          workspaceId: revision.workspaceId,
-                          schemaVersion: revision.definition.schemaVersion,
-                          baseRevision: revision.revision,
-                          postId: post.id,
-                        },
+                        { operation, ...command, postId: post.id },
                         operation,
                       );
                     },
@@ -327,7 +323,7 @@ export function BlogPostList({
                     tone: "destructive",
                     onSelect: () => {
                       const liveNotice =
-                        standing.label === "On your site"
+                        standing.tone === "live"
                           ? " This post is on the site now; archiving takes it off the site first."
                           : "";
                       if (
@@ -369,16 +365,15 @@ export function BlogPostList({
                         {standing.label}
                       </DashboardStateLabel>
                     }
-                    // A row carries a menu when there is something to take on
-                    // that post. The shared standard asks every row in one
-                    // list to hold the same shape; here every active post has
-                    // the same actions offered except the ones its own state
-                    // rules out — a post with no schedule has nothing to
-                    // cancel. A row carries no menu at all only when this
-                    // installation has no blog-operations store to read, and
-                    // then no row does.
+                    // The shared standard asks every row in one list to hold
+                    // the same shape: a menu on all of them or on none. With a
+                    // blog-operations store every row has at least Archive, so
+                    // every row has a menu. Without the store no row has a
+                    // menu, and Publish and Unpublish are on the post's own
+                    // screen instead. A change in flight takes the menu off
+                    // every row at once.
                     actions={
-                      actions.length === 0 || changeInFlight ? undefined : (
+                      summary === undefined || changeInFlight ? undefined : (
                         <DashboardActionMenu
                           label={`Actions for ${postName}`}
                           actions={actions}

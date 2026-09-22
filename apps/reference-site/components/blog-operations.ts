@@ -12,7 +12,10 @@
  * This module is browser-safe. It holds no binding, no secret and no adapter.
  */
 
-import type { BlogPostOperationalSummary } from "@humber-foundry/application";
+import type {
+  BlogPostOperationalSummary,
+  ContentRevision,
+} from "@humber-foundry/application";
 import type {
   BlogPost,
   BlogPostId,
@@ -183,15 +186,15 @@ export function blogPostScheduleStanding(
 export function blogPostExecutionFailureNote(
   summary: BlogPostOperationalSummary | undefined,
 ): string | null {
-  const execution = summary?.latestExecution;
+  const execution = summary?.latestExecution ?? null;
   if (
-    execution === undefined ||
+    summary === undefined ||
     execution === null ||
     (execution.state !== "failed" && execution.state !== "blocked")
   ) {
     return null;
   }
-  return summary!.liveRevisionId !== null
+  return summary.liveRevisionId !== null
     ? "Update failed; the previous version remains live."
     : "First publication failed; it is not live yet.";
 }
@@ -206,8 +209,27 @@ export const changeNotConfirmedMessage =
 
 /** The one sentence the Blog screen reads under its name. */
 export const blogScreenDescription =
-  "Every post you have written. Open one to change it, preview it privately, " +
-  "then publish it.";
+  "Open a post to change it, preview it privately, then publish it.";
+
+/**
+ * The three fields every content-revision command carries: which draft it
+ * changes, which schema that draft uses, and which revision it was written
+ * against. Every Blog screen spreads this into its command, so no screen
+ * types the three by hand.
+ */
+export function revisionCommandBase(
+  revision: Pick<ContentRevision, "workspaceId" | "revision" | "definition">,
+): Readonly<{
+  workspaceId: ContentRevision["workspaceId"];
+  schemaVersion: string;
+  baseRevision: number;
+}> {
+  return {
+    workspaceId: revision.workspaceId,
+    schemaVersion: revision.definition.schemaVersion,
+    baseRevision: revision.revision,
+  };
+}
 
 export const scheduleNeedsApprovalMessage =
   "Scheduling needs a preview of this exact version. Preview this post, " +
@@ -249,20 +271,20 @@ export function blogOperationErrorCode(body: unknown): string {
 }
 
 /**
- * Opens one new tab and sends it to the address `find` returns.
+ * Opens one new tab and sends it to the address `resolveAddress` returns.
  *
  * The tab is opened by the press itself, because a browser blocks a tab
- * opened later, once the request has answered. A `find` that throws closes
- * the tab again, so a refusal never leaves an empty window behind. Both
+ * opened later, once the request has answered. A `resolveAddress` that throws
+ * closes the tab again, so a refusal never leaves an empty window behind. Both
  * previews on the Blog screens go through this.
  */
 export async function openInNewTab(
-  find: () => Promise<string>,
+  resolveAddress: () => Promise<string>,
 ): Promise<void> {
   const popup = window.open("", "_blank");
   if (popup !== null) popup.opener = null;
   try {
-    const destination = await find();
+    const destination = await resolveAddress();
     if (popup === null) {
       window.open(destination, "_blank", "noopener,noreferrer");
     } else {
@@ -295,9 +317,8 @@ export type ArchiveWithdrawalContinuationResult =
 /**
  * Recovers this person's access to the withdrawal that was started when a
  * live post was archived, then opens the exact preview of that withdrawal
- * revision — the site as it will look once this post is off it. This is
- * the honest "a human reviewed this" step: nothing here submits an
- * approval, it only finds and shows the preview so a person can actually
+ * revision — the site as it will look once this post is off it. Nothing here
+ * submits an approval. It only finds and shows the preview, so a person can
  * look at it before confirming.
  */
 export async function openArchiveWithdrawalPreview({

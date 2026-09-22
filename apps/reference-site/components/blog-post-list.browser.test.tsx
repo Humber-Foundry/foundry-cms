@@ -555,7 +555,7 @@ describe("blog posts list browser acceptance", () => {
     await expect
       .element(
         page.getByText(
-          "Write your first post. It stays a private draft until you publish it.",
+          "Write your first post to start your blog; it stays a private draft until you publish it.",
         ),
       )
       .toBeInTheDocument();
@@ -632,6 +632,56 @@ describe("blog posts list browser acceptance", () => {
         ).find((button) => button.getAttribute("aria-label") === menuName) ===
         undefined,
     );
+  });
+
+  it("draws no row menu on any row when this installation has no blog-operations store", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({}));
+
+    // Two posts: one can be published now, one waits on the next site
+    // publish. With no store neither row may carry a menu, or the two rows
+    // would take different shapes in one list.
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    flushSync(() => {
+      root!.render(
+        createElement(BlogPostList, {
+          revision: {
+            ...revision,
+            definition: {
+              ...revision.definition,
+              blog: {
+                ...revision.definition.blog,
+                posts: [
+                  pendingSchedulePost(),
+                  {
+                    ...pendingSchedulePost(),
+                    id: createBlogPostId(
+                      "00000000-0000-4000-8000-00000000f003",
+                    ),
+                    slug: "harbour-notes",
+                    title: "Harbour notes",
+                    targetVisibility: "unpublished",
+                  },
+                ],
+              },
+            },
+          },
+          csrfToken: "csrf-token",
+          verifiedPublicPostIds: [],
+          postSummaries: new Map(),
+          archivedPosts: [],
+          pendingScheduleRequestAgentNames: new Map(),
+        }),
+      );
+    });
+
+    expect(document.querySelectorAll("a.dash-row-link")).toHaveLength(2);
+    expect(
+      Array.from(document.querySelectorAll("button")).filter((button) =>
+        button.getAttribute("aria-label")?.startsWith("Actions for"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("declines the pending schedule request from its row menu", async () => {
