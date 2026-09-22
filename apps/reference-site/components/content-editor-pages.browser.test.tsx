@@ -141,6 +141,21 @@ describe("the editor on a chosen page", () => {
     );
   });
 
+  // #227: the editor's own top-bar way out uses the shared back-link
+  // component, keeping its old wording and target (Overview, with the
+  // workspace carried on the query string).
+  it("shows the shared back link in the top bar, to Overview", () => {
+    const host = mount(second.id);
+    const back = host.querySelector<HTMLAnchorElement>(
+      ".editor-topbar .dash-back-link",
+    );
+    expect(back).not.toBeNull();
+    expect(back?.getAttribute("href")).toBe(
+      "/dash?workspace=workspace_pages_test",
+    );
+    expect(back?.textContent?.trim()).toBe("←Dashboard");
+  });
+
   it("draws the canvas on the home page", () => {
     const host = startEditing(mount(home.id));
     expect(host.querySelector(".editor-immersive")).not.toBeNull();

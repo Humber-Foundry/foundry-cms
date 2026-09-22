@@ -188,8 +188,11 @@
  * Overview lost its top padding and border this way, while its bottom,
  * left and right stayed correct). Sibling margin collapse between the page
  * heading and a `.panel` first section still gives the same gap a plain
- * first section gets, so `.panel` needs no extra rule of its own. */
-.dashboard-main > section:not(.content-editor):not(.panel) {
+ * first section gets, so `.panel` needs no extra rule of its own.
+ *
+ * Overview's `.dash-site-card` is excluded for the same reason as `.panel`:
+ * it is a complete box with its own border on all four sides. */
+.dashboard-main > section:not(.content-editor):not(.panel):not(.dash-site-card) {
   margin-top: var(--dash-panel-gap);
   padding-top: var(--dash-panel-gap);
   border-top: 1px solid var(--dash-line);
@@ -694,6 +697,166 @@
 
 .dash-empty-action {
   margin-top: var(--dash-space-2);
+}
+
+/* Overview's site card ----------------------------------------------------
+ *
+ * The first thing on the dashboard: a picture of the home page beside the
+ * site's name, its address, whether the draft is published, and the one
+ * button that opens the page editor.
+ *
+ * It is a card, so it keeps its corners and draws its own border on all four
+ * sides. `.dashboard-main > section` above leaves a `.panel` alone for that
+ * reason; this card is excluded there in the same way. */
+
+.dash-site-card {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: var(--dash-space-5);
+  align-items: center;
+  padding: var(--dash-space-5);
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+/* The picture of the site. `overflow: hidden` crops the page at the frame,
+ * and the frame keeps a steady shape whatever the home page holds, so the
+ * card's height does not jump from one site to another. */
+.dash-site-preview {
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-canvas);
+}
+
+/* `zoom` rather than `transform: scale`, for the same reason the Design
+ * preview uses it: it shrinks the laid-out box as well as the paint. */
+.dash-site-preview-page {
+  width: var(--dash-preview-width);
+  zoom: var(--dash-preview-scale);
+}
+
+.dash-site-card-detail {
+  display: grid;
+  gap: var(--dash-space-3);
+  justify-items: start;
+  min-width: 0;
+}
+
+/* The one link to the live site. It carries the site's own address with it,
+ * so the owner reads the address rather than a second word for "the site".
+ * It is a control, so it is a full-height tap target. */
+.dash-site-card-address {
+  display: inline-flex;
+  flex-wrap: wrap;
+  min-height: var(--dash-control-height);
+  align-items: center;
+  gap: var(--dash-space-2);
+  max-width: 100%;
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+}
+
+.dash-site-card-host {
+  overflow-wrap: anywhere;
+  color: var(--dash-ink-soft);
+  font-weight: 400;
+}
+
+.dash-site-card-state,
+.dash-site-card-actions {
+  margin: 0;
+}
+
+@media (max-width: 55rem) {
+  .dash-site-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Overview's key numbers --------------------------------------------------
+ *
+ * Four numbers, each one a link to the screen that explains it. The count is
+ * fixed at four, so every row of the grid fills: four across on a wide
+ * screen, two by two in between, one under another on a phone.
+ *
+ * Two text sizes in the whole section: the figure, and everything that
+ * describes it. There is no heading over the row, because a heading would
+ * be a third size and each card already names what it counts.
+ *
+ * A number a source cannot supply draws its sentence in place of the
+ * figure, never a zero. */
+
+.dash-numbers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--dash-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-numbers-sample {
+  margin: 0 0 var(--dash-space-4);
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.dash-number {
+  display: flex;
+  min-width: 0;
+}
+
+.dash-number-link {
+  display: grid;
+  gap: var(--dash-space-2);
+  align-content: start;
+  flex: 1;
+  min-height: var(--dash-control-height);
+  padding: var(--dash-space-4);
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+  color: var(--dash-ink);
+  text-decoration: none;
+}
+
+.dash-number-link:hover,
+.dash-number-link:focus-visible {
+  border-color: var(--dash-accent);
+}
+
+.dash-number-value {
+  font-size: var(--dash-h1);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.dash-number-label {
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+}
+
+.dash-number-note {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+@media (max-width: 70rem) {
+  .dash-numbers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 40rem) {
+  .dash-numbers {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Message inbox ----------------------------------------------------------
@@ -2135,16 +2298,22 @@
   background: var(--dash-surface);
 }
 
-.topbar-back {
+/* The editor topbar's own use of the shared back link (#227). In the bar it
+ * sits in a row with the title and the controls, so it drops the margin
+ * under it and takes the bar's muted ink. It keeps the shared 44px control
+ * height, which fits inside the bar's 3.25rem. The base rule above stays the
+ * one every other screen uses unchanged. */
+.editor-topbar .dash-back-link {
+  margin-bottom: 0;
+  gap: 0.35rem;
   color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
-  font-weight: 600;
-  text-decoration: none;
   white-space: nowrap;
 }
 
-.topbar-back:hover {
+.editor-topbar .dash-back-link:hover,
+.editor-topbar .dash-back-link:focus-visible {
   color: var(--dash-ink);
+  text-decoration: none;
 }
 
 /* Wins over the dashboard's generic h1 sizing: this is chrome, not a page

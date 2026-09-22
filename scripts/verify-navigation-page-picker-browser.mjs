@@ -123,17 +123,10 @@ async function main() {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
 
-      // The dashboard creates the draft workspace on the server, so Overview
-      // links straight into the page editor.
+      // The dashboard creates the draft workspace on the server, so
+      // Overview's site card opens the home page in the editor (#228).
       await page.goto(`${origin}/dash`);
-      await page
-        .getByRole("link", { name: /^(Start|Continue) editing$/u })
-        .click();
-      await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
-
-      // Pages opens on the list of every page. Open the home page from it to
-      // reach the editor.
-      await page.locator(".dash-row-link").first().click();
+      await page.getByRole("link", { name: "Edit site" }).click();
       await page.waitForURL(
         /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u,
       );

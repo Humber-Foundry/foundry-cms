@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { DashboardActionMenu } from "./dashboard-action-menu";
 import { DashboardBackLink } from "./dashboard-back-link";
+import { DashboardDoneLink } from "./dashboard-done-link";
 import { DashboardEmptyState } from "./dashboard-empty-state";
 import { DashboardList, DashboardListRow } from "./dashboard-list";
 import { DashboardPageHeader } from "./dashboard-page-header";
@@ -196,5 +197,17 @@ describe("DashboardBackLink", () => {
     expect(markup).toContain("Back to Settings");
     // The arrow is decoration; the words carry the meaning.
     expect(markup).toContain('aria-hidden="true"');
+  });
+});
+
+describe("DashboardDoneLink", () => {
+  it("is a primary link back to the given screen", () => {
+    const markup = renderToStaticMarkup(
+      <DashboardDoneLink href="/dash/settings/agents" />,
+    );
+
+    expect(markup).toBe(
+      '<p class="panel-actions"><a class="dash-button dash-button-primary" href="/dash/settings/agents">Done</a></p>',
+    );
   });
 });

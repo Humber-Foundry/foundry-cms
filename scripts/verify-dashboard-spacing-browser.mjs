@@ -113,9 +113,10 @@ const collectTightText = (minimumTextGap) => {
     // background has proven itself a box — from there every side is part of
     // that box, including a side whose own border a more specific rule
     // stripped. This is exactly the #173-regression shape a per-side-only
-    // check misses: Overview's "Your draft" card kept its border and padding
-    // on three sides and lost both on the fourth, so the old check never
-    // looked at that side at all.
+    // check misses: Overview's old "Your draft" card (now the site card,
+    // `.dash-site-card`) kept its border and padding on three sides and
+    // lost both on the fourth, so the old check never looked at that side
+    // at all.
     //
     // The threshold is three-or-more sides, not "any," so a strip that is
     // only ever meant to draw one edge — `.editor-toolbar`'s single
@@ -579,7 +580,7 @@ async function main() {
       // the same content the owner's own audit measured.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
       await page
-        .getByRole("link", { name: /^(Start|Continue) editing$/u })
+        .getByRole("link", { name: "Edit site" })
         .waitFor({ state: "visible" });
 
       for (const [name, href] of destinations) {
