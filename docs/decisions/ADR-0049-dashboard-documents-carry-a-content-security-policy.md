@@ -66,8 +66,11 @@ well as on the development server.
 ## Consequences
 
 - The public site and the exact preview at `/__foundry/preview/...` are
-  outside `/dash`, so they keep the live Turnstile challenge. The browser test
-  checks that neither `/` nor `/__foundry/preview/...` carries the policy.
+  outside `/dash`, so they keep the live Turnstile challenge.
+  `scripts/verify-design-preview-browser.mjs` checks that `/` carries no
+  policy. `scripts/verify-private-dashboard-browser.mjs` opens a saved exact
+  preview from the editor and the public home page, requires no policy on the
+  exact preview, and requires the challenge container on both.
 - An installation component that embeds a third party on an editing surface
   now shows an empty frame there, and the browser console names the policy
   that refused it. The component should read `editingSurface` and draw a

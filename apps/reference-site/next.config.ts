@@ -23,11 +23,9 @@ const nextConfig: NextConfig = {
   // Every dashboard document may run scripts and open frames from the site's
   // own origin only, so no editing surface can reach a third party (#234).
   async headers() {
-    return [
-      ...dashboardContentSecurityPolicyHeaders({
-        development: process.env.NODE_ENV !== "production",
-      }),
-    ];
+    return dashboardContentSecurityPolicyHeaders({
+      development: process.env.NODE_ENV !== "production",
+    });
   },
 };
 

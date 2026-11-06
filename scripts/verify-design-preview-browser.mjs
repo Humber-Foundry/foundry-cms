@@ -95,10 +95,8 @@ async function expectDashboardPolicy(origin, path) {
 }
 
 /**
- * The public site and the exact preview must carry no such policy: they
- * render the live challenge. The status does not matter here; the exact
- * preview needs a capability this script does not hold, and the check is
- * only that no path outside `/dash` carries the policy.
+ * The public site must carry no such policy: it renders the live challenge.
+ * The private dashboard script checks a real exact preview the same way.
  */
 async function expectNoPolicy(origin, path) {
   const response = await fetch(`${origin}${path}`, { redirect: "manual" });
@@ -225,7 +223,6 @@ async function main() {
     await expectDashboardPolicy(origin, "/dash");
     await expectDashboardPolicy(origin, "/dash/design");
     await expectNoPolicy(origin, "/");
-    await expectNoPolicy(origin, "/__foundry/preview/workspace_0/1");
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({

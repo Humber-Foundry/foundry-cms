@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentSecurityPolicyDirectives as directives,
   dashboardPolicyShortfall,
-  namesAHost,
+  admitsAnotherSource,
 } from "../../../scripts/lib/content-security-policy.mjs";
 
 import {
@@ -46,7 +46,7 @@ describe("dashboardContentSecurityPolicy", () => {
     for (const development of [false, true]) {
       const policy = directives(dashboardContentSecurityPolicy({ development }));
       for (const values of policy.values()) {
-        expect(values.some(namesAHost)).toBe(false);
+        expect(values.some(admitsAnotherSource)).toBe(false);
       }
     }
   });
@@ -66,7 +66,7 @@ describe("dashboardContentSecurityPolicy", () => {
         dashboardPolicyShortfall(
           `script-src 'self' ${source}; frame-src 'self'; object-src 'none'`,
         ),
-      ).toBe("script-src names a host");
+      ).toBe("script-src admits another source");
     }
   });
 
