@@ -42,7 +42,7 @@ describe("dashboardContentSecurityPolicy", () => {
     expect(policy.get("object-src")).toEqual(["'none'"]);
   });
 
-  it("names no host outside the site's own origin", () => {
+  it("admits no source outside the site's own origin", () => {
     for (const development of [false, true]) {
       const policy = directives(dashboardContentSecurityPolicy({ development }));
       for (const values of policy.values()) {
