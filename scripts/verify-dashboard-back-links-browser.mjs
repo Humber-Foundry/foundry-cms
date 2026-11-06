@@ -248,10 +248,10 @@ async function main() {
     ]) {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
-      // The dashboard creates the draft workspace on the server, so Overview's
-      // "Edit site" link opens the page editor on the home page straight away
-      // (#228). Open the editor through that link, as the other browser
-      // checks do, before the back-link checks start.
+      // Opening Overview makes the server create the draft workspace. Its
+      // "Edit site" link (#228) opens the page editor for that workspace.
+      // Follow the link to prove the draft workspace exists before the
+      // back-link checks start. The checks open each screen themselves.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
       await page.getByRole("link", { name: "Edit site" }).click();
       await page.waitForURL(
