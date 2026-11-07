@@ -137,17 +137,21 @@ export function CampaignSendFlow({
 
   // The tick is one reading of one review, and it is spent on one step.
   //
-  // It clears whenever the email or the approval changes. A changed email
-  // has not been read. Approving is itself a step: without this, the tick
-  // that opened "Approve this email for sending" would still be ticked when
-  // the same screen turns into "Send to 412 people now", and the send would
-  // go out on a review nobody read twice. The tick is cleared during the
-  // drawing that shows the change, not after it, so no drawing ever shows a
-  // control open on the old tick. It clears on every change, so an email
-  // changed and then changed back must be read again.
-  const reviewKey = `${report.rendered.campaignFingerprint}|${
-    authorization?.id ?? ""
-  }`;
+  // It clears whenever the email, the approval, the schedule or the send
+  // changes. A changed email has not been read. Approving, scheduling and
+  // sending are each a step: without this, the tick that opened "Approve
+  // this email for sending" would still be ticked when the same screen turns
+  // into "Send to 412 people now", or a schedule called off would bring back
+  // a send control on the reading the schedule already spent. The tick is
+  // cleared during the drawing that shows the change, not after it, so no
+  // drawing ever shows a control open on the old tick. It clears on every
+  // change, so an email changed and then changed back must be read again.
+  const reviewKey = [
+    report.rendered.campaignFingerprint,
+    authorization?.id ?? "",
+    schedule?.id ?? "",
+    sendOperation?.id ?? "",
+  ].join("|");
   const [reviewTick, setReviewTick] = useState({
     key: reviewKey,
     ticked: false,

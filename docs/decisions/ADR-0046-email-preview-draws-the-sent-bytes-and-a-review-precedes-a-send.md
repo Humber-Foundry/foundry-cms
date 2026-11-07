@@ -102,9 +102,12 @@ offers no send control and asks for a reload.
 The review carries one tick, "I have read this and it is right." Approving,
 sending now and picking a send time all stay shut until it is ticked. One tick
 opens one step: it clears when the email's fingerprint changes, because a
-changed email has not been read, and it clears when the approval changes, so
-the tick that opened "Approve this email for sending" is not still ticked when
-the same screen turns into "Send to 412 people now". Both confirm controls name
+changed email has not been read. It also clears when the approval, the
+schedule or the send changes, so the tick that opened "Approve this email for
+sending" is not still ticked when the same screen turns into "Send to 412
+people now", and a schedule called off does not bring back a send on the
+reading it spent. The tick clears in the same drawing that shows the change,
+so no drawing shows a control open on the old tick. Both confirm controls name
 the count: "Send to 412 people now" and, for a chosen time, "Send to 412
 people then".
 

@@ -546,6 +546,52 @@ describe("one campaign's screen, browser acceptance", () => {
     expect(approve.disabled).toBe(true);
   });
 
+  it("asks for a new reading after a scheduled send is called off", async () => {
+    const server = fakeNewsletterServer();
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    server.state.authorizationId = "50000000-0000-4000-8000-000000000001";
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send to 412 people then")).toBeDefined(),
+    );
+    await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
+    await userEvent.fill(
+      host.querySelector<HTMLInputElement>('input[name="sendAt"]')!,
+      "2030-01-15T09:00",
+    );
+
+    // The tick is spent on scheduling. The server now holds the schedule.
+    server.state.schedule = {
+      id: "70000000-0000-4000-8000-000000000001",
+      state: "active",
+      localDateTime: "2030-01-15T09:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-08:00",
+      executeAtUtc: "2030-01-15T17:00:00.000Z",
+    };
+    await userEvent.click(buttonNamed(host, "Send to 412 people then")!);
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Call this send off")).toBeDefined(),
+    );
+
+    // Calling it off brings the send controls back. The same approval still
+    // stands, but the reading was spent, so sending now needs a new one.
+    server.state.schedule = null;
+    await userEvent.click(buttonNamed(host, "Call this send off")!);
+    const sendNow = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Send to 412 people now");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(sendNow.disabled).toBe(true);
+  });
+
   it("offers no send while the server reviews a different revision", async () => {
     const server = fakeNewsletterServer({
       sendSummaryRevisionId: "30000000-0000-4000-8000-000000000099",
