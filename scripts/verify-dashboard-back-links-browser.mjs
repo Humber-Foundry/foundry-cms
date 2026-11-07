@@ -4,7 +4,7 @@
 //
 // This walks the sub-screens a real owner can reach by clicking through the
 // dashboard, with no seeded data: the page editor, the campaign writing
-// screens, and Connect an agent. Two sub-screens are not walked here because
+// screens, the blog writing screens, and Connect an agent. Two sub-screens are not walked here because
 // nothing in this installation can put data behind them without a seed
 // script this repository does not have:
 //   - `/dash/forms/<receiptId>` needs a real public form submission, and the
@@ -167,6 +167,44 @@ async function writeAndOpenCampaign(page, origin) {
   });
 }
 
+async function checkNewBlogPost(page, origin) {
+  await page.goto(`${origin}/dash/blog`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "New post" }).first().click({
+    timeout: 10_000,
+  });
+  await page.waitForURL(/\/dash\/blog\/new/u, { timeout: 10_000 });
+  await checkBackLink(page, {
+    screen: "New post",
+    expectedText: "Back to Blog",
+    expectedPath: "/dash/blog",
+  });
+}
+
+/** Writes one post so a saved post's screen exists to walk back from. */
+async function writeAndOpenBlogPost(page, origin, viewportLabel) {
+  const title = `Back link check ${viewportLabel}`;
+  await page.goto(`${origin}/dash/blog/new`, { waitUntil: "networkidle" });
+  const composer = page.locator("form.composer");
+  await composer.waitFor({ state: "visible", timeout: 10_000 });
+  await composer.locator('input[name="title"]').fill(title);
+  await composer
+    .getByRole("button", { name: /^Save draft/u })
+    .click({ timeout: 10_000 });
+  await page.waitForURL((url) => url.pathname === "/dash/blog", {
+    timeout: 20_000,
+  });
+
+  const row = page.locator("a.dash-row-link", { hasText: title });
+  await row.waitFor({ timeout: 10_000 });
+  await row.click();
+  await page.waitForURL(/\/dash\/blog\/(?!new)[^/?]+/u, { timeout: 10_000 });
+  await checkBackLink(page, {
+    screen: "Saved post",
+    expectedText: "Back to Blog",
+    expectedPath: "/dash/blog",
+  });
+}
+
 async function checkConnectAnAgent(page, origin) {
   await page.goto(`${origin}/dash/settings/agents`, {
     waitUntil: "networkidle",
@@ -263,6 +301,8 @@ async function main() {
         await checkPagesEditor(page, origin, viewportLabel);
         await checkNewCampaign(page, origin);
         await writeAndOpenCampaign(page, origin);
+        await checkNewBlogPost(page, origin);
+        await writeAndOpenBlogPost(page, origin, viewportLabel);
         await checkConnectAnAgent(page, origin);
       } catch (error) {
         throw new Error(
@@ -274,7 +314,7 @@ async function main() {
     }
 
     process.stdout.write(
-      `Dashboard back-link acceptance passed at ${origin} (1440px and 390px): the page editor, New email, a saved email, and Connect an agent each show the shared back link and it returns to the named parent; Connect an agent also ends with Done, which returns to Connected agents.\n`,
+      `Dashboard back-link acceptance passed at ${origin} (1440px and 390px): the page editor, New email, a saved email, New post, a saved post, and Connect an agent each show the shared back link and it returns to the named parent; Connect an agent also ends with Done, which returns to Connected agents.\n`,
     );
   } finally {
     await browser?.close();
