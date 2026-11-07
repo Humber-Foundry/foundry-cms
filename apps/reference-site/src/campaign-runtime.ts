@@ -483,8 +483,7 @@ export async function loadCampaignRequestContext(
     state: "local_development" as const,
     // Local development holds none of the delivery settings and uses stub
     // adapters, so every one of them is absent. Naming them all lets the
-    // Newsletter steps keep the list for whoever connects a real site, behind
-    // a disclosure, while the open screen says only why no test can go out.
+    // Newsletter steps say which Brevo settings a real site needs.
     missingSettings: campaignDeliverySettingNames,
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,

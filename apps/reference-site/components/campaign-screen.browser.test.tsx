@@ -376,10 +376,14 @@ describe("one campaign's screen, browser acceptance", () => {
       "No test can go out from here. Nothing is broken: a test goes out as " +
         "soon as this site is connected to an email provider.",
     );
+    // One plain sentence says why, and names the Brevo settings that are
+    // missing, as #238 asks and as ADR-0030 keeps for the email connection.
     expect(host.textContent).toContain(
-      "Email is off in local development, because this site holds no email " +
-        "provider connection.",
+      "Email is off in local development, because no Brevo credentials are " +
+        "set. Missing: FOUNDRY_BREVO_API_KEY, " +
+        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON.",
     );
+    expect(host.querySelector("details.connection-status-details")).toBeNull();
     expect(host.textContent).toContain(
       "On a live site, Settings → Email shows whether email is connected.",
     );
@@ -391,27 +395,8 @@ describe("one campaign's screen, browser acceptance", () => {
       host.querySelectorAll<HTMLAnchorElement>("a"),
     ).find((link) => link.textContent === "How to connect email");
     expect(guideLink).toBeDefined();
-
-    // The setting names a connected site holds are kept for whoever connects
-    // one, behind a closed disclosure. Nothing outside it names a setting, so
-    // the open screen carries no configuration name.
-    const disclosure = host.querySelector<HTMLDetailsElement>(
-      "details.connection-status-details",
-    );
-    expect(disclosure).not.toBeNull();
-    expect(disclosure!.open).toBe(false);
-    expect(disclosure!.querySelector("summary")?.textContent).toBe(
-      "Technical details",
-    );
-    expect(disclosure!.textContent).toContain("FOUNDRY_BREVO_API_KEY");
-    expect(disclosure!.textContent).toContain(
-      "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
-    );
-    const outsideDisclosure = host.textContent!.replace(
-      disclosure!.textContent!,
-      "",
-    );
-    expect(outsideDisclosure).not.toContain("FOUNDRY_");
+    // The line is plain status, not an alert: nothing here is a fault.
+    expect(host.querySelector(".connection-status-missing")).toBeNull();
     // Nothing was sent, and nothing reads as a fault.
     expect(server.commands).toHaveLength(0);
   });

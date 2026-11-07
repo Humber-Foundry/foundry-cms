@@ -64,24 +64,23 @@ will break in a real inbox. The width switch is the dashboard's shared toggle,
 the same one the page editor's Browse and Edit switch uses, so the chosen side
 reads the same way here as everywhere else.
 
-**2. A refusal says why, in the owner's words, and keeps the setting names
-behind a disclosure.**
+**2. A refusal says why, in plain words, and names the missing settings.**
 
 The test step in local development says that no test can go out, that nothing
 is broken, and that a test goes out once the site is connected. Under it, the
-connection line says email is off because this site holds no email provider
-connection, and links to the setup document; a second line says that on a
-live site Settings → Email shows whether email is connected. That screen shows
-the connection and does not set it: an operator installs the settings.
+connection line says in one sentence that email is off in local development
+because no Brevo credentials are set, names the settings that are missing, and
+links to the setup document. A second line says that on a live site
+Settings → Email shows whether email is connected. That screen shows the
+connection and does not set it: an operator installs the settings.
 
-No configuration name appears on the open screen. A list of `FOUNDRY_*` names
-is words a site owner cannot use, and the owner's rule is that no internal
-identifier belongs on a dashboard screen. The names still matter to whoever
-connects a real site, so delivery readiness in local development names every
-delivery setting in `missingSettings`, because local development holds none of
-them, and the connection line keeps that list behind a closed "Technical
-details" disclosure — the same way Settings keeps the site's version numbers
-and record identifiers.
+The names stay on the line because #238 asks for them, and because ADR-0021
+and ADR-0030 keep the names on the line for the email and publishing
+connections: an operator installs those settings and needs their names. Only
+the sender details keep their names behind a disclosure. Delivery readiness
+in local development names every delivery setting in `missingSettings`,
+because local development holds none of them. The line is plain status, not
+an alert, so it does not read as a fault.
 
 On a connected site, a test the provider does not take is answered on the
 test step itself, under its button, in plain words that say what happened and
@@ -130,9 +129,8 @@ refusal code and its wording are unchanged. An agent still never sends
 - The preview shows raw email HTML, so it carries none of the dashboard's
   typography. That is the point: an inbox carries none of it either.
 - Adding a setting to `campaignDeliverySettingNames` changes what the local
-  development disclosure lists. That is wanted: the list is the answer to
-  "what does a connected site hold", and it stays out of the way until it is
-  opened.
+  development line names. That is wanted: the list is the answer to "what
+  does a connected site need".
 - One more revision read per campaign report. It is the same revision the
   render already loaded.
 

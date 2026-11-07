@@ -25,7 +25,7 @@ export { emailDeliverySetupGuide as campaignDeliverySetupGuide } from "./setting
  *   development. Nothing is sent, and nothing has to be installed to carry on
  *   writing. `missingSettings` then names every delivery setting, because
  *   local development holds none of them; a screen says in plain words why
- *   no test can go out and keeps the names behind a disclosure.
+ *   no test can go out and names them.
  * - `not_configured` — at least one named setting is absent or invalid.
  * - `connected` — every named setting is installed. `providerHealth` then
  *   reports what the provider itself says about the credential and the sender

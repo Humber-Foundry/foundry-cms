@@ -48,8 +48,8 @@ export type ConnectionReadiness = Readonly<{
  * `HelpTip` (#149) rather than on every screen that renders it.
  *
  * `connectedByOperator`: email and publishing are connected by an operator
- * who reads the setting names, so ADR-0021 puts an absent name on the line
- * and local development shows the setup link. The sender details are the
+ * who reads the setting names, so ADR-0021 puts an absent name on the line,
+ * in local development as well, and local development shows the setup link. The sender details are the
  * owner's own words — a name and a postal address — so that line says it in
  * plain words and keeps the names behind a disclosure for whoever installs
  * them.
@@ -90,8 +90,8 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
   email: {
     setupLinkLabel: "How to connect email",
     localDevelopmentSentence:
-      "Email is off in local development, because this site holds no email " +
-      "provider connection.",
+      "Email is off in local development, because no Brevo credentials are " +
+      "set.",
     connectedSentence: "Email is connected.",
     notConnectedSentence: "Email is not connected yet.",
     connectedMeaning:
@@ -155,16 +155,21 @@ export function ConnectionStatus({
 
   const copy = connectionCopy[kind];
 
-  // Local development names no setting on the open screen. Nothing is absent
-  // that anybody here has to install, and a list of configuration names is
-  // words a site owner cannot use. The names a connected site holds still
-  // matter to whoever connects one, so they sit behind a closed disclosure
-  // under the line, the same way Settings keeps the site's version numbers.
+  // Local development says in one plain sentence why the connection is off.
+  // For a connection an operator installs, the sentence also names the
+  // settings that are absent, the same way the not-connected line does
+  // (ADR-0021, ADR-0030), because those names are what whoever connects the
+  // site has to set. It stays plain status, not an alert: nothing is broken.
   if (readiness.state === "local_development") {
+    const namesInline =
+      readiness.missingSettings.length > 0 && copy.connectedByOperator;
     return (
       <div className="connection-status">
         <p>
           {copy.localDevelopmentSentence}
+          {namesInline ? (
+            <> Missing: {readiness.missingSettings.join(", ")}.</>
+          ) : null}
           {copy.connectedByOperator ? (
             <>
               {" "}
@@ -185,19 +190,6 @@ export function ConnectionStatus({
             {copy.liveSiteStatus.after}
           </p>
         )}
-        {readiness.missingSettings.length > 0 ? (
-          <details className="connection-status-details">
-            <summary>Technical details</summary>
-            <p>A connected site holds these settings:</p>
-            <ul>
-              {readiness.missingSettings.map((name) => (
-                <li key={name}>
-                  <code>{name}</code>
-                </li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
       </div>
     );
   }

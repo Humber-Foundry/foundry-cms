@@ -150,9 +150,8 @@ export function CampaignSendFlow({
 
   function testNeed(): string {
     if (localDevelopment) {
-      // The line under this step names the state and keeps the setting names
-      // behind a disclosure. This says the one thing that line does not:
-      // nothing here is broken.
+      // The line under this step names the state and the missing settings.
+      // This says the one thing that line does not: nothing here is broken.
       return (
         "No test can go out from here. Nothing is broken: a test goes out as " +
         "soon as this site is connected to an email provider."
@@ -231,7 +230,8 @@ export function CampaignSendFlow({
   /**
    * The shared connection-status line: whether email is connected, which
    * settings are missing, where the setup steps are written down, and in
-   * local development where a live site sets the connection.
+   * local development which Settings screen shows the connection on a live
+   * site.
    */
   const setupGuideNote =
     notConnected && delivery !== null ? (
