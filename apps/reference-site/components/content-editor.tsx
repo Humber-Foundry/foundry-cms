@@ -70,6 +70,7 @@ import {
   type EditorPageSummary,
 } from "../src/editor-page-selection";
 import { PublishingConnectionStatus } from "./connection-status";
+import { DashboardBackLink } from "./dashboard-back-link";
 import { DesignDestination } from "./design-destination";
 import { HelpTip } from "./help-tip";
 import { RichTextEditor } from "./rich-text-editor";
@@ -2090,9 +2091,10 @@ export function ContentEditor({
           >
             <span aria-hidden="true">✕</span> Close
           </button>
-          <a className="topbar-back" href={`/dash${activeWorkspaceQuery}`}>
-            ← Dashboard
-          </a>
+          <DashboardBackLink
+            href={`/dash${activeWorkspaceQuery}`}
+            label="Dashboard"
+          />
           <h1 className="topbar-title">{heading}</h1>
           {/* Inside the controls, so on a phone the one Menu sheet carries the
             * way to another page as well. */}

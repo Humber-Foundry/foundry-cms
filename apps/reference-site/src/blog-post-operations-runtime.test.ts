@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createBlogPostOperationsApplication,
@@ -70,6 +70,10 @@ describe("scheduled blog post execution runtime", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // The runtime reads the wall clock when it records an outcome. Fix that
+    // clock at `now` so a lease claimed at `now` is still held, on any date.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
     operationTime = beforeNow;
     mocks.validateApprovalAuthority.mockResolvedValue(true);
     mocks.findApproval.mockResolvedValue(null);
@@ -78,6 +82,10 @@ describe("scheduled blog post execution runtime", () => {
     mocks.operationsStore = createInMemoryBlogPostOperationsStore({
       humanActorIds: [actorId],
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("uses the explicit Worker time-zone database release", () => {
