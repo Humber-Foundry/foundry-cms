@@ -206,7 +206,9 @@
    * This rule is nested, so `&` is the whole selector above, exclusions
    * included. Its specificity is always one class more than the rule above,
    * so it always wins, and a card excluded above is excluded here too
-   * (#254). Add a new exclusion above, and only above. */
+   * (#254). Add a new exclusion above, not here. Also add it to the card
+   * list in `collectSectionLineDefects` in
+   * scripts/verify-dashboard-spacing-browser.mjs. */
   :is(.page-heading, .dash-tabs) + & {
     margin-top: var(--dash-gap);
     padding-top: 0;
