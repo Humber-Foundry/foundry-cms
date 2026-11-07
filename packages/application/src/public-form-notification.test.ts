@@ -55,6 +55,7 @@ function store(
       unreadCount: 0,
     }),
     countUnreadInbox: vi.fn().mockResolvedValue(0),
+    countInboxByForm: vi.fn().mockResolvedValue({ contact: 2 }),
     listSuspectedSpam: vi.fn().mockResolvedValue([]),
     listFailed: vi.fn().mockResolvedValue([]),
     viewSubmission: vi.fn().mockResolvedValue(null),
@@ -194,6 +195,39 @@ describe("public form notification delivery", () => {
 
     expect(authorize).toHaveBeenCalledWith(actor, "forms.review");
     expect(notificationStore.countUnreadInbox).toHaveBeenCalledWith({ siteId });
+    expect(notificationStore.listInbox).not.toHaveBeenCalled();
+  });
+
+  it("counts each form's messages behind the same review authority", async () => {
+    const notificationStore = store();
+    const authorize = vi.fn().mockResolvedValue({
+      id: createHumanMembershipId("membership-editor"),
+      siteId,
+      userId: createHumanUserId("user-editor"),
+      email: "editor@example.com",
+      identityBinding: { issuer: "issuer", subject: "editor" },
+      role: "editor",
+      status: "active",
+    });
+    const actor = {
+      binding: { issuer: "issuer", subject: "editor" },
+      email: "editor@example.com",
+      nonce: "nonce",
+    };
+    const application = createPublicFormOperationsApplication({
+      siteId,
+      store: notificationStore,
+      adapter: { notify: vi.fn(), health: vi.fn() },
+      authorize,
+    });
+
+    await expect(
+      application.queries.messageCountsByForm({ actor }),
+    ).resolves.toEqual({ contact: 2 });
+
+    expect(authorize).toHaveBeenCalledWith(actor, "forms.review");
+    expect(notificationStore.countInboxByForm).toHaveBeenCalledWith({ siteId });
+    // Counting must never read a message. The list query stays untouched.
     expect(notificationStore.listInbox).not.toHaveBeenCalled();
   });
 
