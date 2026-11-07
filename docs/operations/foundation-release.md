@@ -41,10 +41,13 @@ install. Puck and the tiptap starter kit depend on tiptap packages with open
 ranges. Tiptap packages need exactly matching versions of each other. So the
 reference-site package lists every resolved `@tiptap/*` package at one exact
 version. The scaffold and sync write that set as the installation's overrides.
-An installation can add its own tiptap package at the same version. The
-scaffold and sync stop with `foundation_release_tiptap_unpinned` or
-`foundation_release_tiptap_version_drift` when the lockfile resolves a tiptap
-package at another version.
+The scaffold and sync stop with `foundation_release_tiptap_version_drift`
+when the lockfile resolves a tiptap package at a version other than its
+`@tiptap/core`. An installation can add its own tiptap package at that
+version. The check does not compare with the release pin. Before a sync, the
+previous release's overrides can hold the whole set at the previous version.
+The sync then writes the target release's overrides. Run `npm install` after
+the sync so the installation moves to the target tiptap version.
 
 A Puck or tiptap upgrade can add a tiptap package. Add that package to
 `apps/reference-site/package.json` at the shared version. The

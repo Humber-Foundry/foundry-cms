@@ -155,20 +155,24 @@ export function alignedTiptapPins(dependencies) {
 
 /**
  * Checks that an npm lockfile resolves every `@tiptap/*` package, at any
- * depth, to the version that the release `dependencies` pin. An installation
- * may add its own tiptap package at that version. Any other version fails
- * here, by name, instead of as a missing export in the build. The error
- * detail is `<name>@<resolved>:expected:<pinned>`.
+ * depth, to the version of its `@tiptap/core`. A tiptap package at another
+ * version fails here, by name, instead of as a missing export in the build.
+ * The error detail is `<name>@<resolved>:expected:<core version>`.
+ *
+ * The check compares with the lockfile's own core version, not the release
+ * pin. Before a sync, the previous release's overrides hold the whole set at
+ * the previous version. That set builds, and the sync must continue so it can
+ * write the target release's overrides.
  */
-export function assertTiptapSetPinned({ lock, dependencies }) {
-  const pins = alignedTiptapPins(dependencies);
-  const expected = pins["@tiptap/core"];
-  for (const { name, version } of lockedTiptapPackages(lock)) {
-    if (version === expected) continue;
-    const code = pins[name] === undefined ? "unpinned" : "version_drift";
-    throw new Error(
-      `foundation_release_tiptap_${code}:${name}@${version}:expected:${expected}`,
-    );
+export function assertTiptapSetAligned(lock) {
+  const packages = lockedTiptapPackages(lock);
+  const expected = packages.find(({ name }) => name === "@tiptap/core")?.version;
+  for (const { name, version } of packages) {
+    if (version !== expected) {
+      throw new Error(
+        `foundation_release_tiptap_version_drift:${name}@${version}:expected:${expected}`,
+      );
+    }
   }
 }
 
@@ -181,16 +185,6 @@ export function lockedTiptapPackages(lock) {
     const match = /(?:^|\/)node_modules\/(@tiptap\/[^/]+)$/u.exec(path);
     return match === null ? [] : [{ name: match[1], version: entry.version }];
   });
-}
-
-/**
- * Returns the `dependencies` map of the release package at `packageRoot`.
- */
-export async function readReleaseDependencies(packageRoot) {
-  const releasePackage = JSON.parse(
-    await readFile(join(packageRoot, "package.json"), "utf8"),
-  );
-  return releasePackage.dependencies;
 }
 
 /**
@@ -209,9 +203,10 @@ export async function writeInstallationBuildConfiguration({
   targetPackage.private = true;
   targetPackage.type = "module";
   targetPackage.engines = { node: descriptor.compatibility.node };
-  targetPackage.overrides = alignedTiptapPins(
-    await readReleaseDependencies(packageRoot),
+  const releasePackage = JSON.parse(
+    await readFile(join(packageRoot, "package.json"), "utf8"),
   );
+  targetPackage.overrides = alignedTiptapPins(releasePackage.dependencies);
   targetPackage.scripts = {
     ...(targetPackage.scripts ?? {}),
     build: "next build",

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   alignedTiptapPins,
-  assertTiptapSetPinned,
+  assertTiptapSetAligned,
   lockedTiptapPackages,
 } from "./foundation-release-lib.mjs";
 
@@ -43,38 +43,26 @@ describe("tiptap pins", () => {
 });
 
 describe("installed tiptap set", () => {
-  const dependencies = {
-    "@tiptap/core": "3.29.1",
-    "@tiptap/extension-text-align": "3.29.1",
-    next: "16.2.12",
-  };
-
-  it("accepts a lockfile that resolves every tiptap package to its pin", () => {
+  it("accepts a lockfile where every tiptap package shares the core version", () => {
     expect(() =>
-      assertTiptapSetPinned({
-        dependencies,
-        lock: {
-          packages: {
-            "": {},
-            "node_modules/@tiptap/core": { version: "3.29.1" },
-            "node_modules/@puckeditor/core/node_modules/@tiptap/extension-text-align":
-              { version: "3.29.1" },
-            "node_modules/next": { version: "16.2.12" },
-          },
+      assertTiptapSetAligned({
+        packages: {
+          "": {},
+          "node_modules/@tiptap/core": { version: "3.29.1" },
+          "node_modules/@puckeditor/core/node_modules/@tiptap/extension-text-align":
+            { version: "3.29.1" },
+          "node_modules/next": { version: "16.2.12" },
         },
       }),
     ).not.toThrow();
   });
 
-  it("names a tiptap package that a range resolved past its pin", () => {
+  it("names a tiptap package that a range resolved past the core version", () => {
     expect(() =>
-      assertTiptapSetPinned({
-        dependencies,
-        lock: {
-          packages: {
-            "node_modules/@tiptap/core": { version: "3.29.1" },
-            "node_modules/@tiptap/extension-text-align": { version: "3.33.0" },
-          },
+      assertTiptapSetAligned({
+        packages: {
+          "node_modules/@tiptap/core": { version: "3.29.1" },
+          "node_modules/@tiptap/extension-text-align": { version: "3.33.0" },
         },
       }),
     ).toThrow(
@@ -82,34 +70,29 @@ describe("installed tiptap set", () => {
     );
   });
 
-  it("accepts an installation's own tiptap package at the shared version", () => {
+  it("accepts an installation's own tiptap package at the core version", () => {
     expect(() =>
-      assertTiptapSetPinned({
-        dependencies,
-        lock: {
-          packages: {
-            "node_modules/@tiptap/core": { version: "3.29.1" },
-            "node_modules/@tiptap/extension-color": { version: "3.29.1" },
-          },
+      assertTiptapSetAligned({
+        packages: {
+          "node_modules/@tiptap/core": { version: "3.29.1" },
+          "node_modules/@tiptap/extension-color": { version: "3.29.1" },
         },
       }),
     ).not.toThrow();
   });
 
-  it("names a tiptap package that the release does not pin at another version", () => {
+  it("accepts a set held at the previous release's version during an upgrade", () => {
+    // Before sync, the installation still has the previous release's
+    // overrides. They hold the whole set at the previous version. Sync must
+    // continue, so it can write the target release's overrides.
     expect(() =>
-      assertTiptapSetPinned({
-        dependencies,
-        lock: {
-          packages: {
-            "node_modules/@tiptap/core": { version: "3.29.1" },
-            "node_modules/@tiptap/extension-color": { version: "3.33.0" },
-          },
+      assertTiptapSetAligned({
+        packages: {
+          "node_modules/@tiptap/core": { version: "3.29.1" },
+          "node_modules/@tiptap/extension-text-align": { version: "3.29.1" },
         },
       }),
-    ).toThrow(
-      "foundation_release_tiptap_unpinned:@tiptap/extension-color@3.33.0:expected:3.29.1",
-    );
+    ).not.toThrow();
   });
 
   it("is pinned in full by the reference site for the repository lockfile", () => {
@@ -119,17 +102,11 @@ describe("installed tiptap set", () => {
     // resolves it from an open range.
     const referenceManifest = readJson("apps/reference-site/package.json");
     const lock = readJson("package-lock.json");
-    expect(() =>
-      assertTiptapSetPinned({
-        dependencies: referenceManifest.dependencies,
-        lock,
-      }),
-    ).not.toThrow();
     const pins = alignedTiptapPins(referenceManifest.dependencies);
     expect(
-      lockedTiptapPackages(lock)
-        .map(({ name }) => name)
-        .filter((name) => pins[name] === undefined),
+      lockedTiptapPackages(lock).filter(
+        ({ name, version }) => pins[name] !== version,
+      ),
     ).toEqual([]);
   });
 });

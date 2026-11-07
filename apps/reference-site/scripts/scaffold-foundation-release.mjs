@@ -7,10 +7,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertLockedReleaseExecutable,
-  assertTiptapSetPinned,
+  assertTiptapSetAligned,
   isTemplatePath,
   parseReleaseArguments,
-  readReleaseDependencies,
   tarEntries,
   writeInstallationBuildConfiguration,
 } from "./foundation-release-lib.mjs";
@@ -40,10 +39,7 @@ async function main() {
   for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
     assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
   }
-  assertTiptapSetPinned({
-    lock,
-    dependencies: await readReleaseDependencies(packageRoot),
-  });
+  assertTiptapSetAligned(lock);
   const {
     loadFoundationReleaseDescriptor,
     verifyFoundationReleaseArtifacts,
