@@ -466,6 +466,20 @@ export function createD1PublicFormNotificationStore(
         .first<{ unread: number }>();
       return row?.unread ?? 0;
     },
+    async countInboxByForm({ siteId }) {
+      const rows = await database
+        .prepare(
+          acceptedInboxQuery(
+            "submission.form_id, COUNT(*) AS received",
+            "GROUP BY submission.form_id",
+          ),
+        )
+        .bind(siteId)
+        .all<{ form_id: string; received: number }>();
+      return Object.fromEntries(
+        rows.results.map((row) => [row.form_id, row.received]),
+      );
+    },
     async listSuspectedSpam({ siteId }) {
       const rows = await database
         .prepare(

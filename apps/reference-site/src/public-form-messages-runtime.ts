@@ -141,6 +141,20 @@ export async function loadPublicFormInbox(
 }
 
 /**
+ * How many messages each form has received, by form id. Messages shows this
+ * next to each form the site declares. It reads counts only, never a message.
+ */
+export async function loadFormMessageCounts(
+  humanContext: HumanAccessRequestContext,
+): Promise<Readonly<Record<string, number>>> {
+  return readMessages(humanContext, {}, async (application) =>
+    application.queries.messageCountsByForm({
+      actor: humanContext.identity,
+    }),
+  );
+}
+
+/**
  * Settings shows the owner-notification detail: the email queue and any
  * notification that never reached the owner. The messages themselves are kept
  * whatever this says.

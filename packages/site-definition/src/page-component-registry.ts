@@ -507,6 +507,49 @@ const linkFields = {
   href: { control: "siteHref", label: "Destination", defaultValue: "mailto:hello@example.com", editable: false },
 } as const;
 
+/**
+ * The contact form block.
+ *
+ * It is a foundation component, so every installation has a way to put a
+ * working form on a page. The owner writes the heading, the sentence under it
+ * and the button label. The fields themselves are fixed, because they are the
+ * fields of the public form the installation declares, and the Messages inbox
+ * reads them by their registered roles.
+ *
+ * `formId` names that declared form. It is not editable: pointing a block at a
+ * form the site does not declare would send every message into nothing. It
+ * uses the stable `registered` envelope, so no installation has to change the
+ * Site Definition schema to get this block. See ADR-0044.
+ */
+export const contactFormComponent = createRegisteredPageComponent({
+  type: "contactForm",
+  label: "Contact form",
+  fields: {
+    formId: {
+      control: "text",
+      label: "Form",
+      defaultValue: "contact",
+      editable: false,
+    },
+    title: {
+      control: "text",
+      label: "Heading",
+      defaultValue: "Send a message",
+    },
+    body: {
+      control: "textarea",
+      label: "Sentence under the heading",
+      defaultValue:
+        "Tell us what you need. Leave your email address and we will write back.",
+    },
+    actionLabel: {
+      control: "text",
+      label: "Button label",
+      defaultValue: "Send message",
+    },
+  },
+});
+
 const foundationComponents = {
   hero: foundationRegistration("hero", "Hero", {
     variant: { control: "select", label: "Variant", defaultValue: designContract.variants.hero.values[0], options: designContract.variants.hero.values.map((value) => ({ label: value, value })), editable: false },
@@ -545,6 +588,7 @@ const foundationComponents = {
     body: { control: "richText", label: "Body", defaultValue: { version: RICH_TEXT_VERSION, type: "document", children: [{ type: "paragraph", children: [{ type: "text", text: "Explain what will happen next.", marks: [] }] }] } },
     action: { control: "object", label: "Action", fields: linkFields, defaultValue: { id: "action", label: "Continue", href: "mailto:hello@example.com" }, editable: false },
   }, (id, definition) => foundationDefault("callToAction", id, definition)),
+  contactForm: contactFormComponent,
 };
 
 function registryFromComponents(

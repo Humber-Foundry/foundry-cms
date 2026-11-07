@@ -1990,6 +1990,39 @@ describe("MCP page restructure tool", () => {
     ).toEqual(["hero", "proof", "callToAction"]);
   });
 
+  it("adds a contact form block the way a connected agent does", async () => {
+    // A contact form is a foundation component, so an agent can place one on
+    // any installation. See issue #235 and ADR-0044.
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-contact-form",
+    );
+    const result = resultOf<{ revision: number }>(
+      await fixtureValue.application.restructurePage(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "restructure-contact-form",
+          pageId,
+          operations: [{ op: "add", sectionType: "contactForm", position: 1 }],
+        },
+        context,
+      ),
+    );
+    expect(result.revision).toBe(2);
+    const sections = await sectionsOf(fixtureValue, workspaceId, pageId);
+    expect(sections[1]).toMatchObject({
+      type: "registered",
+      component: "contactForm",
+      props: {
+        formId: "contact",
+        title: "Send a message",
+        actionLabel: "Send message",
+      },
+    });
+  });
+
   it("repeats the same answer when the same request is sent twice", async () => {
     const { fixtureValue, workspaceId, pageId } = await draftWithPage(
       [mcpInitialScope, mcpContentDraftScope],

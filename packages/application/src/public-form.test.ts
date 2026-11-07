@@ -326,6 +326,7 @@ describe("public form acceptance", () => {
 describe("installed public form list", () => {
   const contactForm = {
     id: "contact",
+    name: "Contact form",
     schemaVersion: "1.0.0",
     turnstileAction: "contact",
     fields: [
@@ -399,6 +400,11 @@ describe("installed public form list", () => {
       false,
     );
     expect(isInstalledPublicFormList([{ ...contactForm, id: "" }])).toBe(false);
+    // Without a name the dashboard would have to print the form id, which is
+    // an internal identifier no owner should have to read.
+    expect(isInstalledPublicFormList([{ ...contactForm, name: "" }])).toBe(
+      false,
+    );
     expect(
       isInstalledPublicFormList([{ ...contactForm, turnstileAction: 1 }]),
     ).toBe(false);

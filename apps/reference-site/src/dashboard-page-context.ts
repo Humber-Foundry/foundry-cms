@@ -71,6 +71,44 @@ export const loadPublishedDefinition = cache(
     installedSite.application.queries.getPublishedSite(),
 );
 
+/**
+ * The site as this person's own draft has it, or the published site when they
+ * have not started a draft.
+ *
+ * A destination that only reads the site uses this. `loadDashboardWorkspace`
+ * creates a workspace when there is none, which is right for an editing
+ * destination and wrong for a screen that only looks at the site: opening it
+ * must write nothing.
+ */
+export const loadEditedOrPublishedDefinition = cache(
+  async (): Promise<SiteDefinition> => {
+    const access = await requireAuthorizedDashboardAccess();
+    const actorId = createContentActorId(access.membership.id);
+    const latest = await latestContentWorkspaceIdForActor(actorId);
+    if (latest === null) {
+      return loadPublishedDefinition();
+    }
+    try {
+      const application = await loadContentRevisionApplication(
+        latest,
+        actorId,
+      );
+      return (await application.queries.getCurrent()).definition;
+    } catch (error) {
+      // The draft cannot be read. The published site is still the truth about
+      // what visitors see, so a read-only screen shows that rather than
+      // failing.
+      if (
+        error instanceof ContentWorkspaceAccessError ||
+        error instanceof ContentRevisionConfigurationError
+      ) {
+        return loadPublishedDefinition();
+      }
+      throw error;
+    }
+  },
+);
+
 export const loadMutationToken = cache(async (): Promise<string> => {
   const access = await requireAuthorizedDashboardAccess();
   return createHumanMutationToken(access.identity);
