@@ -77,6 +77,7 @@ const destinations = [
   ["Overview", "/dash"],
   ["Pages", "/dash/pages"],
   ["Blog", "/dash/blog"],
+  ["New post", "/dash/blog/new"],
   ["Photos", "/dash/media"],
   ["Design", "/dash/design"],
   ["Messages", "/dash/forms"],
@@ -172,6 +173,37 @@ async function checkCampaignScreen(page, origin) {
   await checkDestination(page, origin, "One email", href);
 }
 
+/**
+ * Opens one saved post's screen and runs the same axe check there.
+ *
+ * Where a post stands, its preview and its writing box used to render on
+ * /dash/blog, which this sweep visits. Since #230 they are on one post's own
+ * screen, which needs a post to open, so this writes one through the writing
+ * box the first time and opens it from the list after that.
+ */
+async function checkBlogPostScreen(page, origin) {
+  await page.goto(`${origin}/dash/blog`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  if ((await page.locator(".dash-row").count()) === 0) {
+    await page.getByRole("link", { name: "New post" }).first()
+      .click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/blog\/new/u, { timeout: 20_000 });
+    const composer = page.locator("form.composer");
+    await composer.waitFor({ state: "visible", timeout: 20_000 });
+    await composer.locator('input[name="title"]').fill("Harbour notes");
+    await composer
+      .locator(".rich-text-editor [contenteditable]")
+      .fill("The new pontoon is finished and the winter berths are open.");
+    await page.getByRole("button", { name: /^Save draft/u })
+      .click({ timeout: 8000 });
+    await page.waitForURL(/\/dash\/blog(\?|$)/u, { timeout: 30_000 });
+  }
+  const row = page.locator(".dash-row").first();
+  await row.waitFor({ timeout: 20_000 });
+  const href = await row.locator("a.dash-row-link").getAttribute("href");
+  await checkDestination(page, origin, "One post", href);
+}
+
 async function main() {
   const port = await availablePort();
   if (port === 3000) throw new Error("dashboard_axe_origin_not_distinct");
@@ -238,6 +270,7 @@ async function main() {
       await checkDestination(page, origin, name, href);
     }
     await checkCampaignScreen(page, origin);
+    await checkBlogPostScreen(page, origin);
     await context.close();
 
     process.stdout.write(
