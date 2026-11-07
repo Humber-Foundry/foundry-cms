@@ -56,7 +56,20 @@ describe("one campaign's screen, browser acceptance", () => {
    * the server says it is.
    */
   function fakeNewsletterServer(
-    options: { deliveryState?: string; senderDetailsState?: string } = {},
+    options: {
+      deliveryState?: string;
+      deliveryMissingSettings?: ReadonlyArray<string>;
+      senderDetailsState?: string;
+      /** The revision the server's send review describes, when not this one. */
+      sendSummaryRevisionId?: string;
+      /** The provider's answer to a test, when it is not a delivery. */
+      testFailureCode?: string;
+      /**
+       * The fingerprint is a hash of what the email says, so an email edited
+       * back to its first words has its first fingerprint again.
+       */
+      fingerprintFollowsSubject?: boolean;
+    } = {},
   ) {
     const campaign = {
       id: "20000000-0000-4000-8000-000000000002",
@@ -112,7 +125,10 @@ describe("one campaign's screen, browser acceptance", () => {
           revisionNumber: 1,
           html: {
             channel: "html",
-            bytes: "<p>News</p>",
+            bytes:
+              '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+              "<title>September news</title></head><body><p>Preview</p>" +
+              "<h2><strong>News</strong></h2></body></html>",
             fingerprint: "html-one",
             schemaVersion: "1.7.0",
             rendererVersion: revision.rendererVersion,
@@ -125,7 +141,19 @@ describe("one campaign's screen, browser acceptance", () => {
             rendererVersion: revision.rendererVersion,
           },
           campaignFingerprint: state.campaignFingerprint,
-          eligibleSubscriberCount: 12,
+          eligibleSubscriberCount: 412,
+        },
+        sendSummary: {
+          campaignRevisionId: options.sendSummaryRevisionId ?? revision.id,
+          recipientCount: 412,
+          subject: revision.subject,
+          senderName: "Example News",
+          senderAddress: "news@example.test",
+          replyAddress: "news@example.test",
+          footer:
+            "Example News \u00b7 1 Harbour Road \u00b7 Contact: https://example.test/",
+          unsubscribeAddress:
+            "https://example.test/unsubscribe?token={{foundry.unsubscribe.token}}",
         },
         testEvidence:
           state.testedFingerprint === null
@@ -179,6 +207,13 @@ describe("one campaign's screen, browser acceptance", () => {
           >;
           commands.push(command);
           if (command.action === "request_test") {
+            if (options.testFailureCode !== undefined) {
+              return Response.json({
+                executionId,
+                state: "failed",
+                failureCode: options.testFailureCode,
+              });
+            }
             state.testedFingerprint = state.campaignFingerprint;
             state.readiness = "owner_confirmation_required";
             return Response.json({ executionId, state: "accepted" });
@@ -196,8 +231,12 @@ describe("one campaign's screen, browser acceptance", () => {
           if (command.action === "edit") {
             // A new revision renders to a new fingerprint, so the delivered
             // test no longer covers what the email says.
-            state.campaignFingerprint = "fingerprint-two";
             const input = (command.input ?? {}) as Record<string, unknown>;
+            state.campaignFingerprint =
+              options.fingerprintFollowsSubject === true &&
+              input.subject === revision.subject
+                ? "fingerprint-one"
+                : "fingerprint-two";
             return Response.json({
               campaign: { ...campaign, version: 2 },
               revision: { ...revision, ...input, revisionNumber: 2 },
@@ -210,7 +249,7 @@ describe("one campaign's screen, browser acceptance", () => {
           return Response.json({
             delivery: {
               state: options.deliveryState ?? "connected",
-              missingSettings: [],
+              missingSettings: options.deliveryMissingSettings ?? [],
               providerHealth: null,
               setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
             },
@@ -288,17 +327,354 @@ describe("one campaign's screen, browser acceptance", () => {
     });
   });
 
-  it("shows the saved email without anyone asking for a preview", async () => {
+  it("draws the exact email the provider will send, at two widths", async () => {
     const server = fakeNewsletterServer();
     const host = mount(server.revision, "owner");
 
-    const preview = host.querySelector("section.email-preview");
-    expect(preview).not.toBeNull();
-    expect(preview!.textContent).toContain("Preview");
+    // The frame draws the server's own rendered bytes, not a second drawing
+    // of the same content in the dashboard's styles.
+    const frame = await vi.waitFor(() => {
+      const found = host.querySelector<HTMLIFrameElement>(
+        "section.email-preview iframe",
+      );
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(frame.srcdoc).toContain("<title>September news</title>");
+    expect(frame.srcdoc).toContain("<h2><strong>News</strong></h2>");
+    // Nothing in the frame may run or reach off this site.
+    expect(frame.srcdoc).toContain("default-src 'none'");
+    expect(frame.sandbox.value).toBe("allow-same-origin");
+
+    // An email is built for 600 pixels. The phone width is the same email at
+    // 390, never a scaled picture of the wider one.
+    expect(frame.style.width).toBe("600px");
+    await userEvent.click(buttonNamed(host, "On a phone")!);
+    expect(frame.style.width).toBe("390px");
+    expect(buttonNamed(host, "On a phone")!.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    await userEvent.click(buttonNamed(host, "On a computer")!);
+    expect(frame.style.width).toBe("600px");
+
     // The rendered text and the content fingerprint arrive with the report.
     await vi.waitFor(() =>
       expect(host.textContent).toContain("html-one"),
     );
+  });
+
+  it("says why a test cannot go out in local development, and does not look broken", async () => {
+    const server = fakeNewsletterServer({
+      deliveryState: "local_development",
+      deliveryMissingSettings: [
+        "FOUNDRY_BREVO_API_KEY",
+        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
+      ],
+    });
+    const host = mount(server.revision, "owner");
+
+    // The button stays on the step, and the step says exactly why it cannot
+    // work here.
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
+    );
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send me a test")!.disabled).toBe(true),
+    );
+    expect(host.textContent).toContain(
+      "No test can go out from here. Nothing is broken: a test goes out as " +
+        "soon as this site is connected to an email provider.",
+    );
+    // One plain sentence on the line says why.
+    expect(host.textContent).toContain(
+      "Email is off in local development, because no Brevo credentials are " +
+        "set.",
+    );
+    expect(host.textContent).toContain(
+      "On a live site, Settings → Email shows whether email is connected.",
+    );
+    const settingsLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>("a"),
+    ).find((link) => link.textContent === "Settings → Email");
+    expect(settingsLink?.getAttribute("href")).toBe("/dash/settings/email");
+    const guideLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>("a"),
+    ).find((link) => link.textContent === "How to connect email");
+    expect(guideLink).toBeDefined();
+    // The line is plain status, not an alert: nothing here is a fault.
+    expect(host.querySelector(".connection-status-missing")).toBeNull();
+
+    // The missing setting names are technical details, shown on demand. A
+    // closed disclosure under the line names every one of them, and nothing
+    // outside it names a setting, so the open screen stays plain.
+    const disclosure = host.querySelector<HTMLDetailsElement>(
+      "details.connection-status-details",
+    );
+    expect(disclosure).not.toBeNull();
+    expect(disclosure!.open).toBe(false);
+    expect(disclosure!.querySelector("summary")?.textContent).toBe(
+      "Technical details",
+    );
+    expect(disclosure!.textContent).toContain("These settings are missing:");
+    expect(disclosure!.textContent).toContain("FOUNDRY_BREVO_API_KEY");
+    expect(disclosure!.textContent).toContain(
+      "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
+    );
+    const outsideDisclosure = host.textContent!.replace(
+      disclosure!.textContent!,
+      "",
+    );
+    expect(outsideDisclosure).not.toContain("FOUNDRY_");
+    // Nothing was sent, and nothing reads as a fault.
+    expect(server.commands).toHaveLength(0);
+  });
+
+  it("says on the test step why the provider did not take a test", async () => {
+    const server = fakeNewsletterServer({
+      testFailureCode: "provider_rate_limited",
+    });
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
+    );
+    await userEvent.click(buttonNamed(host, "Send me a test")!);
+    expect(server.commands).toContainEqual({
+      action: "request_test",
+      campaignId: server.campaign.id,
+      testRecipientIds: ["membership-owner"],
+    });
+
+    // The reason sits on the step itself, in plain words, and the step stays
+    // where it was: no test was delivered, so nothing reads as done.
+    const step = await vi.waitFor(() => {
+      const found = Array.from(host.querySelectorAll("li.send-step")).find(
+        (item) => item.textContent?.includes("2. Send me a test"),
+      );
+      expect(found?.textContent).toContain(
+        "The email provider is taking too many requests right now. Wait a " +
+          "few minutes, then send the test again.",
+      );
+      return found!;
+    });
+    expect(step.getAttribute("data-state")).toBe("now");
+    expect(buttonNamed(host, "Send me a test")).toBeDefined();
+    // The step is the one place that says it.
+    const saidAt = Array.from(host.querySelectorAll('[role="status"]')).filter(
+      (element) => element.textContent?.includes("too many requests"),
+    );
+    expect(saidAt).toHaveLength(1);
+    expect(step.contains(saidAt[0]!)).toBe(true);
+  });
+
+  it("makes the owner read the same review before it will approve", async () => {
+    const server = fakeNewsletterServer();
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    const host = mount(server.revision, "owner");
+
+    const approve = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Approve this email for sending");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(host.querySelector(".send-review")!.textContent).toContain(
+      "Going to 412 people.",
+    );
+    expect(approve.disabled).toBe(true);
+
+    await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
+    expect(approve.disabled).toBe(false);
+    // Watch every change to the screen from here. The send control must
+    // never be open, not even for one drawing, until the review is read
+    // again.
+    let sendOpenedEarly = false;
+    const watcher = new MutationObserver(() => {
+      const sendNow = buttonNamed(host, "Send to 412 people now");
+      if (sendNow !== undefined && !sendNow.disabled) sendOpenedEarly = true;
+    });
+    watcher.observe(host, { subtree: true, childList: true, attributes: true });
+    await userEvent.click(approve);
+    expect(server.commands).toContainEqual({
+      action: "authorize_bulk",
+      campaignId: server.campaign.id,
+      testExecutionId: "40000000-0000-4000-8000-000000000001",
+    });
+
+    // One tick opens one step. Approving is a step, so the send that follows
+    // needs its own reading; otherwise the same tick would send the email.
+    const send = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Send to 412 people now");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(send.disabled).toBe(true);
+    watcher.disconnect();
+    expect(sendOpenedEarly).toBe(false);
+  });
+
+  it("does not keep a review tick through an edit that is later undone", async () => {
+    const server = fakeNewsletterServer({ fingerprintFollowsSubject: true });
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Approve this email for sending")).toBeDefined(),
+    );
+    await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
+    expect(buttonNamed(host, "Approve this email for sending")!.disabled).toBe(
+      false,
+    );
+
+    // Change the subject, then change it back. The email says the same words
+    // as before, but the review was read for an email that then changed, so
+    // it has to be read again.
+    async function changeSubject(from: string, to: string) {
+      await userEvent.click(buttonNamed(host, "Change the email")!);
+      const subject = Array.from(
+        host.querySelectorAll<HTMLInputElement>('input[name="subject"]'),
+      ).find(({ value }) => value === from);
+      await userEvent.fill(subject!, to);
+      await userEvent.click(page.getByRole("button", { name: "Save changes" }));
+      await vi.waitFor(() =>
+        expect(buttonNamed(host, "Change the email")).toBeDefined(),
+      );
+    }
+    await changeSubject("September news", "October news");
+    await vi.waitFor(() =>
+      expect(
+        buttonNamed(host, "Approve this email for sending"),
+      ).toBeUndefined(),
+    );
+    await changeSubject("October news", "September news");
+
+    const approve = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Approve this email for sending");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(approve.disabled).toBe(true);
+  });
+
+  it("asks for a new reading after a scheduled send is called off", async () => {
+    const server = fakeNewsletterServer();
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    server.state.authorizationId = "50000000-0000-4000-8000-000000000001";
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Send to 412 people then")).toBeDefined(),
+    );
+    await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
+    await userEvent.fill(
+      host.querySelector<HTMLInputElement>('input[name="sendAt"]')!,
+      "2030-01-15T09:00",
+    );
+
+    // The tick is spent on scheduling. The server now holds the schedule.
+    server.state.schedule = {
+      id: "70000000-0000-4000-8000-000000000001",
+      state: "active",
+      localDateTime: "2030-01-15T09:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-08:00",
+      executeAtUtc: "2030-01-15T17:00:00.000Z",
+    };
+    await userEvent.click(buttonNamed(host, "Send to 412 people then")!);
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Call this send off")).toBeDefined(),
+    );
+
+    // Calling it off brings the send controls back. The same approval still
+    // stands, but the reading was spent, so sending now needs a new one.
+    server.state.schedule = null;
+    await userEvent.click(buttonNamed(host, "Call this send off")!);
+    const sendNow = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Send to 412 people now");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(sendNow.disabled).toBe(true);
+  });
+
+  it("offers no send while the server reviews a different revision", async () => {
+    const server = fakeNewsletterServer({
+      sendSummaryRevisionId: "30000000-0000-4000-8000-000000000099",
+    });
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    server.state.authorizationId = "50000000-0000-4000-8000-000000000001";
+    const host = mount(server.revision, "owner");
+
+    // The review would name a subject nobody is reading, so the screen asks
+    // for a reload instead and offers no control that could send.
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain(
+        "This email changed since the page opened. Reload the page and read " +
+          "it again before you send it.",
+      ),
+    );
+    expect(host.querySelector(".send-review")).toBeNull();
+    expect(buttonNamed(host, "Send to 412 people now")).toBeUndefined();
+    expect(host.querySelector('input[name="sendReviewed"]')).toBeNull();
+    expect(server.commands).toHaveLength(0);
+  });
+
+  it("makes the owner read a review naming the list before it will send", async () => {
+    const server = fakeNewsletterServer();
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    server.state.authorizationId = "50000000-0000-4000-8000-000000000001";
+    const host = mount(server.revision, "owner");
+
+    const confirm = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Send to 412 people now");
+      expect(found).toBeDefined();
+      return found!;
+    });
+
+    // Everything the owner has to read before a send, from the revision that
+    // would go out.
+    const review = host.querySelector(".send-review")!;
+    expect(review.textContent).toContain("Going to 412 people.");
+    expect(review.textContent).toContain("September news");
+    expect(review.textContent).toContain("Example News");
+    expect(review.textContent).toContain("news@example.test");
+    expect(review.textContent).toContain("1 Harbour Road");
+    // The unsubscribe address reads as an address, with no token marker.
+    expect(review.textContent).toContain("https://example.test/unsubscribe");
+    expect(review.textContent).not.toContain("foundry.unsubscribe.token");
+
+    // Nothing goes out until the owner says they read it.
+    const scheduleButton = buttonNamed(host, "Send to 412 people then")!;
+    expect(confirm.disabled).toBe(true);
+    expect(scheduleButton.disabled).toBe(true);
+    await userEvent.click(
+      host.querySelector('input[name="sendReviewed"]')!,
+    );
+    expect(confirm.disabled).toBe(false);
+    expect(server.commands).toHaveLength(0);
+
+    await userEvent.click(confirm);
+    expect(server.commands).toContainEqual({
+      action: "send_bulk_now",
+      campaignId: server.campaign.id,
+      authorizationId: "50000000-0000-4000-8000-000000000001",
+    });
   });
 
   it("opens sending only after a delivered test is confirmed, and closes it again on an edit", async () => {
@@ -306,7 +682,7 @@ describe("one campaign's screen, browser acceptance", () => {
     const host = mount(server.revision, "owner");
 
     await vi.waitFor(() =>
-      expect(buttonNamed(host, "Send a test email")).toBeDefined(),
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
     );
 
     // Nothing can be approved or sent before a test exists.
@@ -316,7 +692,7 @@ describe("one campaign's screen, browser acceptance", () => {
       "Send a test and confirm it arrived first.",
     );
 
-    await userEvent.click(buttonNamed(host, "Send a test email")!);
+    await userEvent.click(buttonNamed(host, "Send me a test")!);
     await vi.waitFor(() =>
       expect(buttonNamed(host, "Confirm the test arrived")).toBeDefined(),
     );
@@ -355,7 +731,7 @@ describe("one campaign's screen, browser acceptance", () => {
     // The save closes the writing box and the steps come back, now asking for
     // a new test.
     await vi.waitFor(() =>
-      expect(buttonNamed(host, "Send a test email")).toBeDefined(),
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
     );
     expect(buttonNamed(host, "Approve this email for sending")).toBeUndefined();
     expect(host.textContent).toContain(
@@ -425,7 +801,7 @@ describe("one campaign's screen, browser acceptance", () => {
     const host = mount(server.revision, "editor");
 
     await vi.waitFor(() =>
-      expect(buttonNamed(host, "Send a test email")).toBeDefined(),
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
     );
 
     expect(host.textContent).toContain(
@@ -466,11 +842,11 @@ describe("one campaign's screen, browser acceptance", () => {
     const host = mount(server.revision, "owner");
 
     await vi.waitFor(() =>
-      expect(buttonNamed(host, "Send a test email")).toBeDefined(),
+      expect(buttonNamed(host, "Send me a test")).toBeDefined(),
     );
 
     await vi.waitFor(() =>
-      expect(buttonNamed(host, "Send a test email")!.disabled).toBe(true),
+      expect(buttonNamed(host, "Send me a test")!.disabled).toBe(true),
     );
     expect(host.textContent).toContain(
       "Email is not connected yet, so no test can go out.",

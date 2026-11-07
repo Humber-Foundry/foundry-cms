@@ -11,23 +11,21 @@ import type {
 import { parseSerializedRichTextDocument } from "@humber-foundry/site-definition";
 
 import {
-  campaignPreviewSrc,
-  previewEmailContent,
   readCampaignSendReport,
   refusalCodeIn,
   refusalCodeOf,
   refusalMessage,
   sendCampaignCommand,
+  testFailureMessage,
   type CampaignSendReport,
   type SendFlowCommand,
 } from "./campaign-operations";
 import { useCampaignReadiness } from "./use-campaign-readiness";
+import { CampaignEmailPreview } from "./campaign-email-preview";
 import { CampaignSendFlow } from "./campaign-send-flow";
 import type { EditorMediaContext } from "./change-photo-field";
 import { ConnectionStatus } from "./connection-status";
 import { EmailComposer } from "./email-composer";
-import { HelpTip } from "./help-tip";
-import { RichTextRenderer } from "./rich-text-renderer";
 
 /**
  * One saved email, on its own screen (#237): how it looks, the four steps
@@ -56,6 +54,12 @@ export function CampaignScreen({
   const [revision, setRevision] = useState(initialRevision);
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
+  /**
+   * Why the last test did not go out, or "" while there is nothing to say.
+   * It is drawn on the test step itself, beside the control that was
+   * pressed.
+   */
+  const [testProblem, setTestProblem] = useState("");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<CampaignSendReport | null>(null);
   const { delivery, senderDetails, senderDetailsMissing } =
@@ -74,6 +78,7 @@ export function CampaignScreen({
   async function saveEmail(command: unknown) {
     setBusy(true);
     setMessage("");
+    setTestProblem("");
     try {
       const response = await sendCampaignCommand(csrfToken, command);
       if (!response.ok) {
@@ -106,26 +111,29 @@ export function CampaignScreen({
   async function runStep(command: SendFlowCommand) {
     setBusy(true);
     setMessage("");
+    setTestProblem("");
     try {
       const response = await sendCampaignCommand(csrfToken, command);
       const body = (await response.json().catch(() => null)) as Record<
         string,
         unknown
       > | null;
+      // A test's answer goes on the test step. Every other step's answer goes
+      // at the foot of the screen, as before.
+      const say =
+        command.action === "request_test" ? setTestProblem : setMessage;
       if (!response.ok) {
-        setMessage(refusalMessage(refusalCodeIn(body)));
+        say(refusalMessage(refusalCodeIn(body)));
       } else if (
         command.action === "request_test" &&
         body?.state !== "accepted"
       ) {
         // The provider answered, but not with a delivery. Say so rather than
         // letting the step look finished.
-        const failure =
-          typeof body?.failureCode === "string" ? body.failureCode : "";
-        setMessage(
-          failure === ""
-            ? "The test has not been delivered yet."
-            : `The test was not delivered. Reason: ${failure}.`,
+        say(
+          testFailureMessage(
+            typeof body?.failureCode === "string" ? body.failureCode : "",
+          ),
         );
       }
     } finally {
@@ -162,54 +170,35 @@ export function CampaignScreen({
         />
       ) : (
         <>
-          <section className="email-preview" aria-label="Email preview">
-            <h2>How the email looks</h2>
-            <div className="email-preview-message rendered-rich-text">
-              {revision.headerImage == null ? null : (
-                <figure className="campaign-header-image">
-                  <img
-                    src={campaignPreviewSrc(revision.headerImage.url)}
-                    alt={revision.headerImage.alt}
-                  />
-                </figure>
-              )}
-              <p className="campaign-preview-line">{revision.previewText}</p>
-              <RichTextRenderer
-                document={previewEmailContent(revision.emailContent)}
+          {report === null ? (
+            <section className="email-preview" aria-label="Email preview">
+              <h2>How the email looks</h2>
+              <p>Reading this email back from the server…</p>
+            </section>
+          ) : (
+            <>
+              <CampaignEmailPreview
+                html={report.rendered.html.bytes}
+                text={report.rendered.text.bytes}
+                contentId={report.rendered.html.fingerprint}
               />
-              <p>
-                <a href={revision.callToAction.href}>
-                  {revision.callToAction.label}
-                </a>
-              </p>
-            </div>
-            {report === null ? null : (
-              <details>
-                <summary>How the email reads, and technical details</summary>
-                <pre>{report.rendered.text.bytes}</pre>
-                <p>
-                  Content ID{" "}
-                  <HelpTip label="What's a Content ID?">
-                    A code that proves this email's exact content, so support
-                    can confirm nothing changed after it was approved.
-                  </HelpTip>
-                  : <code>{report.rendered.html.fingerprint}</code>
-                </p>
-              </details>
-            )}
-          </section>
-          {report === null ? null : (
-            <CampaignSendFlow
-              report={report}
-              delivery={delivery}
-              role={role}
-              busy={busy}
-              editBlocked={senderDetailsMissing}
-              onCommand={(sendCommand) => {
-                void runStep(sendCommand);
-              }}
-              onEdit={() => setEditing(true)}
-            />
+              <CampaignSendFlow
+                report={report}
+                delivery={delivery}
+                role={role}
+                busy={busy}
+                editBlocked={senderDetailsMissing}
+                testProblem={testProblem}
+                // The screen's own revision decides whether the review may be
+                // shown. The report describes one exact revision, and a review
+                // that read a different one would name the wrong subject.
+                shownRevisionId={revision.id}
+                onCommand={(sendCommand) => {
+                  void runStep(sendCommand);
+                }}
+                onEdit={() => setEditing(true)}
+              />
+            </>
           )}
         </>
       )}

@@ -496,6 +496,19 @@ export async function GET(request: Request) {
       actor: context.identity,
       campaignId,
     });
+    // The exact revision the bytes above came from. The review a person reads
+    // before a send is built from this one revision only, so it can never
+    // describe a different email from the one that would go out.
+    const sentRevision = await context.application.queries.getRevision({
+      actor: context.identity,
+      campaignId,
+      revisionNumber: rendered.revisionNumber,
+    });
+    // Who the email comes from: the installation's own sending name and
+    // address, which every recipient already reads in their inbox. It is null
+    // while this installation holds no sender under that identity, and the
+    // screen then says so rather than inventing one.
+    const sender = context.readSenderIdentity(sentRevision.senderIdentityId);
     const testEvidence =
       await context.testDelivery.queries.currentEvidence({
         actor: context.identity,
@@ -531,6 +544,21 @@ export async function GET(request: Request) {
         bulkState,
         testRecipients,
         scheduleRequest,
+        // What the owner must read before a send: how many people it goes to,
+        // what it says it is, who it comes from, and the two addresses at the
+        // bottom of it. A reply carries no reply-to header of its own, so a
+        // reply goes back to the sending address.
+        sendSummary: {
+          campaignRevisionId: sentRevision.id,
+          recipientCount: rendered.eligibleSubscriberCount,
+          subject: sentRevision.subject,
+          senderName: sender?.name ?? null,
+          senderAddress: sender?.email ?? null,
+          replyAddress: sender?.email ?? null,
+          footer: sentRevision.complianceFooter.content,
+          unsubscribeAddress:
+            sentRevision.complianceFooter.unsubscribePlaceholder,
+        },
       },
       { headers: { "cache-control": "private, no-store" } },
     );

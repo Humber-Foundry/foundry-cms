@@ -9,9 +9,15 @@ import {
   testConfirmed,
   testCoversCurrentEmail,
   type CampaignSendReport,
+  type CampaignSendSummary,
   type DeliveryReadiness,
   type SendFlowCommand,
 } from "./campaign-operations";
+import {
+  CampaignSendReview,
+  sendLaterLabel,
+  sendNowLabel,
+} from "./campaign-send-review";
 import {
   browserTimeZone,
   resolveSendTime,
@@ -60,6 +66,8 @@ export function CampaignSendFlow({
   role,
   busy,
   editBlocked,
+  testProblem,
+  shownRevisionId,
   onCommand,
   onEdit,
 }: {
@@ -68,11 +76,23 @@ export function CampaignSendFlow({
   role: HumanRole;
   busy: boolean;
   /**
+   * Why the last test did not go out, in plain words, or "" while there is
+   * nothing to say. Drawn on the test step, under its button, so the reason
+   * sits beside the control that was pressed.
+   */
+  testProblem: string;
+  /**
    * True while this installation has no sender details, so no revision can be
    * stored. The server refuses the save either way; the step says so instead
    * of offering a writing box whose save always fails.
    */
   editBlocked: boolean;
+  /**
+   * The revision the screen around this is showing. The review before a send
+   * is offered only while the report describes that same revision, so the
+   * review can never name a subject nobody is looking at.
+   */
+  shownRevisionId: string;
   onCommand(command: SendFlowCommand): void;
   onEdit(): void;
 }) {
@@ -84,7 +104,13 @@ export function CampaignSendFlow({
   // The one delivered test the server named. Both the confirmation and the
   // approval act on this exact execution, never on a test chosen here.
   const testEvidence = report.testEvidence;
-  const notConnected = delivery?.state === "not_configured";
+  // Delivery is connected only when the server says so. Local development is
+  // not connected either: it holds no provider credentials and its adapters
+  // refuse every send. While readiness could not be read at all, this says
+  // nothing about the connection and leaves the server to refuse.
+  const notConnected =
+    delivery !== null && delivery.state !== "connected";
+  const localDevelopment = delivery?.state === "local_development";
   const tested = testCoversCurrentEmail(report);
   const confirmed = testConfirmed(report);
   const isOwner = role === "owner";
@@ -94,8 +120,57 @@ export function CampaignSendFlow({
       ? report.testRecipients.ids
       : [report.testRecipients.yours];
   const testStaleAfterEdit = report.testEvidence !== null && !tested;
+  // The review describes one exact revision. While the report and the screen
+  // hold different ones, no send control is offered at all, because the review
+  // would otherwise name a subject nobody is reading.
+  const reviewSummary: CampaignSendSummary | null =
+    report.sendSummary.campaignRevisionId === shownRevisionId
+      ? report.sendSummary
+      : null;
+  // The test goes to a verified address. Only a site owner holds one, so an
+  // Editor's test lands in the owner's inbox and the step must not promise
+  // the Editor a copy. The step and its button carry the same name.
+  const testStepName =
+    report.testRecipients.yours === null
+      ? "Send the site owner a test"
+      : "Send me a test";
+
+  // The tick is one reading of one review, and it is spent on one step.
+  //
+  // It clears whenever the email, the approval, the schedule or the send
+  // changes. A changed email has not been read. Approving, scheduling and
+  // sending are each a step: without this, the tick that opened "Approve
+  // this email for sending" would still be ticked when the same screen turns
+  // into "Send to 412 people now", or a schedule called off would bring back
+  // a send control on the reading the schedule already spent. The tick is
+  // cleared during the drawing that shows the change, not after it, so no
+  // drawing ever shows a control open on the old tick. It clears on every
+  // change, so an email changed and then changed back must be read again.
+  const reviewKey = [
+    report.rendered.campaignFingerprint,
+    authorization?.id ?? "",
+    schedule?.id ?? "",
+    sendOperation?.id ?? "",
+  ].join("|");
+  const [reviewTick, setReviewTick] = useState({
+    key: reviewKey,
+    ticked: false,
+  });
+  if (reviewTick.key !== reviewKey) {
+    setReviewTick({ key: reviewKey, ticked: false });
+  }
+  const sendReviewed = reviewTick.key === reviewKey && reviewTick.ticked;
 
   function testNeed(): string {
+    if (localDevelopment) {
+      // The line under this step names the state and keeps the missing
+      // settings behind a disclosure. This says the one thing that line does
+      // not: nothing here is broken.
+      return (
+        "No test can go out from here. Nothing is broken: a test goes out as " +
+        "soon as this site is connected to an email provider."
+      );
+    }
     if (notConnected) {
       return (
         "Email is not connected yet, so no test can go out. Someone with " +
@@ -168,7 +243,9 @@ export function CampaignSendFlow({
 
   /**
    * The shared connection-status line: whether email is connected, which
-   * settings are missing, and where the setup steps are written down.
+   * settings are missing, where the setup steps are written down, and in
+   * local development which Settings screen shows the connection on a live
+   * site.
    */
   const setupGuideNote =
     notConnected && delivery !== null ? (
@@ -193,8 +270,8 @@ export function CampaignSendFlow({
       "against the provider's own record.",
     scheduled: "This email is set to send at the time below.",
     not_connected:
-      "Email is not connected yet, so nothing can be sent from here. Step 2 " +
-      "says where the steps to connect it are written down.",
+      "Nothing can be sent from here until email is connected. Step 2 says " +
+      "why, and where the steps to connect it are written down.",
     needs_test: "Send a test and confirm it arrived first.",
     needs_approval: "Approve this email, then send it now or pick a time.",
     ready: "Send it now, or pick a time to send it.",
@@ -207,6 +284,22 @@ export function CampaignSendFlow({
       stage === "not_connected"
       ? "later"
       : "now";
+  }
+
+  /**
+   * The review and its tick, shown above whichever control the send step is
+   * offering. Approving and sending each need the same reading, so they show
+   * the same block rather than two that could drift apart.
+   */
+  function review(summary: CampaignSendSummary) {
+    return (
+      <CampaignSendReview
+        summary={summary}
+        reviewed={sendReviewed}
+        busy={busy}
+        onReviewed={(ticked) => setReviewTick({ key: reviewKey, ticked })}
+      />
+    );
   }
 
   function scheduleThisEmail() {
@@ -259,11 +352,7 @@ export function CampaignSendFlow({
 
         <SendStep
           number={2}
-          name={
-            report.testRecipients.yours === null
-              ? "Send a test to the site owner"
-              : "Send a test to yourself"
-          }
+          name={testStepName}
           state={tested ? "done" : "now"}
           need={testNeed()}
         >
@@ -280,8 +369,13 @@ export function CampaignSendFlow({
                 })
               }
             >
-              Send a test email
+              {testStepName}
             </button>
+          )}
+          {testProblem === "" ? null : (
+            <p className="send-step-reason" role="status">
+              {testProblem}
+            </p>
           )}
           {setupGuideNote}
           {notConnected || testRecipientIds.length > 0 ? null : (
@@ -407,30 +501,47 @@ export function CampaignSendFlow({
           ) : stage === "not_yours" ||
             stage === "needs_test" ||
             stage === "not_connected" ? (
-            setupGuideNote
+            // Nothing more to add. Step 2 already carries the connection line
+            // and the settings, and the sentence above sends the reader
+            // there; repeating the list of setting names here would show
+            // it twice.
+            null
+          ) : reviewSummary === null ? (
+            // The server is describing a different version of this email from
+            // the one on screen, which happens when somebody or an app has
+            // just changed it. Offering a send here would send something
+            // nobody has read.
+            <p className="send-step-reason">
+              This email changed since the page opened. Reload the page and
+              read it again before you send it.
+            </p>
           ) : stage === "needs_approval" ? (
             testEvidence === null ? null : (
-              <button
-                type="button"
-                className="dash-button dash-button-primary"
-                disabled={busy || notConnected}
-                onClick={() =>
-                  onCommand({
-                    action: "authorize_bulk",
-                    campaignId,
-                    testExecutionId: testEvidence.executionId,
-                  })
-                }
-              >
-                Approve this email for sending
-              </button>
+              <div className="send-step-outcome">
+                {review(reviewSummary)}
+                <button
+                  type="button"
+                  className="dash-button dash-button-primary"
+                  disabled={busy || notConnected || !sendReviewed}
+                  onClick={() =>
+                    onCommand({
+                      action: "authorize_bulk",
+                      campaignId,
+                      testExecutionId: testEvidence.executionId,
+                    })
+                  }
+                >
+                  Approve this email for sending
+                </button>
+              </div>
             )
           ) : authorization === null ? null : (
             <div className="send-step-outcome">
+              {review(reviewSummary)}
               <button
                 type="button"
                 className="dash-button dash-button-primary"
-                disabled={busy || notConnected}
+                disabled={busy || notConnected || !sendReviewed}
                 onClick={() =>
                   onCommand({
                     action: "send_bulk_now",
@@ -439,7 +550,7 @@ export function CampaignSendFlow({
                   })
                 }
               >
-                Send it now
+                {sendNowLabel(reviewSummary.recipientCount)}
               </button>
               <div className="send-step-time">
                 <label>
@@ -455,10 +566,10 @@ export function CampaignSendFlow({
                 <button
                   type="button"
                   className="dash-button dash-button-plain"
-                  disabled={busy || sendAt === ""}
+                  disabled={busy || sendAt === "" || !sendReviewed}
                   onClick={scheduleThisEmail}
                 >
-                  Send it then
+                  {sendLaterLabel(reviewSummary.recipientCount)}
                 </button>
               </div>
               {timeProblem === "" ? null : (
