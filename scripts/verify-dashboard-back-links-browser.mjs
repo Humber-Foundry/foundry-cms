@@ -248,12 +248,16 @@ async function main() {
     ]) {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
-      // The dashboard creates the draft workspace on the server, so Pages
-      // renders its real editing surface as soon as Overview is open.
+      // Opening Overview makes the server create the draft workspace. Its
+      // "Edit site" link (#228) opens the page editor for that workspace.
+      // Follow the link to prove the draft workspace exists before the
+      // back-link checks start. The checks open each screen themselves.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
-      await page
-        .getByRole("link", { name: /^(Start|Continue) editing$/u })
-        .waitFor({ state: "visible" });
+      await page.getByRole("link", { name: "Edit site" }).click();
+      await page.waitForURL(
+        /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+      );
+      await page.getByRole("heading", { name: "Pages" }).waitFor();
 
       try {
         await checkPagesEditor(page, origin, viewportLabel);
