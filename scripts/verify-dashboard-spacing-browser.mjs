@@ -8,8 +8,10 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 
 /** The minimum plain reading the owner's acceptance criteria set for #173:
  * no text closer than 8px to a border it sits inside, or to a sibling
- * control; no phone tap target under 44px high. #226 adds one more rule to
- * the same sweep: no destination scrolls sideways at either width. */
+ * control; no phone tap target under 44px high. #226 adds one more check to
+ * the same sweep: no destination scrolls sideways at either width. #254
+ * adds another: the section after the page heading or the settings tabs
+ * draws no second line under it. */
 const minimumTextGap = 8;
 const minimumTapTarget = 44;
 
@@ -249,6 +251,97 @@ const collectHorizontalOverflow = () => {
     culprits.push({ sel: s.slice(0, 120), right: Math.round(r.right) });
   }
   return { overflow: Math.round(overflow), viewport: limit, culprits: culprits.slice(0, 10) };
+};
+
+/**
+ * The line between the sections of a screen (#254).
+ *
+ * The page heading and the settings tabs each draw a line under themselves.
+ * The section right after one of them must not draw a second line: it has no
+ * top border, no top padding, and the plain `--dash-gap` margin. Every later
+ * section keeps its own line: a 1px top border with the section gap above and
+ * below it. A card (`.panel`, `.content-editor`, `.dash-site-card`) draws its
+ * own border on all four sides, so its top border must match its left one.
+ * (On a phone the editor card drops its border on every side, so both are
+ * 0px there, which still matches.)
+ *
+ * This reads computed styles, so it fails whenever the cascade gives the
+ * wrong answer, whatever the selectors say.
+ *
+ * This runs inside the browser through `page.evaluate`, so it can call
+ * nothing outside itself. That is why it resolves the two spacing tokens
+ * itself and writes out its own element description.
+ */
+const collectSectionLineDefects = () => {
+  const main = document.querySelector(".dashboard-main");
+  if (main === null) return [];
+  const tokenPixels = (token) => {
+    const probe = document.createElement("div");
+    probe.style.marginTop = `var(${token})`;
+    main.append(probe);
+    const pixels = getComputedStyle(probe).marginTop;
+    probe.remove();
+    return pixels;
+  };
+  const gap = tokenPixels("--dash-gap");
+  const sectionGap = tokenPixels("--dash-panel-gap");
+  const describe = (el) => {
+    let s = el.tagName.toLowerCase();
+    if (typeof el.className === "string" && el.className.trim() !== "") {
+      s += `.${el.className.trim().split(/\s+/u).join(".")}`;
+    }
+    return s.slice(0, 120);
+  };
+  // The width of the line drawn on one side, or 0px when no line is drawn.
+  const drawnWidth = (style, side) =>
+    style[`border${side}Style`] === "none" ? "0px" : style[`border${side}Width`];
+  const defects = [];
+  for (const section of main.querySelectorAll(":scope > section")) {
+    const style = getComputedStyle(section);
+    const before = section.previousElementSibling;
+    const found = {
+      borderTop: drawnWidth(style, "Top"),
+      paddingTop: style.paddingTop,
+      marginTop: style.marginTop,
+    };
+    if (section.matches(".panel, .content-editor, .dash-site-card")) {
+      const left = drawnWidth(style, "Left");
+      if (found.borderTop !== left) {
+        defects.push({
+          sel: describe(section),
+          kind: "card",
+          want: { borderTop: left },
+          ...found,
+        });
+      }
+    } else if (before?.matches(".page-heading, .dash-tabs")) {
+      if (
+        found.borderTop !== "0px" ||
+        found.paddingTop !== "0px" ||
+        found.marginTop !== gap
+      ) {
+        defects.push({
+          sel: describe(section),
+          kind: "first section",
+          after: describe(before),
+          want: { borderTop: "0px", paddingTop: "0px", marginTop: gap },
+          ...found,
+        });
+      }
+    } else if (
+      found.borderTop !== "1px" ||
+      found.paddingTop !== sectionGap ||
+      found.marginTop !== sectionGap
+    ) {
+      defects.push({
+        sel: describe(section),
+        kind: "later section",
+        want: { borderTop: "1px", paddingTop: sectionGap, marginTop: sectionGap },
+        ...found,
+      });
+    }
+  }
+  return defects;
 };
 
 const collectSmallTapTargets = (minimumTapTarget) => {
@@ -501,6 +594,13 @@ async function checkDestination(page, origin, name, href, viewportLabel) {
     );
   }
 
+  const sectionLines = await page.evaluate(collectSectionLineDefects);
+  if (sectionLines.length > 0) {
+    throw new Error(
+      `dashboard_spacing_section_line:${viewportLabel}:${name}:${JSON.stringify(sectionLines)}`,
+    );
+  }
+
   const sideways = await page.evaluate(collectHorizontalOverflow);
   if (sideways !== null) {
     throw new Error(
@@ -599,7 +699,7 @@ async function main() {
     }
 
     process.stdout.write(
-      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination: no text touching a border, no sideways scroll, no small tap target).\n`,
+      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination: no text touching a border, no doubled section line, no sideways scroll, no small tap target).\n`,
     );
   } finally {
     await browser?.close();
