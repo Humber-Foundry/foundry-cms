@@ -41,13 +41,12 @@ install. Puck and the tiptap starter kit depend on tiptap packages with open
 ranges. Tiptap packages need exactly matching versions of each other. So the
 reference-site package lists every resolved `@tiptap/*` package at one exact
 version. The scaffold and sync write that set as the installation's overrides.
-The scaffold and sync stop with `foundation_release_tiptap_version_drift`
-when the lockfile resolves a tiptap package at a version other than its
+The scaffold stops with `foundation_release_tiptap_version_drift` when the
+lockfile resolves a tiptap package at a version other than its
 `@tiptap/core`. An installation can add its own tiptap package at that
-version. The check does not compare with the release pin. Before a sync, the
-previous release's overrides can hold the whole set at the previous version.
-The sync then writes the target release's overrides. Run `npm install` after
-the sync so the installation moves to the target tiptap version.
+version. The sync does not run this check. Before a sync, the lockfile still
+reflects the previous release's overrides, so the check could block the sync
+that replaces them.
 
 A Puck or tiptap upgrade can add a tiptap package. Add that package to
 `apps/reference-site/package.json` at the shared version. The
@@ -89,11 +88,15 @@ Migrations are additive-only: the sync adds new migrations, keeps every existing
 one byte-for-byte, never deletes a past migration, and fails closed if an
 already-present migration does not match the target's bytes.
 
+The sync also writes the target release's tiptap overrides to the
+installation's `package.json`. Run `npm install` after the sync, so the
+lockfile moves to the target's tiptap set.
+
 The command prints a report of every file written, added, removed, kept as an
-override and every conflict with its path. After a clean, conflict-free sync the
-installation's framework files are byte-identical to the target's template, its
-`.foundry/*` pin files and `package-lock.json` name the target, and typecheck
-and build pass. See
+override and every conflict with its path. After a clean, conflict-free sync
+and `npm install`, the installation's framework files are byte-identical to
+the target's template, its `.foundry/*` pin files and `package-lock.json` name
+the target, and typecheck and build pass. See
 [ADR-0015](../decisions/ADR-0015-foundation-framework-sync-seam.md).
 
 ## Publication boundary

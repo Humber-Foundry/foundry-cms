@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertLockedReleaseExecutable,
-  assertTiptapSetAligned,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
@@ -79,7 +78,6 @@ async function main() {
   for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
     assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
   }
-  assertTiptapSetAligned(lock);
 
   const {
     loadFoundationReleaseDescriptor,

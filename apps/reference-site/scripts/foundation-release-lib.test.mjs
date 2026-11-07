@@ -81,18 +81,14 @@ describe("installed tiptap set", () => {
     ).not.toThrow();
   });
 
-  it("accepts a set held at the previous release's version during an upgrade", () => {
-    // Before sync, the installation still has the previous release's
-    // overrides. They hold the whole set at the previous version. Sync must
-    // continue, so it can write the target release's overrides.
+  it("names a lockfile whose tiptap packages have no core", () => {
     expect(() =>
       assertTiptapSetAligned({
         packages: {
-          "node_modules/@tiptap/core": { version: "3.29.1" },
-          "node_modules/@tiptap/extension-text-align": { version: "3.29.1" },
+          "node_modules/@tiptap/extension-text-align": { version: "3.33.0" },
         },
       }),
-    ).not.toThrow();
+    ).toThrow("foundation_release_tiptap_core_missing");
   });
 
   it("is pinned in full by the reference site for the repository lockfile", () => {

@@ -142,14 +142,9 @@ export function alignedTiptapPins(dependencies) {
   const pins = Object.fromEntries(
     Object.entries(dependencies).filter(([name]) => name.startsWith("@tiptap/")),
   );
-  const expected = pins["@tiptap/core"];
-  for (const [name, version] of Object.entries(pins)) {
-    if (version !== expected) {
-      throw new Error(
-        `foundation_release_tiptap_version_drift:${name}@${version}:expected:${expected}`,
-      );
-    }
-  }
+  assertOneTiptapVersion(
+    Object.entries(pins).map(([name, version]) => ({ name, version })),
+  );
   return pins;
 }
 
@@ -157,16 +152,22 @@ export function alignedTiptapPins(dependencies) {
  * Checks that an npm lockfile resolves every `@tiptap/*` package, at any
  * depth, to the version of its `@tiptap/core`. A tiptap package at another
  * version fails here, by name, instead of as a missing export in the build.
- * The error detail is `<name>@<resolved>:expected:<core version>`.
- *
- * The check compares with the lockfile's own core version, not the release
- * pin. Before a sync, the previous release's overrides hold the whole set at
- * the previous version. That set builds, and the sync must continue so it can
- * write the target release's overrides.
+ * The scaffold runs this check on a new installation's first install, before
+ * any overrides exist.
  */
 export function assertTiptapSetAligned(lock) {
-  const packages = lockedTiptapPackages(lock);
+  assertOneTiptapVersion(lockedTiptapPackages(lock));
+}
+
+/**
+ * Throws unless every `{ name, version }` entry has the version of the
+ * `@tiptap/core` entry. The error detail is
+ * `<name>@<version>:expected:<core version>`.
+ */
+function assertOneTiptapVersion(packages) {
+  if (packages.length === 0) return;
   const expected = packages.find(({ name }) => name === "@tiptap/core")?.version;
+  if (expected === undefined) throw new Error("foundation_release_tiptap_core_missing");
   for (const { name, version } of packages) {
     if (version !== expected) {
       throw new Error(
