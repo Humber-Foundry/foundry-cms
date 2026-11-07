@@ -499,6 +499,14 @@ async function main() {
     if ((await preview.locator(".story-section").count()) !== 1) {
       throw new Error("private_dashboard_preview_custom_renderer_missing");
     }
+    // The exact preview is outside the dashboard. It carries no Content
+    // Security Policy and draws the live newsletter challenge (ADR-0049).
+    const previewDocument = await context.request.get(preview.url());
+    if (previewDocument.headers()["content-security-policy"] !== undefined) {
+      throw new Error("private_dashboard_preview_carries_dashboard_policy");
+    }
+    await preview.locator(".newsletter-section .newsletter-signup-check")
+      .waitFor({ state: "attached" });
     const publicPage = await context.newPage();
     await publicPage.goto(origin);
     await publicPage.getByRole("heading", {
@@ -507,6 +515,8 @@ async function main() {
     if ((await publicPage.locator(".story-section").count()) !== 0) {
       throw new Error("private_dashboard_unapproved_component_was_public");
     }
+    await publicPage.locator(".newsletter-section .newsletter-signup-check")
+      .waitFor({ state: "attached" });
     const overflow = await page.locator("body").evaluate((body) => ({
       width: body.scrollWidth,
       elements: [...body.querySelectorAll("*")]

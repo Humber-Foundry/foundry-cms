@@ -128,6 +128,17 @@
         }
       },
       {
+        "id": "section_contact_form",
+        "type": "registered",
+        "component": "contactForm",
+        "props": {
+          "formId": "contact",
+          "title": "Send a message",
+          "body": "Tell us what you need. Leave your email address and we will write back.",
+          "actionLabel": "Send message"
+        }
+      },
+      {
         "id": "section_contact",
         "type": "callToAction",
         "variant": "moss",

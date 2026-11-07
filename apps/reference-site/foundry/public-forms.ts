@@ -7,7 +7,8 @@ import {
  * Installation-owned public forms.
  *
  * An adopted repository replaces this list with the forms its own site
- * publishes. Each field says how long a value may be and whether it is
+ * publishes. `name` is what the dashboard calls the form, so no screen has to
+ * show the form id. Each field says how long a value may be and whether it is
  * required. `inboxRole` says what the field means in the Messages inbox: the
  * person's name, the address to reply to, or the text shown as the preview
  * line. A field with no role is only ever shown when a human opens the
@@ -25,6 +26,7 @@ const installedCandidate: ReadonlyArray<InstalledPublicFormDefinition> =
   Object.freeze([
     Object.freeze({
       id: "contact",
+      name: "Contact form",
       schemaVersion: "1.0.0",
       turnstileAction: "contact",
       fields: Object.freeze([

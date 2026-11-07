@@ -87,6 +87,34 @@ describe("installation-owned page components", () => {
     }
   });
 
+  it("offers the contact form block in the page editor with only its words editable", () => {
+    // Issue #235: an owner adds a contact form from the page editor. The
+    // heading, the sentence and the button label are theirs to write. The form
+    // it sends to is fixed (ADR-0044), so the editor shows no control for it.
+    const config = createVisualComponentConfig(
+      () => new Set(),
+      () => installedSiteDefinition,
+      () => homePage(installedSiteDefinition),
+    );
+    const contactForm = config.components.contactForm;
+    expect(contactForm?.label).toBe("Contact form");
+    expect(contactForm?.defaultProps).toMatchObject({
+      type: "registered",
+      component: "contactForm",
+      formId: "contact",
+      title: "Send a message",
+      actionLabel: "Send message",
+    });
+    const fields = (contactForm?.fields ?? {}) as Record<
+      string,
+      { visible?: boolean }
+    >;
+    expect(fields.formId?.visible).toBe(false);
+    for (const key of ["title", "body", "actionLabel"]) {
+      expect(fields[key]?.visible).not.toBe(false);
+    }
+  });
+
   it("projects an editable object schema without flattening its nested fields", () => {
     expect(createPuckField({
       control: "object",

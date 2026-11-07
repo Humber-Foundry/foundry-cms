@@ -47,9 +47,12 @@ export type PageComponentRenderContext = Readonly<{
   inlineText?: InlineTextRenderer;
   inlineImage?: InlineImageRenderer;
   /**
-   * True on editing surfaces (the canvas and browse mode), which render
-   * inside the authenticated dashboard. Third-party embeds are sandboxed
-   * there; the public site and the exact preview render them live.
+   * True on editing surfaces (the canvas, browse mode and the Design
+   * preview), which render inside the authenticated dashboard. A component
+   * that embeds a third party must draw a placeholder here: every dashboard
+   * document carries a Content Security Policy that refuses a frame or
+   * script from any other host (ADR-0049). The public site and the exact
+   * preview render the embed live.
    */
   editingSurface?: boolean;
   /**

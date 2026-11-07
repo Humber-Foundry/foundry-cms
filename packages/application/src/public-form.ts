@@ -76,6 +76,11 @@ export type PublicFormDefinition = Readonly<{
  */
 export type InstalledPublicFormDefinition = Readonly<{
   id: string;
+  /**
+   * What the dashboard calls this form. It is the owner's words, so no screen
+   * ever has to show the form id.
+   */
+  name: string;
   schemaVersion: string;
   turnstileAction: string;
   fields: ReadonlyArray<PublicFormFieldDefinition>;
@@ -132,6 +137,7 @@ export function isInstalledPublicFormList(
     const form = candidate as Record<string, unknown>;
     if (
       !isNonEmptyString(form.id) ||
+      !isNonEmptyString(form.name) ||
       !isNonEmptyString(form.schemaVersion) ||
       !isNonEmptyString(form.turnstileAction) ||
       !Array.isArray(form.fields) ||
