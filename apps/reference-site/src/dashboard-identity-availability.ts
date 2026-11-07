@@ -120,12 +120,16 @@ export function createDashboardIdentityBoundary<Environment, Context>({
         error instanceof AccessIdentityError ||
         error instanceof HumanAccessConfigurationError
       ) {
-        // A page below /dash goes on with no identity and answers "not
-        // found" itself, so its 404 still carries the dashboard Content
-        // Security Policy (ADR-0049).
+        // A page below /dash goes on with no identity and no assertion, and
+        // answers "not found" itself, so its 404 still carries the dashboard
+        // Content Security Policy (ADR-0049).
         return isDashboardHome
           ? notFoundResponse()
-          : next(sanitizedRequest, environment, context);
+          : next(
+              withoutCloudflareAccessAssertion(sanitizedRequest),
+              environment,
+              context,
+            );
       }
       throw error;
     }

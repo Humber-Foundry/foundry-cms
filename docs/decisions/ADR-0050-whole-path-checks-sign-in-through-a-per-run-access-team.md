@@ -148,7 +148,8 @@ this was a defect, not a decision.
 
 The boundary now verifies the assertion for every path below `/dash` too, and
 passes the verified identity on. When the assertion is missing or invalid, a
-page below `/dash` still goes on with no identity and answers 404 itself, so
+page below `/dash` still goes on, with no identity and with the raw assertion
+removed (ADR-0005), and answers 404 itself, so
 its 404 keeps the dashboard Content Security Policy that ADR-0049 records.
 When the Access keys cannot be fetched, a page below `/dash` gets the same 503
 as `/dash`.

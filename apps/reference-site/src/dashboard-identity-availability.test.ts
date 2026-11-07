@@ -139,10 +139,13 @@ describe("dashboard identity availability boundary", () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a page below /dash answer an invalid identity itself, with no identity attached", async () => {
+  it("lets a page below /dash answer an invalid identity itself, with no identity or assertion attached", async () => {
     const next = vi.fn(async (request: Request) => {
       expect(
         request.headers.has(verifiedDashboardIdentityHeader),
+      ).toBe(false);
+      expect(
+        request.headers.has(cloudflareAccessAssertionHeader),
       ).toBe(false);
       return new Response("not found", { status: 404 });
     });
@@ -156,6 +159,7 @@ describe("dashboard identity availability boundary", () => {
     const response = await boundary(
       new Request("https://example.com/dash/design", {
         headers: {
+          [cloudflareAccessAssertionHeader]: "expired-assertion",
           [verifiedDashboardIdentityHeader]: encodeURIComponent(
             JSON.stringify(identity),
           ),
