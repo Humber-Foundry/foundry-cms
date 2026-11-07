@@ -198,8 +198,8 @@
   border-top: 1px solid var(--dash-line);
 
   /* The section right after the page heading or the settings tabs would
-   * otherwise show two lines: the heading's bottom border, then this
-   * section's top border. The heading's bottom border is the only line the
+   * otherwise show two lines: the bottom border of the heading or tabs,
+   * then this section's top border. That bottom border is the only line the
    * screen needs there, so the first section has no border and only a plain
    * gap.
    *
