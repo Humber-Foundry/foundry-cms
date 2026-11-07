@@ -36,6 +36,16 @@ async function sendTheContactForm(harness) {
   await form.locator('[name="email"]').fill("ada@example.com");
   await form.locator('[name="message"]').fill(message);
 
+  // The form sends nothing until the Turnstile widget has handed it a token.
+  // The widget also writes that token into this hidden field.
+  await page.waitForFunction(
+    () =>
+      document.querySelector(
+        '.contact-form-section input[name="cf-turnstile-response"]',
+      )?.value,
+    undefined,
+    { timeout: 30_000 },
+  );
   const waited = Date.now() - opened;
   if (waited < visitorFillTimeMs) {
     await new Promise((wait) => setTimeout(wait, visitorFillTimeMs - waited));

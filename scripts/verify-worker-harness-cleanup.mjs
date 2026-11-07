@@ -97,12 +97,14 @@ async function runCase(name) {
     });
     if (name === "interrupt") child.kill("SIGINT");
 
+    let watchdog;
     const code = await Promise.race([
       new Promise((resolveExit) => child.once("exit", resolveExit)),
-      new Promise((resolveExit) =>
-        setTimeout(() => resolveExit("timeout"), 60_000),
-      ),
+      new Promise((resolveExit) => {
+        watchdog = setTimeout(() => resolveExit("timeout"), 60_000);
+      }),
     ]);
+    clearTimeout(watchdog);
     if (code === "timeout") {
       child.kill("SIGKILL");
       throw new Error(`${name}_child_did_not_exit\n${output.join("")}`);
