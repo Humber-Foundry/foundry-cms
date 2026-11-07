@@ -71,6 +71,9 @@ jobs:
       - name: Verify workerd runtime behavior
         run: npm run verify:worker
 
+      - name: Run whole-path browser checks against the built Worker
+        run: npm run verify:whole-path
+
       - name: Verify public repository integrity
         env:
           GH_TOKEN: ${{ github.token }}

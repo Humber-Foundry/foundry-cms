@@ -110,6 +110,97 @@ describe("dashboard identity availability boundary", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("passes one verified identity to a dashboard page below /dash", async () => {
+    const authenticate = vi.fn().mockResolvedValue(identity);
+    const next = vi.fn(async (request: Request) => {
+      expect(
+        readVerifiedDashboardIdentity(request.headers),
+      ).toEqual(identity);
+      expect(
+        request.headers.has(cloudflareAccessAssertionHeader),
+      ).toBe(false);
+      return new Response("messages");
+    });
+    const boundary = createDashboardIdentityBoundary({
+      next,
+      authenticate,
+    });
+
+    const response = await boundary(
+      new Request("https://example.com/dash/forms", {
+        headers: { [cloudflareAccessAssertionHeader]: "signed-assertion" },
+      }),
+      {},
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a page below /dash answer an invalid identity itself, with no identity attached", async () => {
+    const next = vi.fn(async (request: Request) => {
+      expect(
+        request.headers.has(verifiedDashboardIdentityHeader),
+      ).toBe(false);
+      return new Response("not found", { status: 404 });
+    });
+    const boundary = createDashboardIdentityBoundary({
+      next,
+      authenticate: vi
+        .fn()
+        .mockRejectedValue(new AccessIdentityError()),
+    });
+
+    const response = await boundary(
+      new Request("https://example.com/dash/design", {
+        headers: {
+          [verifiedDashboardIdentityHeader]: encodeURIComponent(
+            JSON.stringify(identity),
+          ),
+        },
+      }),
+      {},
+      {},
+    );
+
+    expect(response.status).toBe(404);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a 503 below /dash too when the identity keys are unavailable", async () => {
+    const next = vi.fn();
+    const boundary = createDashboardIdentityBoundary({
+      next,
+      authenticate: vi
+        .fn()
+        .mockRejectedValue(new AccessIdentityUnavailableError()),
+    });
+
+    const response = await boundary(
+      new Request("https://example.com/dash/forms"),
+      {},
+      {},
+    );
+
+    expect(response.status).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a path that only starts with the letters dash as the dashboard", async () => {
+    const authenticate = vi.fn();
+    const next = vi.fn(async () => new Response("public"));
+    const boundary = createDashboardIdentityBoundary({
+      next,
+      authenticate,
+    });
+
+    await boundary(new Request("https://example.com/dashboard-tips"), {}, {});
+
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
   it("strips an untrusted identity marker before unrelated routing", async () => {
     const authenticate = vi.fn();
     const next = vi.fn(async (request: Request) => {

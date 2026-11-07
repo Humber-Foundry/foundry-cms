@@ -101,7 +101,8 @@ export function createDashboardIdentityBoundary<Environment, Context>({
   ): Promise<Response> => {
     const sanitizedRequest = withoutVerifiedDashboardIdentity(request);
     const pathname = new URL(request.url).pathname;
-    if (pathname !== "/dash" && pathname !== "/dash/") {
+    const isDashboardHome = pathname === "/dash" || pathname === "/dash/";
+    if (!isDashboardHome && !pathname.startsWith("/dash/")) {
       return next(sanitizedRequest, environment, context);
     }
 
@@ -119,7 +120,12 @@ export function createDashboardIdentityBoundary<Environment, Context>({
         error instanceof AccessIdentityError ||
         error instanceof HumanAccessConfigurationError
       ) {
-        return notFoundResponse();
+        // A page below /dash goes on with no identity and answers "not
+        // found" itself, so its 404 still carries the dashboard Content
+        // Security Policy (ADR-0049).
+        return isDashboardHome
+          ? notFoundResponse()
+          : next(sanitizedRequest, environment, context);
       }
       throw error;
     }

@@ -31,7 +31,8 @@
     "verify:mcp:inspector": "RUN_MCP_INSPECTOR=1 vitest run apps/reference-site/src/mcp-http-runtime.test.ts -t 'pinned official MCP Inspector'",
     "verify:site-validator": "npm run generate:validator --workspace @humber-foundry/site-definition -- --check",
     "verify:bundle": "node scripts/verify-public-bundle.mjs",
-    "verify:worker": "node scripts/verify-worker-runtime.mjs"
+    "verify:worker": "node scripts/verify-worker-runtime.mjs",
+    "verify:whole-path": "node scripts/verify-access-stand-in-refused.mjs && node scripts/verify-contact-form-whole-path-browser.mjs --reuse-build"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -50,8 +51,10 @@
     "axe-core": "^4.13.0",
     "commonmark": "0.31.2",
     "esbuild": "0.28.1",
+    "jose": "6.2.4",
     "playwright": "1.56.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "wrangler": "4.114.0"
   }
 }
