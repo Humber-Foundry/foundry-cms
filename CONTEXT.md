@@ -103,6 +103,21 @@ can never disagree with the site.
 such as a stacked list or three cards. It belongs to that section, not to the
 whole site.
 
+**Editing surface** — A place inside the dashboard where a page component is
+drawn: the page editor's canvas, its browse mode, and the Design preview. A
+component receives `editingSurface: true` there and must send nothing and
+reach no third party. Every dashboard document carries a Content Security
+Policy that refuses a script or frame from another host (ADR-0049).
+
+**Design preview** — The picture of the draft site on the Design screen. It
+renders the working draft directly at desktop width, scaled to fit, and is
+not a frame (ADR-0009). It is an editing surface.
+
+**Exact preview** — The saved revision served as a real page at
+`/__foundry/preview/...`, opened from the toolbar's Preview button. It is
+outside the dashboard, so it renders the site as a visitor sees it, including
+the newsletter challenge.
+
 ## Media
 
 **Media asset** — A stable, site-scoped identity and metadata record for one
