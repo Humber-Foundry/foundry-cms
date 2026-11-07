@@ -415,7 +415,7 @@ export async function startWorkerHarness({
   }
 }
 
-/** The exit code for a process stopped by `signal`: 128 plus its number. */
+/** The exit code after an interrupt: 130 for SIGINT, 143 for SIGTERM. */
 export function interruptedExitCode(signal) {
   return signal === "SIGINT" ? 130 : 143;
 }
