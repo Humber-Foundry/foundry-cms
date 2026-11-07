@@ -216,16 +216,26 @@ describe("a message sent from the contact form through the real route", () => {
         },
       },
     };
+    const contactForm = installedPublicForms.find((form) => form.id === "contact")!;
     const siteverifyCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input) !== siteverify) return realFetch(input, init);
+        const url = new URL(String(input));
+        // The local test database answers on the loopback address.
+        if (url.hostname === "127.0.0.1" || url.hostname === "localhost") {
+          return realFetch(input, init);
+        }
+        // Any other outbound call is one this test does not stand in for, so
+        // it fails here instead of reaching the network.
+        if (url.href !== siteverify) {
+          throw new Error(`unexpected_outbound_request:${url.href}`);
+        }
         siteverifyCalls.push(String(init?.body ?? ""));
         return Response.json({
           success: true,
-          hostname: "foundry.example",
-          action: "contact",
+          hostname: new URL(canonicalOrigin).hostname,
+          action: contactForm.turnstileAction,
         });
       },
     );
@@ -236,8 +246,8 @@ describe("a message sent from the contact form through the real route", () => {
     const status = await (await GET(new Request(address), params)).json();
     expect(status).toEqual({
       available: true,
-      schemaVersion: "1.0.0",
-      turnstileAction: "contact",
+      schemaVersion: contactForm.schemaVersion,
+      turnstileAction: contactForm.turnstileAction,
       turnstileSiteKey: "0xSITEKEY",
     });
 
