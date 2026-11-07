@@ -81,7 +81,7 @@ describe("installed tiptap set", () => {
     ).not.toThrow();
   });
 
-  it("names a lockfile whose tiptap packages have no core", () => {
+  it("rejects a lockfile whose tiptap packages have no core", () => {
     expect(() =>
       assertTiptapSetAligned({
         packages: {

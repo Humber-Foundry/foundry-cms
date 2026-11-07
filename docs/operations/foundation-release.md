@@ -43,10 +43,11 @@ reference-site package lists every resolved `@tiptap/*` package at one exact
 version. The scaffold and sync write that set as the installation's overrides.
 The scaffold stops with `foundation_release_tiptap_version_drift` when the
 lockfile resolves a tiptap package at a version other than its
-`@tiptap/core`. An installation can add its own tiptap package at that
-version. The sync does not run this check. Before a sync, the lockfile still
-reflects the previous release's overrides, so the check could block the sync
-that replaces them.
+`@tiptap/core`. It stops with `foundation_release_tiptap_core_missing` when
+the lockfile has tiptap packages but no `@tiptap/core`. An installation can
+add its own tiptap package at the core version. The sync does not run these
+checks. Before a sync, the lockfile still reflects the previous release's
+overrides, so the checks could block the sync that replaces them.
 
 A Puck or tiptap upgrade can add a tiptap package. Add that package to
 `apps/reference-site/package.json` at the shared version. The
