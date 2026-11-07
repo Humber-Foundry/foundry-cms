@@ -457,6 +457,15 @@ describe("one campaign's screen, browser acceptance", () => {
 
     await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
     expect(approve.disabled).toBe(false);
+    // Watch every change to the screen from here. The send control must
+    // never be open, not even for one drawing, until the review is read
+    // again.
+    let sendOpenedEarly = false;
+    const watcher = new MutationObserver(() => {
+      const sendNow = buttonNamed(host, "Send to 412 people now");
+      if (sendNow !== undefined && !sendNow.disabled) sendOpenedEarly = true;
+    });
+    watcher.observe(host, { subtree: true, childList: true, attributes: true });
     await userEvent.click(approve);
     expect(server.commands).toContainEqual({
       action: "authorize_bulk",
@@ -476,6 +485,8 @@ describe("one campaign's screen, browser acceptance", () => {
         .checked,
     ).toBe(false);
     expect(send.disabled).toBe(true);
+    watcher.disconnect();
+    expect(sendOpenedEarly).toBe(false);
   });
 
   it("offers no send while the server reviews a different revision", async () => {

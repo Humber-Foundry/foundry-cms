@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { HumanRole } from "@humber-foundry/application";
 
@@ -97,7 +97,8 @@ export function CampaignSendFlow({
   onEdit(): void;
 }) {
   const [reviewed, setReviewed] = useState(false);
-  const [sendReviewed, setSendReviewed] = useState(false);
+  // Which email and approval the review tick was given for, or null.
+  const [reviewedFor, setReviewedFor] = useState<string | null>(null);
   const [sendAt, setSendAt] = useState("");
   const [timeProblem, setTimeProblem] = useState("");
 
@@ -138,15 +139,17 @@ export function CampaignSendFlow({
 
   // The tick is one reading of one review, and it is spent on one step.
   //
-  // It clears when the email changes, because a changed email has not been
-  // read. It also clears when the approval changes, because approving is
-  // itself a step: without this, the tick that opened "Approve this email for
-  // sending" would still be ticked when the same screen turns into "Send to
-  // 412 people now", and the send would go out on a review nobody read twice.
-  const approvalId = authorization?.id ?? "";
-  useEffect(() => {
-    setSendReviewed(false);
-  }, [report.rendered.campaignFingerprint, approvalId]);
+  // It holds only for the email and the approval it was given for. A changed
+  // email has not been read. Approving is itself a step: without this, the
+  // tick that opened "Approve this email for sending" would still be ticked
+  // when the same screen turns into "Send to 412 people now", and the send
+  // would go out on a review nobody read twice. The tick is compared in the
+  // same drawing that shows the new step, so no drawing ever shows the send
+  // control open on the old tick.
+  const reviewKey = `${report.rendered.campaignFingerprint}|${
+    authorization?.id ?? ""
+  }`;
+  const sendReviewed = reviewedFor === reviewKey;
 
   function testNeed(): string {
     if (localDevelopment) {
@@ -283,7 +286,7 @@ export function CampaignSendFlow({
         summary={summary}
         reviewed={sendReviewed}
         busy={busy}
-        onReviewed={setSendReviewed}
+        onReviewed={(ticked) => setReviewedFor(ticked ? reviewKey : null)}
       />
     );
   }
