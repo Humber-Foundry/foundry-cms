@@ -1,5 +1,6 @@
 import type { InstalledPublicFormDefinition } from "@humber-foundry/application";
 import {
+  contactFormComponent,
   pageDisplayTitle,
   pagePath,
   type SiteDefinition,
@@ -31,9 +32,6 @@ export type SiteFormOverviewRow = Readonly<{
   messageCount: number;
 }>;
 
-/** The page component that puts a declared form on a page. */
-const contactFormComponentType = "contactForm";
-
 function placementsByFormId(
   definition: SiteDefinition,
 ): ReadonlyMap<string, ReadonlyArray<SiteFormPlacement>> {
@@ -42,7 +40,7 @@ function placementsByFormId(
     for (const section of page.sections) {
       if (
         section.type !== "registered" ||
-        section.component !== contactFormComponentType
+        section.component !== contactFormComponent.type
       ) {
         continue;
       }

@@ -1,6 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+
+/**
+ * The Cloudflare bindings the route reads. Only the test below that drives the
+ * real route sets them.
+ */
+const cloudflareEnvironment = vi.hoisted(() => ({
+  current: {} as Record<string, unknown>,
+}));
+vi.mock("@opennextjs/cloudflare", () => ({
+  getCloudflareContext: vi.fn(async () => ({ env: cloudflareEnvironment.current })),
+}));
 
 import {
   createPublicFormApplication,
@@ -9,10 +20,16 @@ import {
 } from "@humber-foundry/application";
 import { createSiteId } from "@humber-foundry/site-definition";
 
+import { GET, POST } from "../app/api/forms/[formId]/submissions/route";
 import { contactFormEnvelope } from "../components/contact-form-envelope";
 import { installedPublicForms } from "../foundry/public-forms";
+import { installedSiteDefinition } from "../foundry/site-definition";
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
+import {
+  formPlacementAndCountSentence,
+  siteFormsOverview,
+} from "./site-forms-overview";
 import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 /**
@@ -22,7 +39,8 @@ import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
  *
  * It is the join between the two halves the browser cannot run together on a
  * development machine: the form's own send (covered in
- * `components/contact-form.browser.test.tsx`) and the inbox read.
+ * `components/contact-form.browser.test.tsx`) and the inbox read. The last
+ * test sends the envelope through the real route handler as well.
  */
 
 const { database } = useMigratedTestDatabase([
@@ -171,5 +189,106 @@ describe("a message sent from the contact form", () => {
       replyAddress: null,
       preview: "No address today.",
     });
+  });
+});
+
+describe("a message sent from the contact form through the real route", () => {
+  const siteverify = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    cloudflareEnvironment.current = {};
+    vi.unstubAllGlobals();
+  });
+
+  it("is accepted by the route and counted in Messages", async () => {
+    // The real route, the real runtime, the real acceptance rules and the real
+    // store. Only two things stand in: the Cloudflare bindings, which hold the
+    // migrated test database, and Cloudflare's own siteverify answer.
+    cloudflareEnvironment.current = {
+      FOUNDRY_DB: database,
+      FOUNDRY_CANONICAL_ORIGIN: canonicalOrigin,
+      FOUNDRY_TURNSTILE_SITE_KEY: "0xSITEKEY",
+      FOUNDRY_TURNSTILE_SECRET: "0xSECRET",
+      FOUNDRY_FORM_RATE_LIMITER: {
+        async limit() {
+          return { success: true };
+        },
+      },
+    };
+    const siteverifyCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== siteverify) return realFetch(input, init);
+        siteverifyCalls.push(String(init?.body ?? ""));
+        return Response.json({
+          success: true,
+          hostname: "foundry.example",
+          action: "contact",
+        });
+      },
+    );
+    const params = { params: Promise.resolve({ formId: "contact" }) };
+    const address = `${canonicalOrigin}/api/forms/contact/submissions`;
+
+    // The form asks first, the same way `ContactForm` does.
+    const status = await (await GET(new Request(address), params)).json();
+    expect(status).toEqual({
+      available: true,
+      schemaVersion: "1.0.0",
+      turnstileAction: "contact",
+      turnstileSiteKey: "0xSITEKEY",
+    });
+
+    const envelope = contactFormEnvelope({
+      schemaVersion: status.schemaVersion,
+      submissionId: "00000000-0000-4000-8000-000000000005",
+      name: "Ada",
+      email: "ada@example.com",
+      message: "Please call me back about the workshop.",
+      turnstileToken: "browser-token",
+      // The visitor started typing a minute ago, so the message is not held
+      // as automated traffic.
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const response = await POST(
+      new Request(address, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: canonicalOrigin },
+        body: JSON.stringify(envelope),
+      }),
+      params,
+    );
+    expect(response.status).toBe(201);
+    expect(siteverifyCalls).toHaveLength(1);
+    expect(JSON.parse(siteverifyCalls[0]!)).toMatchObject({
+      secret: "0xSECRET",
+      response: "browser-token",
+    });
+
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+    const siteOfTheRoute = installedSiteDefinition.site.id;
+    const page = await store.listInbox({
+      siteId: siteOfTheRoute,
+      limit: 25,
+      olderThanReceiptId: null,
+    });
+    expect(page.messages).toHaveLength(1);
+    expect(page.messages[0]).toMatchObject({
+      formId: "contact",
+      senderName: "Ada",
+      replyAddress: "ada@example.com",
+      preview: "Please call me back about the workshop.",
+    });
+
+    // The "Forms on your site" row Messages draws from that count.
+    const [row] = siteFormsOverview(
+      installedSiteDefinition,
+      installedPublicForms,
+      await store.countInboxByForm({ siteId: siteOfTheRoute }),
+    );
+    expect(row).toMatchObject({ formId: "contact", messageCount: 1 });
+    expect(formPlacementAndCountSentence(row!)).toMatch(/1 message received\.$/u);
   });
 });

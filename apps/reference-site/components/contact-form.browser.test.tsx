@@ -36,6 +36,13 @@ async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   }
 }
 
+/** The form's plain sentence that holds this text, once it is shown. */
+function noteContaining(text: string) {
+  return [...document.querySelectorAll(".contact-form-note")].find(
+    (candidate) => candidate.textContent?.includes(text) === true,
+  );
+}
+
 function field(name: string) {
   return document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `[name="${name}"]`,
@@ -131,13 +138,7 @@ describe("the public contact form", () => {
       turnstileSiteKey: null,
     });
     render();
-    const note = await waitFor(
-      () =>
-        [...document.querySelectorAll(".contact-form-note")].find(
-          (candidate) =>
-            candidate.textContent?.includes("not ready yet") === true,
-        ) ?? undefined,
-    );
+    const note = await waitFor(() => noteContaining("not ready yet"));
     expect(note.textContent).toContain("cannot take your message");
     expect(document.querySelector("input")).toBeNull();
   });
@@ -239,12 +240,7 @@ describe("the public contact form", () => {
     type("message", "Please call me back.");
     document.querySelector("form")!.requestSubmit();
 
-    const note = await waitFor(
-      () =>
-        [...document.querySelectorAll(".contact-form-note")].find(
-          (candidate) => candidate.textContent?.includes("Thank you") === true,
-        ) ?? undefined,
-    );
+    const note = await waitFor(() => noteContaining("Thank you"));
     expect(note.getAttribute("role")).toBe("status");
     expect(document.querySelector("form")).toBeNull();
   });
@@ -261,13 +257,7 @@ describe("the public contact form", () => {
     type("message", "Please call me back.");
     document.querySelector("form")!.requestSubmit();
 
-    const note = await waitFor(
-      () =>
-        [...document.querySelectorAll(".contact-form-note")].find(
-          (candidate) =>
-            candidate.textContent?.includes("could not send") === true,
-        ) ?? undefined,
-    );
+    const note = await waitFor(() => noteContaining("could not send"));
     expect(note.textContent).toContain("Please try again");
     expect(field("name")!.value).toBe("Ada");
     expect(field("message")!.value).toBe("Please call me back.");
@@ -285,13 +275,7 @@ describe("the public contact form", () => {
     type("message", "Please call me back.");
     document.querySelector("form")!.requestSubmit();
 
-    const note = await waitFor(
-      () =>
-        [...document.querySelectorAll(".contact-form-note")].find(
-          (candidate) =>
-            candidate.textContent?.includes("cannot take messages") === true,
-        ) ?? undefined,
-    );
+    const note = await waitFor(() => noteContaining("cannot take messages"));
     expect(note.textContent).toContain("try again later");
     expect(field("message")!.value).toBe("Please call me back.");
   });

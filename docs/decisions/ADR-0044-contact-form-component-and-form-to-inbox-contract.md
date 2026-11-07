@@ -137,8 +137,16 @@ writing down for every page component.
   envelope through the real acceptance rules and the real store, then reads the
   message back as the inbox reads it. Both build the envelope with
   `components/contact-form-envelope.ts`, the one function the form itself
-  uses, so the halves cannot drift apart. No test drives a browser send into
-  the real route and then reads it in Messages; that needs the Cloudflare
-  bindings.
+  uses, so the halves cannot drift apart. The same test file also sends that
+  envelope through the real route handler: it asks the form's status with
+  `GET`, sends with `POST`, and reads the stored message and the "Forms on
+  your site" count back. Only the Cloudflare bindings, which hold the migrated
+  test database, and Cloudflare's siteverify answer are stand-ins. No test
+  drives a browser send into the real route and then reads it on the rendered
+  Messages screen; that needs the Cloudflare bindings in the browser run.
+- The editing surfaces are inside `/dash`, so the dashboard Content Security
+  Policy (ADR-0049) applies there. The block draws no Turnstile widget and
+  loads no script on an editing surface, so the policy has nothing to refuse.
+  The public site is outside `/dash` and keeps the live challenge.
 - #236 rebuilds the inbox rows and the message view. This decision does not
   touch either.
