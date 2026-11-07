@@ -49,10 +49,10 @@ export type ConnectionReadiness = Readonly<{
  *
  * `connectedByOperator`: email and publishing are connected by an operator
  * who reads the setting names, so ADR-0021 puts an absent name on the line,
- * in local development as well, and local development shows the setup link. The sender details are the
- * owner's own words — a name and a postal address — so that line says it in
- * plain words and keeps the names behind a disclosure for whoever installs
- * them.
+ * in local development as well, and local development shows the setup link.
+ * The sender details are the owner's own words — a name and a postal address
+ * — so that line says it in plain words and keeps the names behind a
+ * disclosure for whoever installs them.
  *
  * `liveSiteStatus`: the Settings screen that shows this connection once the
  * site is live, said under the local development sentence. The screen shows
@@ -154,6 +154,13 @@ export function ConnectionStatus({
   if (!readiness) return null;
 
   const copy = connectionCopy[kind];
+  const missingNames = readiness.missingSettings.join(", ");
+  // The names on the line, for a connection an operator installs. The local
+  // development line and the not-connected line say them the same way.
+  const namesOnTheLine =
+    readiness.missingSettings.length > 0 && copy.connectedByOperator ? (
+      <> Missing: {missingNames}.</>
+    ) : null;
 
   // Local development says in one plain sentence why the connection is off.
   // For a connection an operator installs, the sentence also names the
@@ -161,15 +168,11 @@ export function ConnectionStatus({
   // (ADR-0021, ADR-0030), because those names are what whoever connects the
   // site has to set. It stays plain status, not an alert: nothing is broken.
   if (readiness.state === "local_development") {
-    const namesInline =
-      readiness.missingSettings.length > 0 && copy.connectedByOperator;
     return (
       <div className="connection-status">
         <p>
           {copy.localDevelopmentSentence}
-          {namesInline ? (
-            <> Missing: {readiness.missingSettings.join(", ")}.</>
-          ) : null}
+          {namesOnTheLine}
           {copy.connectedByOperator ? (
             <>
               {" "}
@@ -203,16 +206,13 @@ export function ConnectionStatus({
     );
   }
 
-  const missingNames = readiness.missingSettings.join(", ");
-  const namesInline =
-    readiness.missingSettings.length > 0 && copy.connectedByOperator;
   const namesBehindDisclosure =
     readiness.missingSettings.length > 0 && !copy.connectedByOperator;
 
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {copy.notConnectedSentence}
-      {namesInline ? <> Missing: {missingNames}.</> : null}
+      {namesOnTheLine}
       {namesBehindDisclosure ? (
         <>
           {" "}
