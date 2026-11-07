@@ -54,10 +54,12 @@ export type ConnectionReadiness = Readonly<{
  * plain words and keeps the names behind a disclosure for whoever installs
  * them.
  *
- * `setOnLiveSite`: where an owner sets this connection once the site is live,
- * said under the local development sentence. Email carries one because the
- * Newsletter steps send the owner there (#238). Publishing's line is as it
- * was; a line for it belongs with the Settings → Site work, not here.
+ * `liveSiteStatus`: the Settings screen that shows this connection once the
+ * site is live, said under the local development sentence. The screen shows
+ * the connection; it does not set it, because an operator installs the
+ * settings. Email carries one because the Newsletter steps send the owner
+ * there (#238). Publishing has none; a line for it belongs with the
+ * Settings → Site work, not here.
  */
 type ConnectionCopy = Readonly<{
   setupLinkLabel: string;
@@ -66,7 +68,12 @@ type ConnectionCopy = Readonly<{
   notConnectedSentence: string;
   connectedMeaning: string;
   connectedByOperator: boolean;
-  setOnLiveSite?: Readonly<{ before: string; label: string; href: string }>;
+  liveSiteStatus?: Readonly<{
+    before: string;
+    label: string;
+    href: string;
+    after: string;
+  }>;
 }>;
 
 /**
@@ -91,10 +98,11 @@ const connectionCopy: Readonly<Record<ConnectionKind, ConnectionCopy>> = {
       "This means every email setting is installed, not that a message was " +
       "sent.",
     connectedByOperator: true,
-    setOnLiveSite: {
-      before: "On a live site the email connection is set in ",
+    liveSiteStatus: {
+      before: "On a live site, ",
       label: "Settings → Email",
       href: settingsTab.email.href,
+      after: " shows whether email is connected.",
     },
   },
   publishing: {
@@ -170,10 +178,11 @@ export function ConnectionStatus({
             </>
           ) : null}
         </p>
-        {copy.setOnLiveSite === undefined ? null : (
+        {copy.liveSiteStatus === undefined ? null : (
           <p>
-            {copy.setOnLiveSite.before}
-            <a href={copy.setOnLiveSite.href}>{copy.setOnLiveSite.label}</a>.
+            {copy.liveSiteStatus.before}
+            <a href={copy.liveSiteStatus.href}>{copy.liveSiteStatus.label}</a>
+            {copy.liveSiteStatus.after}
           </p>
         )}
         {readiness.missingSettings.length > 0 ? (

@@ -70,8 +70,9 @@ behind a disclosure.**
 The test step in local development says that no test can go out, that nothing
 is broken, and that a test goes out once the site is connected. Under it, the
 connection line says email is off because this site holds no email provider
-connection, and links to the setup document; a second line says the email
-connection is set in Settings → Email on a live site.
+connection, and links to the setup document; a second line says that on a
+live site Settings → Email shows whether email is connected. That screen shows
+the connection and does not set it: an operator installs the settings.
 
 No configuration name appears on the open screen. A list of `FOUNDRY_*` names
 is words a site owner cannot use, and the owner's rule is that no internal
@@ -104,8 +105,9 @@ sending now and picking a send time all stay shut until it is ticked. One tick
 opens one step: it clears when the email's fingerprint changes, because a
 changed email has not been read, and it clears when the approval changes, so
 the tick that opened "Approve this email for sending" is not still ticked when
-the same screen turns into "Send to 412 people now". The confirm control names
-the count.
+the same screen turns into "Send to 412 people now". Both confirm controls name
+the count: "Send to 412 people now" and, for a chosen time, "Send to 412
+people then".
 
 The sending name and address leave the server. They are the installation's own
 sending identity, which every recipient already reads in their inbox. A test

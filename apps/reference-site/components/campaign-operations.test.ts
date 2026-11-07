@@ -16,6 +16,7 @@ import {
 } from "./campaign-operations";
 import {
   recipientCountSentence,
+  sendLaterLabel,
   sendNowLabel,
 } from "./campaign-send-review";
 
@@ -226,14 +227,16 @@ describe("what a refused step says", () => {
 });
 
 describe("what the review says about the list", () => {
-  it("names the count in the sentence and on the confirm control", () => {
+  it("names the count in the sentence and on both confirm controls", () => {
     expect(recipientCountSentence(412)).toBe("Going to 412 people.");
     expect(sendNowLabel(412)).toBe("Send to 412 people now");
+    expect(sendLaterLabel(412)).toBe("Send to 412 people then");
   });
 
   it("counts one person as one person", () => {
     expect(recipientCountSentence(1)).toBe("Going to 1 person.");
     expect(sendNowLabel(1)).toBe("Send to 1 person now");
+    expect(sendLaterLabel(1)).toBe("Send to 1 person then");
   });
 
   it("says plainly when nobody is on the list", () => {

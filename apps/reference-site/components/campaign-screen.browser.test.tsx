@@ -381,7 +381,7 @@ describe("one campaign's screen, browser acceptance", () => {
         "provider connection.",
     );
     expect(host.textContent).toContain(
-      "On a live site the email connection is set in Settings → Email.",
+      "On a live site, Settings → Email shows whether email is connected.",
     );
     const settingsLink = Array.from(
       host.querySelectorAll<HTMLAnchorElement>("a"),
@@ -542,7 +542,7 @@ describe("one campaign's screen, browser acceptance", () => {
     expect(review.textContent).not.toContain("foundry.unsubscribe.token");
 
     // Nothing goes out until the owner says they read it.
-    const scheduleButton = buttonNamed(host, "Send it then")!;
+    const scheduleButton = buttonNamed(host, "Send to 412 people then")!;
     expect(confirm.disabled).toBe(true);
     expect(scheduleButton.disabled).toBe(true);
     await userEvent.click(

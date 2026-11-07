@@ -13,7 +13,11 @@ import {
   type DeliveryReadiness,
   type SendFlowCommand,
 } from "./campaign-operations";
-import { CampaignSendReview, sendNowLabel } from "./campaign-send-review";
+import {
+  CampaignSendReview,
+  sendLaterLabel,
+  sendNowLabel,
+} from "./campaign-send-review";
 import {
   browserTimeZone,
   resolveSendTime,
@@ -485,8 +489,8 @@ export function CampaignSendFlow({
             stage === "not_connected" ? (
             // Nothing more to add. Step 2 already carries the connection line
             // and the settings, and the sentence above sends the reader
-            // there; repeating a list of eight setting names here would fill
-            // the screen twice over.
+            // there; repeating the list of setting names here would show
+            // it twice.
             null
           ) : reviewSummary === null ? (
             // The server is describing a different version of this email from
@@ -551,7 +555,7 @@ export function CampaignSendFlow({
                   disabled={busy || sendAt === "" || !sendReviewed}
                   onClick={scheduleThisEmail}
                 >
-                  Send it then
+                  {sendLaterLabel(reviewSummary.recipientCount)}
                 </button>
               </div>
               {timeProblem === "" ? null : (

@@ -29,12 +29,22 @@ function ReviewFact({
  */
 export function recipientCountSentence(count: number): string {
   if (count === 0) return "Nobody is on your list yet, so nobody would get it.";
-  return count === 1 ? "Going to 1 person." : `Going to ${count} people.`;
+  return `Going to ${peopleCount(count)}.`;
 }
 
-/** What the confirm control says it will do. */
+/** What the send-now confirm control says it will do. */
 export function sendNowLabel(count: number): string {
-  return count === 1 ? "Send to 1 person now" : `Send to ${count} people now`;
+  return `Send to ${peopleCount(count)} now`;
+}
+
+/** What the confirm control for a chosen time says it will do. */
+export function sendLaterLabel(count: number): string {
+  return `Send to ${peopleCount(count)} then`;
+}
+
+/** A count of people, so that one person never reads as "1 people". */
+function peopleCount(count: number): string {
+  return count === 1 ? "1 person" : `${count} people`;
 }
 
 /**
