@@ -4,9 +4,9 @@
 //
 // This walks the sub-screens a real owner can reach by clicking through the
 // dashboard, with no seeded data: the page editor, the campaign writing
-// screens, the blog writing screens, and Connect an agent. Two sub-screens are not walked here because
-// nothing in this installation can put data behind them without a seed
-// script this repository does not have:
+// screens, the blog writing screens, and Connect an agent. Two sub-screens
+// are not walked here because nothing in this installation can put data
+// behind them without a seed script this repository does not have:
 //   - `/dash/forms/<receiptId>` needs a real public form submission, and the
 //     public contact form block does not exist yet (#235, #236 are open).
 //   - `/dash/review/<previewId>` needs a real MCP preview, which only a
