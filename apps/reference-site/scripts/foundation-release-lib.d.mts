@@ -20,7 +20,7 @@ export function assertLockedReleaseExecutable(args: {
   name: string;
 }): void;
 
-export function tiptapPins(
+export function alignedTiptapPins(
   dependencies: Readonly<Record<string, string>>,
 ): Record<string, string>;
 
@@ -28,6 +28,14 @@ export function assertTiptapSetPinned(args: {
   lock: unknown;
   dependencies: Readonly<Record<string, string>>;
 }): void;
+
+export function lockedTiptapPackages(
+  lock: unknown,
+): Array<{ name: string; version: string }>;
+
+export function readReleaseDependencies(
+  packageRoot: string,
+): Promise<Record<string, string>>;
 
 export function writeInstallationBuildConfiguration(args: {
   target: string;

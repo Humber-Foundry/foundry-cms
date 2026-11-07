@@ -134,11 +134,11 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 /**
  * Returns every `@tiptap/*` entry of a release `dependencies` map. Tiptap
  * packages declare exact peer versions of each other, but Puck and the
- * starter kit depend on them with open ranges. The release therefore pins
- * the whole set at one exact version. Throws when an entry differs from the
+ * starter kit depend on them with open ranges. So the release pins the whole
+ * set at one exact version. Throws when an entry differs from the
  * `@tiptap/core` version.
  */
-export function tiptapPins(dependencies) {
+export function alignedTiptapPins(dependencies) {
   const pins = Object.fromEntries(
     Object.entries(dependencies).filter(([name]) => name.startsWith("@tiptap/")),
   );
@@ -155,28 +155,42 @@ export function tiptapPins(dependencies) {
 
 /**
  * Checks that an npm lockfile resolves every `@tiptap/*` package, at any
- * depth, to the version that the release `dependencies` pin. A new upstream
- * tiptap package or version then fails here, by name, instead of as a
- * missing export in the build.
+ * depth, to the version that the release `dependencies` pin. An installation
+ * may add its own tiptap package at that version. Any other version fails
+ * here, by name, instead of as a missing export in the build. The error
+ * detail is `<name>@<resolved>:expected:<pinned>`.
  */
 export function assertTiptapSetPinned({ lock, dependencies }) {
-  const pins = tiptapPins(dependencies);
+  const pins = alignedTiptapPins(dependencies);
   const expected = pins["@tiptap/core"];
-  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
-    const match = /(?:^|\/)node_modules\/(@tiptap\/[^/]+)$/u.exec(path);
-    if (match === null) continue;
-    const name = match[1];
-    if (pins[name] === undefined) {
-      throw new Error(
-        `foundation_release_tiptap_unpinned:${name}@${entry.version}:expected:${expected}`,
-      );
-    }
-    if (entry.version !== pins[name]) {
-      throw new Error(
-        `foundation_release_tiptap_version_drift:${name}@${entry.version}:expected:${pins[name]}`,
-      );
-    }
+  for (const { name, version } of lockedTiptapPackages(lock)) {
+    if (version === expected) continue;
+    const code = pins[name] === undefined ? "unpinned" : "version_drift";
+    throw new Error(
+      `foundation_release_tiptap_${code}:${name}@${version}:expected:${expected}`,
+    );
   }
+}
+
+/**
+ * Returns the name and version of every `@tiptap/*` package in an npm
+ * lockfile, at any depth.
+ */
+export function lockedTiptapPackages(lock) {
+  return Object.entries(lock.packages ?? {}).flatMap(([path, entry]) => {
+    const match = /(?:^|\/)node_modules\/(@tiptap\/[^/]+)$/u.exec(path);
+    return match === null ? [] : [{ name: match[1], version: entry.version }];
+  });
+}
+
+/**
+ * Returns the `dependencies` map of the release package at `packageRoot`.
+ */
+export async function readReleaseDependencies(packageRoot) {
+  const releasePackage = JSON.parse(
+    await readFile(join(packageRoot, "package.json"), "utf8"),
+  );
+  return releasePackage.dependencies;
 }
 
 /**
@@ -195,10 +209,9 @@ export async function writeInstallationBuildConfiguration({
   targetPackage.private = true;
   targetPackage.type = "module";
   targetPackage.engines = { node: descriptor.compatibility.node };
-  const releasePackage = JSON.parse(
-    await readFile(join(packageRoot, "package.json"), "utf8"),
+  targetPackage.overrides = alignedTiptapPins(
+    await readReleaseDependencies(packageRoot),
   );
-  targetPackage.overrides = tiptapPins(releasePackage.dependencies);
   targetPackage.scripts = {
     ...(targetPackage.scripts ?? {}),
     build: "next build",

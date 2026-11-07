@@ -10,6 +10,7 @@ import {
   assertTiptapSetPinned,
   isTemplatePath,
   parseReleaseArguments,
+  readReleaseDependencies,
   tarEntries,
   writeInstallationBuildConfiguration,
 } from "./foundation-release-lib.mjs";
@@ -39,10 +40,10 @@ async function main() {
   for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
     assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
   }
-  const releasePackage = JSON.parse(
-    await readFile(join(packageRoot, "package.json"), "utf8"),
-  );
-  assertTiptapSetPinned({ lock, dependencies: releasePackage.dependencies });
+  assertTiptapSetPinned({
+    lock,
+    dependencies: await readReleaseDependencies(packageRoot),
+  });
   const {
     loadFoundationReleaseDescriptor,
     verifyFoundationReleaseArtifacts,

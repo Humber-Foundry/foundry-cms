@@ -4,8 +4,9 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  alignedTiptapPins,
   assertTiptapSetPinned,
-  tiptapPins,
+  lockedTiptapPackages,
 } from "./foundation-release-lib.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -17,7 +18,7 @@ function readJson(path) {
 describe("tiptap pins", () => {
   it("selects every @tiptap/* dependency and nothing else", () => {
     expect(
-      tiptapPins({
+      alignedTiptapPins({
         "@puckeditor/core": "0.22.2",
         "@tiptap/core": "3.29.1",
         "@tiptap/extension-text-align": "3.29.1",
@@ -31,7 +32,7 @@ describe("tiptap pins", () => {
 
   it("rejects a tiptap set that does not share one exact version", () => {
     expect(() =>
-      tiptapPins({
+      alignedTiptapPins({
         "@tiptap/core": "3.29.1",
         "@tiptap/extension-text-align": "^3.29.1",
       }),
@@ -81,7 +82,21 @@ describe("installed tiptap set", () => {
     );
   });
 
-  it("names a tiptap package that the release does not pin", () => {
+  it("accepts an installation's own tiptap package at the shared version", () => {
+    expect(() =>
+      assertTiptapSetPinned({
+        dependencies,
+        lock: {
+          packages: {
+            "node_modules/@tiptap/core": { version: "3.29.1" },
+            "node_modules/@tiptap/extension-color": { version: "3.29.1" },
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("names a tiptap package that the release does not pin at another version", () => {
     expect(() =>
       assertTiptapSetPinned({
         dependencies,
@@ -103,11 +118,18 @@ describe("installed tiptap set", () => {
     // must be added there at the shared version, or a fresh installation
     // resolves it from an open range.
     const referenceManifest = readJson("apps/reference-site/package.json");
+    const lock = readJson("package-lock.json");
     expect(() =>
       assertTiptapSetPinned({
         dependencies: referenceManifest.dependencies,
-        lock: readJson("package-lock.json"),
+        lock,
       }),
     ).not.toThrow();
+    const pins = alignedTiptapPins(referenceManifest.dependencies);
+    expect(
+      lockedTiptapPackages(lock)
+        .map(({ name }) => name)
+        .filter((name) => pins[name] === undefined),
+    ).toEqual([]);
   });
 });

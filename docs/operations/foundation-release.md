@@ -38,14 +38,16 @@ client credential is read by this verification.
 
 The install adds no npm overrides, the same as a new installation's first
 install. Puck and the tiptap starter kit depend on tiptap packages with open
-ranges, but tiptap packages need exactly matching versions of each other. So
-the reference-site package lists every resolved `@tiptap/*` package at one
-exact version, and the scaffold and sync write that set as the installation's
-overrides. The scaffold and sync stop with
-`foundation_release_tiptap_unpinned` or
+ranges. Tiptap packages need exactly matching versions of each other. So the
+reference-site package lists every resolved `@tiptap/*` package at one exact
+version. The scaffold and sync write that set as the installation's overrides.
+An installation can add its own tiptap package at the same version. The
+scaffold and sync stop with `foundation_release_tiptap_unpinned` or
 `foundation_release_tiptap_version_drift` when the lockfile resolves a tiptap
-package outside that set. When a Puck or tiptap upgrade adds a tiptap package,
-add it to `apps/reference-site/package.json` at the shared version; the
+package at another version.
+
+A Puck or tiptap upgrade can add a tiptap package. Add that package to
+`apps/reference-site/package.json` at the shared version. The
 `foundation-release-lib` test fails until you do.
 
 ## Sync an installation to a newer release
