@@ -133,8 +133,8 @@ That script runs:
 - `node scripts/verify-access-stand-in-refused.mjs`, which proves a deploy
   build refuses the harness's sign-in;
 - `node scripts/verify-worker-harness-cleanup.mjs`, which proves the harness
-  leaves no file, process or open port after a failed or interrupted check;
-  and
+  leaves no file in its temporary directory, no browser process and no open
+  Worker port after a failed or interrupted check; and
 - each whole-path check with `--reuse-build`.
 
 Add a new whole-path check to the `verify:whole-path` script in the root

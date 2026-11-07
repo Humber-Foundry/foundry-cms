@@ -19,6 +19,9 @@ import { unstable_startWorker } from "wrangler";
  * visitor page and a signed-in page, and everything is stopped and removed
  * afterwards. `docs/operations/whole-path-browser-checks.md` explains how to
  * write a check; ADR-0050 records why the sign-in is safe.
+ *
+ * Importing this module adds a process `exit` hook that stops any command
+ * still running from `run`.
  */
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
@@ -45,7 +48,7 @@ function isAccessProtectedPath(pathname) {
   );
 }
 
-// Build and database commands still running. If the process exits early,
+// Commands started by `run` that are still running. If the process exits early,
 // they are stopped first, so none of them writes into a directory after it
 // is removed. This hook is added before any directory hook, so it runs first.
 const runningChildren = new Set();
@@ -412,6 +415,11 @@ export async function startWorkerHarness({
   }
 }
 
+/** The exit code for a process stopped by `signal`: 128 plus its number. */
+export function interruptedExitCode(signal) {
+  return signal === "SIGINT" ? 130 : 143;
+}
+
 /**
  * Start the harness, run `check` with it, and stop everything afterwards,
  * whether the check passes, fails or the process is interrupted.
@@ -420,7 +428,7 @@ export async function withWorkerHarness(options, check) {
   let harness;
   const interrupted = (signal) => {
     void Promise.resolve(harness?.stop()).finally(() =>
-      process.exit(signal === "SIGINT" ? 130 : 143),
+      process.exit(interruptedExitCode(signal)),
     );
   };
   process.once("SIGINT", interrupted);

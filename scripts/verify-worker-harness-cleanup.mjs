@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,9 +13,11 @@ import { pathToFileURL } from "node:url";
  * Each case runs one harness in a child process with its own temporary
  * directory. The check prints the Worker's origin, then fails or waits to be
  * interrupted. Afterwards the child must have exited by itself, the temporary
- * directory must hold nothing but tool caches, and nothing may answer on the
- * Worker's port. The database and the browser profile both live in that
- * directory, so a leftover of either fails the check.
+ * directory must hold nothing but tool caches, nothing may answer on the
+ * Worker's port, and no process may name the directory. The database and the
+ * browser profile both live in that directory, and the browser's command line
+ * names its profile, so a leftover database or browser fails the check. The
+ * closed port shows the Worker runtime has stopped.
  */
 
 const harnessUrl = pathToFileURL(
@@ -49,6 +51,24 @@ function portAnswers(origin) {
       resolveAnswer(true);
     });
     socket.once("error", () => resolveAnswer(false));
+  });
+}
+
+/**
+ * Every running process whose command line names `directory`. Chromium names
+ * its profile folder, which the harness puts in the case's directory.
+ */
+function processesNaming(directory) {
+  return new Promise((resolveList, reject) => {
+    execFile("ps", ["-axo", "pid=,command="], (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolveList(
+        stdout.split("\n").filter((line) => line.includes(directory)),
+      );
+    });
   });
 }
 
@@ -91,13 +111,17 @@ async function runCase(name) {
       throw new Error(`${name}_child_exited_0\n${output.join("")}`);
     }
     const left = (await readdir(directory)).filter(
-      (name) => !toolCaches.has(name),
+      (entry) => !toolCaches.has(entry),
     );
     if (left.length > 0) {
       throw new Error(`${name}_left_temporary_files:${left.join(",")}`);
     }
     if (await portAnswers(origin)) {
       throw new Error(`${name}_left_port_open:${origin}`);
+    }
+    const processes = await processesNaming(directory);
+    if (processes.length > 0) {
+      throw new Error(`${name}_left_processes:\n${processes.join("\n")}`);
     }
     return code;
   } finally {

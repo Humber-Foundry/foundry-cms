@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   createAccessStandIn,
+  interruptedExitCode,
   prepareLocalState,
   run,
   siteRoot,
@@ -135,7 +136,7 @@ async function main() {
 // An interrupt exits through `process.exit`, so the harness's exit hooks stop
 // its commands and remove the database directory.
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => process.exit(signal === "SIGINT" ? 130 : 143));
+  process.once(signal, () => process.exit(interruptedExitCode(signal)));
 }
 
 try {
