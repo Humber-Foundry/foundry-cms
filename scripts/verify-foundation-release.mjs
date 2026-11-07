@@ -43,22 +43,14 @@ async function main() {
       NPM_CONFIG_CACHE: join(isolatedHome, "npm-cache"),
       NPM_CONFIG_UPDATE_NOTIFIER: "false",
     };
-    const referenceManifest = JSON.parse(
-      await readFile(join(root, "apps/reference-site/package.json"), "utf8"),
-    );
-    const tiptapOverrides = Object.fromEntries(
-      Object.entries(referenceManifest.dependencies).filter(([name]) =>
-        /^@tiptap\/(?:core|pm|extension-(?:bubble|floating)-menu|extension-list)$/u.test(
-          name,
-        ),
-      ),
-    );
     const dependencies = Object.fromEntries(
       Object.entries(descriptor.artifacts).map(([name, artifact]) => [
         name,
         `file:${join(releaseDirectory, "artifacts", artifact.filename)}`,
       ]),
     );
+    // No overrides: this is a client's first install, before the scaffold
+    // writes any. The release artifacts alone must resolve one tiptap set.
     await writeFile(
       join(target, "package.json"),
       `${JSON.stringify(
@@ -69,7 +61,6 @@ async function main() {
           type: "module",
           scripts: {},
           dependencies,
-          overrides: tiptapOverrides,
         },
         null,
         2,

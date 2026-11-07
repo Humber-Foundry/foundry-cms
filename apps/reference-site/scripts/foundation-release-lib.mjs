@@ -132,6 +132,63 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 }
 
 /**
+ * Returns every `@tiptap/*` entry of a release `dependencies` map. Tiptap
+ * packages declare exact peer versions of each other, but Puck and the
+ * starter kit depend on them with open ranges. So the release pins the whole
+ * set at one exact version. Throws when an entry differs from the
+ * `@tiptap/core` version.
+ */
+export function alignedTiptapPins(dependencies) {
+  const pins = Object.fromEntries(
+    Object.entries(dependencies).filter(([name]) => name.startsWith("@tiptap/")),
+  );
+  assertOneTiptapVersion(
+    Object.entries(pins).map(([name, version]) => ({ name, version })),
+  );
+  return pins;
+}
+
+/**
+ * Checks that an npm lockfile resolves every `@tiptap/*` package, at any
+ * depth, to the version of its `@tiptap/core`. A tiptap package at another
+ * version fails here, by name, instead of as a missing export in the build.
+ * The scaffold runs this check on a new installation's first install, before
+ * any overrides exist.
+ */
+export function assertTiptapSetAligned(lock) {
+  assertOneTiptapVersion(lockedTiptapPackages(lock));
+}
+
+/**
+ * Throws unless every `{ name, version }` entry has the version of the
+ * `@tiptap/core` entry. The error detail is
+ * `<name>@<version>:expected:<core version>`.
+ */
+function assertOneTiptapVersion(packages) {
+  if (packages.length === 0) return;
+  const expected = packages.find(({ name }) => name === "@tiptap/core")?.version;
+  if (expected === undefined) throw new Error("foundation_release_tiptap_core_missing");
+  for (const { name, version } of packages) {
+    if (version !== expected) {
+      throw new Error(
+        `foundation_release_tiptap_version_drift:${name}@${version}:expected:${expected}`,
+      );
+    }
+  }
+}
+
+/**
+ * Returns the name and version of every `@tiptap/*` package in an npm
+ * lockfile, at any depth.
+ */
+export function lockedTiptapPackages(lock) {
+  return Object.entries(lock.packages ?? {}).flatMap(([path, entry]) => {
+    const match = /(?:^|\/)node_modules\/(@tiptap\/[^/]+)$/u.exec(path);
+    return match === null ? [] : [{ name: match[1], version: entry.version }];
+  });
+}
+
+/**
  * Writes the installation `package.json` and `tsconfig.json` from the target
  * release. Installation scripts are preserved; the foundation's build, engines,
  * tiptap overrides and TypeScript project are set to the target's. This is the
@@ -150,11 +207,7 @@ export async function writeInstallationBuildConfiguration({
   const releasePackage = JSON.parse(
     await readFile(join(packageRoot, "package.json"), "utf8"),
   );
-  targetPackage.overrides = Object.fromEntries(
-    Object.entries(releasePackage.dependencies).filter(([name]) =>
-      /^@tiptap\/(?:core|pm|extension-(?:bubble|floating)-menu)$/u.test(name),
-    ),
-  );
+  targetPackage.overrides = alignedTiptapPins(releasePackage.dependencies);
   targetPackage.scripts = {
     ...(targetPackage.scripts ?? {}),
     build: "next build",
