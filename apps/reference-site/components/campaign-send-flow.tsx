@@ -97,8 +97,6 @@ export function CampaignSendFlow({
   onEdit(): void;
 }) {
   const [reviewed, setReviewed] = useState(false);
-  // Which email and approval the review tick was given for, or null.
-  const [reviewedFor, setReviewedFor] = useState<string | null>(null);
   const [sendAt, setSendAt] = useState("");
   const [timeProblem, setTimeProblem] = useState("");
 
@@ -139,17 +137,25 @@ export function CampaignSendFlow({
 
   // The tick is one reading of one review, and it is spent on one step.
   //
-  // It holds only for the email and the approval it was given for. A changed
-  // email has not been read. Approving is itself a step: without this, the
-  // tick that opened "Approve this email for sending" would still be ticked
-  // when the same screen turns into "Send to 412 people now", and the send
-  // would go out on a review nobody read twice. The tick is compared in the
-  // same drawing that shows the new step, so no drawing ever shows the send
-  // control open on the old tick.
+  // It clears whenever the email or the approval changes. A changed email
+  // has not been read. Approving is itself a step: without this, the tick
+  // that opened "Approve this email for sending" would still be ticked when
+  // the same screen turns into "Send to 412 people now", and the send would
+  // go out on a review nobody read twice. The tick is cleared during the
+  // drawing that shows the change, not after it, so no drawing ever shows a
+  // control open on the old tick. It clears on every change, so an email
+  // changed and then changed back must be read again.
   const reviewKey = `${report.rendered.campaignFingerprint}|${
     authorization?.id ?? ""
   }`;
-  const sendReviewed = reviewedFor === reviewKey;
+  const [reviewTick, setReviewTick] = useState({
+    key: reviewKey,
+    ticked: false,
+  });
+  if (reviewTick.key !== reviewKey) {
+    setReviewTick({ key: reviewKey, ticked: false });
+  }
+  const sendReviewed = reviewTick.key === reviewKey && reviewTick.ticked;
 
   function testNeed(): string {
     if (localDevelopment) {
@@ -286,7 +292,7 @@ export function CampaignSendFlow({
         summary={summary}
         reviewed={sendReviewed}
         busy={busy}
-        onReviewed={(ticked) => setReviewedFor(ticked ? reviewKey : null)}
+        onReviewed={(ticked) => setReviewTick({ key: reviewKey, ticked })}
       />
     );
   }

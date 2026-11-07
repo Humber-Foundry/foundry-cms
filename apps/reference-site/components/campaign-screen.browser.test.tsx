@@ -64,6 +64,11 @@ describe("one campaign's screen, browser acceptance", () => {
       sendSummaryRevisionId?: string;
       /** The provider's answer to a test, when it is not a delivery. */
       testFailureCode?: string;
+      /**
+       * The fingerprint is a hash of what the email says, so an email edited
+       * back to its first words has its first fingerprint again.
+       */
+      fingerprintFollowsSubject?: boolean;
     } = {},
   ) {
     const campaign = {
@@ -226,8 +231,12 @@ describe("one campaign's screen, browser acceptance", () => {
           if (command.action === "edit") {
             // A new revision renders to a new fingerprint, so the delivered
             // test no longer covers what the email says.
-            state.campaignFingerprint = "fingerprint-two";
             const input = (command.input ?? {}) as Record<string, unknown>;
+            state.campaignFingerprint =
+              options.fingerprintFollowsSubject === true &&
+              input.subject === revision.subject
+                ? "fingerprint-one"
+                : "fingerprint-two";
             return Response.json({
               campaign: { ...campaign, version: 2 },
               revision: { ...revision, ...input, revisionNumber: 2 },
@@ -487,6 +496,54 @@ describe("one campaign's screen, browser acceptance", () => {
     expect(send.disabled).toBe(true);
     watcher.disconnect();
     expect(sendOpenedEarly).toBe(false);
+  });
+
+  it("does not keep a review tick through an edit that is later undone", async () => {
+    const server = fakeNewsletterServer({ fingerprintFollowsSubject: true });
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.readiness = "ready";
+    const host = mount(server.revision, "owner");
+
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Approve this email for sending")).toBeDefined(),
+    );
+    await userEvent.click(host.querySelector('input[name="sendReviewed"]')!);
+    expect(buttonNamed(host, "Approve this email for sending")!.disabled).toBe(
+      false,
+    );
+
+    // Change the subject, then change it back. The email says the same words
+    // as before, but the review was read for an email that then changed, so
+    // it has to be read again.
+    async function changeSubject(from: string, to: string) {
+      await userEvent.click(buttonNamed(host, "Change the email")!);
+      const subject = Array.from(
+        host.querySelectorAll<HTMLInputElement>('input[name="subject"]'),
+      ).find(({ value }) => value === from);
+      await userEvent.fill(subject!, to);
+      await userEvent.click(page.getByRole("button", { name: "Save changes" }));
+      await vi.waitFor(() =>
+        expect(buttonNamed(host, "Change the email")).toBeDefined(),
+      );
+    }
+    await changeSubject("September news", "October news");
+    await vi.waitFor(() =>
+      expect(
+        buttonNamed(host, "Approve this email for sending"),
+      ).toBeUndefined(),
+    );
+    await changeSubject("October news", "September news");
+
+    const approve = await vi.waitFor(() => {
+      const found = buttonNamed(host, "Approve this email for sending");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[name="sendReviewed"]')!
+        .checked,
+    ).toBe(false);
+    expect(approve.disabled).toBe(true);
   });
 
   it("offers no send while the server reviews a different revision", async () => {
