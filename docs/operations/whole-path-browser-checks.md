@@ -73,7 +73,9 @@ try {
       await owner.context().close();
 
       if (harness.refusedOutbound.length > 0) {
-        throw new Error(`unexpected requests: ${harness.refusedOutbound}`);
+        throw new Error(
+          `worker_sent_unexpected_requests:${harness.refusedOutbound.join(", ")}`,
+        );
       }
     },
   );
@@ -86,7 +88,8 @@ try {
 
 Rules:
 
-- Throw on the first wrong thing, with a short error code and the value seen.
+- Throw at the first value that does not match, with a short error code and
+  the value seen.
   Set `process.exitCode`; do not call `process.exit` inside the check, or the
   harness cannot clean up.
 - Do not read a refused response's body with Playwright's `response.text()`.
@@ -128,7 +131,10 @@ Product CI builds the Worker once, then runs `npm run verify:whole-path`.
 That script runs:
 
 - `node scripts/verify-access-stand-in-refused.mjs`, which proves a deploy
-  build refuses the harness's sign-in; and
+  build refuses the harness's sign-in;
+- `node scripts/verify-worker-harness-cleanup.mjs`, which proves the harness
+  leaves no file, process or open port after a failed or interrupted check;
+  and
 - each whole-path check with `--reuse-build`.
 
 Add a new whole-path check to the `verify:whole-path` script in the root

@@ -32,7 +32,7 @@
     "verify:site-validator": "npm run generate:validator --workspace @humber-foundry/site-definition -- --check",
     "verify:bundle": "node scripts/verify-public-bundle.mjs",
     "verify:worker": "node scripts/verify-worker-runtime.mjs",
-    "verify:whole-path": "node scripts/verify-access-stand-in-refused.mjs && node scripts/verify-contact-form-whole-path-browser.mjs --reuse-build"
+    "verify:whole-path": "node scripts/verify-access-stand-in-refused.mjs && node scripts/verify-worker-harness-cleanup.mjs && node scripts/verify-contact-form-whole-path-browser.mjs --reuse-build"
   },
   "engines": {
     "node": ">=22.19.0"

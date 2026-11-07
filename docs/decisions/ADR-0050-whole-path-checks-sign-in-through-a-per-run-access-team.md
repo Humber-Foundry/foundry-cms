@@ -12,7 +12,8 @@
 
 The browser checks in `scripts/verify-*-browser.mjs` run `next dev`. In
 development the dashboard signs in a built-in local Owner, no D1 database is
-bound, and every Messages read returns an empty result. So no browser check
+bound, and every Messages read returns an empty result (`readMessages` in
+`apps/reference-site/src/public-form-messages-runtime.ts`). So no browser check
 could follow a visitor's action all the way to the dashboard. ADR-0044 had to
 split "a visitor's message appears in Messages" into a browser half and a
 route-test half. The v1 release gate (#63) needs whole-path proof.
@@ -133,8 +134,9 @@ carries no `action`. ADR-0001 requires the Worker to check both against its
 own values, and the Worker does. So when Cloudflare reports success, the
 harness fills in the hostname and the action that a real widget on this site
 would report, and passes the answer on. When Cloudflare reports failure, the
-harness passes that on unchanged. The Worker's own hostname and action check
-still runs: a check that names the wrong action is refused with a 400.
+harness passes that on unchanged. The Worker's hostname and action check still
+runs, but it compares the Worker's values with values the harness chose. It
+proves the check runs on the answer, not what a real widget reports.
 
 ### The dashboard pages below `/dash` receive the verified identity
 
@@ -158,7 +160,9 @@ source is already built), prepares the database in a new directory under the
 system temporary directory, serves the Worker on `https://127.0.0.1:<port>`,
 launches Chromium and gives the check an origin, a visitor page and a
 signed-in page. It stops the browser and the Worker and removes the directory
-when the check passes, fails or is interrupted. `docs/operations/whole-path-browser-checks.md`
+when the check passes, fails or is interrupted.
+`scripts/verify-worker-harness-cleanup.mjs` proves this in Product CI for a
+failed and an interrupted check. `docs/operations/whole-path-browser-checks.md`
 explains how to write a check.
 
 The Worker is served over HTTPS with Miniflare's built-in local certificate,

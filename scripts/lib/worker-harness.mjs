@@ -22,7 +22,7 @@ import { unstable_startWorker } from "wrangler";
  */
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
-const siteRoot = join(repositoryRoot, "apps", "reference-site");
+export const siteRoot = join(repositoryRoot, "apps", "reference-site");
 const wranglerConfig = join(siteRoot, "wrangler.jsonc");
 const databaseName = "foundry-reference-site";
 const siteId = "site_foundry_reference";
@@ -45,21 +45,39 @@ function isAccessProtectedPath(pathname) {
   );
 }
 
-async function run(command, args, options) {
+// Build and database commands still running. If the process exits early,
+// they are stopped first, so none of them writes into a directory after it
+// is removed. This hook is added before any directory hook, so it runs first.
+const runningChildren = new Set();
+process.on("exit", () => {
+  for (const child of runningChildren) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // It has already exited.
+    }
+  }
+});
+
+/** Run a command to the end, and throw with its output if it fails. */
+export async function run(command, args, options) {
   const output = [];
   const child = spawn(command, args, {
     ...options,
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  runningChildren.add(child);
   child.stdout.on("data", (chunk) => output.push(String(chunk)));
   child.stderr.on("data", (chunk) => output.push(String(chunk)));
   const code = await new Promise((resolveExit, reject) => {
     child.once("error", reject);
     child.once("exit", resolveExit);
-  });
+  }).finally(() => runningChildren.delete(child));
   if (code !== 0) {
     throw new Error(
-      `${command} ${args.join(" ")} exited with ${code}\n${output.join("")}`,
+      `worker_harness_command_failed:${command} ${args.join(" ")}:${code}\n` +
+        output.join(""),
     );
   }
 }
@@ -167,10 +185,20 @@ INSERT INTO human_memberships (
 /**
  * A fresh local database with every migration applied and the stand-in's
  * member added, in a new directory under the system temporary directory.
- * The caller removes `directory`.
+ * The caller calls `remove()` when it is done.
+ *
+ * Wrangler stops its runtime and exits on an interrupt before an
+ * asynchronous clean-up can finish, so the directory is also removed
+ * synchronously when the process exits.
  */
 export async function prepareLocalState(accessStandIn) {
   const directory = await mkdtemp(join(tmpdir(), "foundry-worker-harness-"));
+  const removeOnExit = () => rmSync(directory, { recursive: true, force: true });
+  process.once("exit", removeOnExit);
+  const remove = async () => {
+    process.off("exit", removeOnExit);
+    await rm(directory, { recursive: true, force: true });
+  };
   try {
     const persistTo = join(directory, "state");
     const wranglerD1 = (args) =>
@@ -183,9 +211,9 @@ export async function prepareLocalState(accessStandIn) {
     const memberFile = join(directory, "member.sql");
     await writeFile(memberFile, ownerMembershipSql(accessStandIn));
     await wranglerD1(["execute", databaseName, "--file", memberFile]);
-    return { directory, persistTo };
+    return { persistTo, remove };
   } catch (error) {
-    await rm(directory, { recursive: true, force: true });
+    await remove();
     throw error;
   }
 }
@@ -214,9 +242,9 @@ function workerSettings({ origin, accessStandIn }) {
  * Serve the built Worker on `https://127.0.0.1:<port>` with the bindings in
  * `wrangler.jsonc` and this run's settings.
  *
- * `outbound(origin)` returns the function that answers every request the
- * Worker sends out. Leave it undefined to let those requests reach the
- * network, as a deployed Worker's do.
+ * `outbound(request, origin)` answers every request the Worker sends out.
+ * Leave it undefined to let those requests reach the network, as a deployed
+ * Worker's do.
  */
 export async function startBuiltWorker({ persistTo, accessStandIn, outbound }) {
   const port = await availablePort();
@@ -233,7 +261,7 @@ export async function startBuiltWorker({ persistTo, accessStandIn, outbound }) {
       logLevel: "warn",
       ...(outbound === undefined
         ? {}
-        : { outboundService: outbound(origin) }),
+        : { outboundService: (request) => outbound(request, origin) }),
     },
   });
   try {
@@ -269,7 +297,7 @@ async function siteverifyWithTestSecret(request, { hostname, action }) {
 }
 
 function harnessOutbound({ accessStandIn, turnstileAction, refused }) {
-  return (origin) => async (request) => {
+  return async (request, origin) => {
     if (request.method === "GET" && request.url === accessStandIn.keySetUrl) {
       return Response.json(accessStandIn.keySet);
     }
@@ -324,16 +352,7 @@ export async function startWorkerHarness({
     }
     const accessStandIn = await createAccessStandIn();
     const state = await prepareLocalState(accessStandIn);
-    // Wrangler stops its runtime and exits on an interrupt before an
-    // asynchronous clean-up can finish, so the database directory is also
-    // removed synchronously when the process exits.
-    const removeStateOnExit = () =>
-      rmSync(state.directory, { recursive: true, force: true });
-    process.once("exit", removeStateOnExit);
-    stops.push(async () => {
-      process.off("exit", removeStateOnExit);
-      await rm(state.directory, { recursive: true, force: true });
-    });
+    stops.push(state.remove);
 
     const refusedOutbound = [];
     const { origin, worker } = await startBuiltWorker({
@@ -377,6 +396,8 @@ export async function startWorkerHarness({
             route.continue({
               headers: {
                 ...route.request().headers(),
+                // `cloudflareAccessAssertionHeader` in
+                // apps/reference-site/src/access-authentication.ts
                 "cf-access-jwt-assertion": assertion,
               },
             }),
@@ -396,19 +417,20 @@ export async function startWorkerHarness({
  * whether the check passes, fails or the process is interrupted.
  */
 export async function withWorkerHarness(options, check) {
-  const harness = await startWorkerHarness(options);
+  let harness;
   const interrupted = (signal) => {
-    void harness
-      .stop()
-      .finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
+    void Promise.resolve(harness?.stop()).finally(() =>
+      process.exit(signal === "SIGINT" ? 130 : 143),
+    );
   };
   process.once("SIGINT", interrupted);
   process.once("SIGTERM", interrupted);
   try {
+    harness = await startWorkerHarness(options);
     return await check(harness);
   } finally {
     process.off("SIGINT", interrupted);
     process.off("SIGTERM", interrupted);
-    await harness.stop();
+    await harness?.stop();
   }
 }

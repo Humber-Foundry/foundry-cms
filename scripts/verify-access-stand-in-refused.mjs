@@ -1,11 +1,12 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import {
   createAccessStandIn,
   prepareLocalState,
+  run,
+  siteRoot,
   startBuiltWorker,
 } from "./lib/worker-harness.mjs";
 
@@ -25,30 +26,16 @@ import {
  *    hold, which is what Cloudflare serves for a real team.
  */
 
-const repositoryRoot = resolve(import.meta.dirname, "..");
-const siteRoot = join(repositoryRoot, "apps", "reference-site");
-
 // Words that appear in the harness and nowhere in the product.
 const harnessMarkers = ["foundry-harness-", "worker-harness"];
 
 async function deployBundleText() {
   const directory = await mkdtemp(join(tmpdir(), "foundry-deploy-bundle-"));
   try {
-    const output = [];
-    const child = spawn(
-      "npx",
-      ["wrangler", "deploy", "--dry-run", "--outdir", directory],
-      { cwd: siteRoot, env: { ...process.env, CI: "1" } },
-    );
-    child.stdout.on("data", (chunk) => output.push(String(chunk)));
-    child.stderr.on("data", (chunk) => output.push(String(chunk)));
-    const code = await new Promise((resolveExit, reject) => {
-      child.once("error", reject);
-      child.once("exit", resolveExit);
+    await run("npx", ["wrangler", "deploy", "--dry-run", "--outdir", directory], {
+      cwd: siteRoot,
+      env: { ...process.env, CI: "1" },
     });
-    if (code !== 0) {
-      throw new Error(`deploy_dry_run_failed:${code}\n${output.join("")}`);
-    }
     const files = (await readdir(directory)).filter((name) =>
       name.endsWith(".js"),
     );
@@ -71,6 +58,8 @@ async function messagesStatus({ persistTo, accessStandIn, outbound }) {
   });
   try {
     const response = await worker.fetch(`${origin}/dash/forms`, {
+      // `cloudflareAccessAssertionHeader` in
+      // apps/reference-site/src/access-authentication.ts
       headers: { "cf-access-jwt-assertion": await accessStandIn.assertion() },
       redirect: "manual",
     });
@@ -86,7 +75,7 @@ async function messagesStatus({ persistTo, accessStandIn, outbound }) {
 
 /** Answer the Access team's key request with `keySet`; refuse the rest. */
 function answerTeamKeys(accessStandIn, keySet) {
-  return () => async (request) =>
+  return async (request) =>
     request.url === accessStandIn.keySetUrl
       ? Response.json(keySet)
       : new Response("refused", { status: 502 });
@@ -139,8 +128,14 @@ async function main() {
         `deployed network ${deployed.status}, other keys ${otherKeys.status}.\n`,
     );
   } finally {
-    await rm(state.directory, { recursive: true, force: true });
+    await state.remove();
   }
+}
+
+// An interrupt exits through `process.exit`, so the harness's exit hooks stop
+// its commands and remove the database directory.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => process.exit(signal === "SIGINT" ? 130 : 143));
 }
 
 try {
