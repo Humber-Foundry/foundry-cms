@@ -331,18 +331,22 @@ export async function startWorkerHarness({
 } = {}) {
   const stops = [];
   // One clean-up, however many callers ask for it: an interrupt and a
-  // failing check can both reach it at once.
+  // failing check can both reach it at once. Every step is tried; then the
+  // clean-up fails if any step failed, so a check cannot pass while it
+  // leaves something behind.
   let stopped;
   const stop = () => {
     stopped ??= (async () => {
+      const failures = [];
       while (stops.length > 0) {
         try {
           await stops.pop()();
         } catch (error) {
-          process.stderr.write(
-            `worker harness cleanup failed: ${String(error)}\n`,
-          );
+          failures.push(String(error));
         }
+      }
+      if (failures.length > 0) {
+        throw new Error(`worker_harness_cleanup_failed:${failures.join("; ")}`);
       }
     })();
     return stopped;
@@ -410,7 +414,11 @@ export async function startWorkerHarness({
       stop,
     });
   } catch (error) {
-    await stop();
+    // The start failure is the error to report. A clean-up failure after it
+    // is written out so it is not lost.
+    await stop().catch((cleanupError) =>
+      process.stderr.write(`${String(cleanupError)}\n`),
+    );
     throw error;
   }
 }
@@ -427,18 +435,35 @@ export function interruptedExitCode(signal) {
 export async function withWorkerHarness(options, check) {
   let harness;
   const interrupted = (signal) => {
-    void Promise.resolve(harness?.stop()).finally(() =>
-      process.exit(interruptedExitCode(signal)),
-    );
+    const exit = () => process.exit(interruptedExitCode(signal));
+    Promise.resolve(harness?.stop()).then(exit, (cleanupError) => {
+      process.stderr.write(`${String(cleanupError)}\n`);
+      exit();
+    });
   };
   process.once("SIGINT", interrupted);
   process.once("SIGTERM", interrupted);
+  let outcome;
   try {
     harness = await startWorkerHarness(options);
-    return await check(harness);
+    outcome = { result: await check(harness) };
+  } catch (error) {
+    outcome = { error };
   } finally {
     process.off("SIGINT", interrupted);
     process.off("SIGTERM", interrupted);
-    await harness?.stop();
   }
+  // A failed check is the error to report. Without one, a failed clean-up is.
+  const cleanupError = await Promise.resolve(harness?.stop()).then(
+    () => undefined,
+    (error) => error,
+  );
+  if ("error" in outcome) {
+    if (cleanupError !== undefined) {
+      process.stderr.write(`${String(cleanupError)}\n`);
+    }
+    throw outcome.error;
+  }
+  if (cleanupError !== undefined) throw cleanupError;
+  return outcome.result;
 }
