@@ -385,14 +385,11 @@ describe("one campaign's screen, browser acceptance", () => {
       "No test can go out from here. Nothing is broken: a test goes out as " +
         "soon as this site is connected to an email provider.",
     );
-    // One plain sentence says why, and names the Brevo settings that are
-    // missing, as #238 asks and as ADR-0030 keeps for the email connection.
+    // One plain sentence on the line says why.
     expect(host.textContent).toContain(
       "Email is off in local development, because no Brevo credentials are " +
-        "set. Missing: FOUNDRY_BREVO_API_KEY, " +
-        "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON.",
+        "set.",
     );
-    expect(host.querySelector("details.connection-status-details")).toBeNull();
     expect(host.textContent).toContain(
       "On a live site, Settings → Email shows whether email is connected.",
     );
@@ -406,6 +403,28 @@ describe("one campaign's screen, browser acceptance", () => {
     expect(guideLink).toBeDefined();
     // The line is plain status, not an alert: nothing here is a fault.
     expect(host.querySelector(".connection-status-missing")).toBeNull();
+
+    // The missing setting names are technical details, shown on demand. A
+    // closed disclosure under the line names every one of them, and nothing
+    // outside it names a setting, so the open screen stays plain.
+    const disclosure = host.querySelector<HTMLDetailsElement>(
+      "details.connection-status-details",
+    );
+    expect(disclosure).not.toBeNull();
+    expect(disclosure!.open).toBe(false);
+    expect(disclosure!.querySelector("summary")?.textContent).toBe(
+      "Technical details",
+    );
+    expect(disclosure!.textContent).toContain("These settings are missing:");
+    expect(disclosure!.textContent).toContain("FOUNDRY_BREVO_API_KEY");
+    expect(disclosure!.textContent).toContain(
+      "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
+    );
+    const outsideDisclosure = host.textContent!.replace(
+      disclosure!.textContent!,
+      "",
+    );
+    expect(outsideDisclosure).not.toContain("FOUNDRY_");
     // Nothing was sent, and nothing reads as a fault.
     expect(server.commands).toHaveLength(0);
   });

@@ -48,11 +48,11 @@ export type ConnectionReadiness = Readonly<{
  * `HelpTip` (#149) rather than on every screen that renders it.
  *
  * `connectedByOperator`: email and publishing are connected by an operator
- * who reads the setting names, so ADR-0021 puts an absent name on the line,
- * in local development as well, and local development shows the setup link.
- * The sender details are the owner's own words — a name and a postal address
- * — so that line says it in plain words and keeps the names behind a
- * disclosure for whoever installs them.
+ * who reads the setting names, so ADR-0021 puts an absent name on the
+ * not-connected line and local development shows the setup link. The sender
+ * details are the owner's own words — a name and a postal address — so that
+ * line says it in plain words and keeps the names behind a disclosure for
+ * whoever installs them.
  *
  * `liveSiteStatus`: the Settings screen that shows this connection once the
  * site is live, said under the local development sentence. The screen shows
@@ -154,25 +154,17 @@ export function ConnectionStatus({
   if (!readiness) return null;
 
   const copy = connectionCopy[kind];
-  const missingNames = readiness.missingSettings.join(", ");
-  // The names on the line, for a connection an operator installs. The local
-  // development line and the not-connected line say them the same way.
-  const namesOnTheLine =
-    readiness.missingSettings.length > 0 && copy.connectedByOperator ? (
-      <> Missing: {missingNames}.</>
-    ) : null;
 
   // Local development says in one plain sentence why the connection is off.
-  // For a connection an operator installs, the sentence also names the
-  // settings that are absent, the same way the not-connected line does
-  // (ADR-0021, ADR-0030), because those names are what whoever connects the
-  // site has to set. It stays plain status, not an alert: nothing is broken.
+  // It stays plain status, not an alert: nothing is broken. The missing
+  // setting names are technical details, so they are shown on demand: a
+  // closed disclosure under the line names every one of them for whoever
+  // connects a real site, and the open screen stays uncluttered (ADR-0046).
   if (readiness.state === "local_development") {
     return (
       <div className="connection-status">
         <p>
           {copy.localDevelopmentSentence}
-          {namesOnTheLine}
           {copy.connectedByOperator ? (
             <>
               {" "}
@@ -193,6 +185,19 @@ export function ConnectionStatus({
             {copy.liveSiteStatus.after}
           </p>
         )}
+        {readiness.missingSettings.length > 0 ? (
+          <details className="connection-status-details">
+            <summary>Technical details</summary>
+            <p>These settings are missing:</p>
+            <ul>
+              {readiness.missingSettings.map((name) => (
+                <li key={name}>
+                  <code>{name}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </div>
     );
   }
@@ -206,13 +211,16 @@ export function ConnectionStatus({
     );
   }
 
+  const missingNames = readiness.missingSettings.join(", ");
+  const namesInline =
+    readiness.missingSettings.length > 0 && copy.connectedByOperator;
   const namesBehindDisclosure =
     readiness.missingSettings.length > 0 && !copy.connectedByOperator;
 
   return (
     <p className="connection-status connection-status-missing" role="alert">
       {copy.notConnectedSentence}
-      {namesOnTheLine}
+      {namesInline ? <> Missing: {missingNames}.</> : null}
       {namesBehindDisclosure ? (
         <>
           {" "}

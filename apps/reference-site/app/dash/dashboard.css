@@ -1396,15 +1396,44 @@
 }
 
 /* In local development the connection line is a short stack of lines: the
- * state with the missing setting names, then which Settings screen shows the
- * connection on a live site. The stack keeps the one margin above; each line
- * inside it takes the small gap. */
+ * state, which Settings screen shows the connection on a live site, and a
+ * disclosure. The stack keeps the one margin above; each line inside it takes
+ * the small gap. */
 .connection-status > p {
   margin: 0;
 }
 
 .connection-status > p + p {
   margin-top: var(--dash-space-2);
+}
+
+/* The missing setting names, kept behind a closed disclosure for whoever
+ * connects a real site. The summary is a control, so it takes the full
+ * control height a phone needs; it keeps the browser's own marker, the same
+ * as the other disclosures on the dashboard. */
+.connection-status-details {
+  margin-top: var(--dash-space-2);
+}
+
+.connection-status-details > summary {
+  min-height: var(--dash-control-height);
+  padding: var(--dash-space-2) 0;
+  color: var(--dash-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-status-details > p {
+  margin: var(--dash-space-2) 0 0;
+}
+
+.connection-status-details > ul {
+  margin: var(--dash-space-2) 0 0;
+  padding-left: var(--dash-space-5);
+}
+
+.connection-status-details li + li {
+  margin-top: var(--dash-space-1);
 }
 
 .composer-settings {
