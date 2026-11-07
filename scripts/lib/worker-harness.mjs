@@ -317,6 +317,11 @@ function harnessOutbound({ accessStandIn, turnstileAction, refused }) {
   };
 }
 
+/** Write a clean-up failure out when another error is the one reported. */
+function reportCleanupError(error) {
+  process.stderr.write(`${String(error)}\n`);
+}
+
 /**
  * Build and start everything one check needs. Prefer `withWorkerHarness`,
  * which also stops it.
@@ -417,7 +422,7 @@ export async function startWorkerHarness({
     // The start failure is the error to report. A clean-up failure after it
     // is written out so it is not lost.
     await stop().catch((cleanupError) =>
-      process.stderr.write(`${String(cleanupError)}\n`),
+      reportCleanupError(cleanupError),
     );
     throw error;
   }
@@ -437,7 +442,7 @@ export async function withWorkerHarness(options, check) {
   const interrupted = (signal) => {
     const exit = () => process.exit(interruptedExitCode(signal));
     Promise.resolve(harness?.stop()).then(exit, (cleanupError) => {
-      process.stderr.write(`${String(cleanupError)}\n`);
+      reportCleanupError(cleanupError);
       exit();
     });
   };
@@ -460,7 +465,7 @@ export async function withWorkerHarness(options, check) {
   );
   if ("error" in outcome) {
     if (cleanupError !== undefined) {
-      process.stderr.write(`${String(cleanupError)}\n`);
+      reportCleanupError(cleanupError);
     }
     throw outcome.error;
   }

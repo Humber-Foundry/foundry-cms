@@ -29,7 +29,8 @@ It:
 4. launches headless Chromium;
 5. calls `check(harness)`;
 6. closes the browser, stops the Worker and removes the directory, whether
-   the check passed, failed or was interrupted.
+   the check passed, failed or was interrupted. If a clean-up step fails, a
+   check that passed fails too.
 
 `harness` has:
 

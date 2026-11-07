@@ -21,7 +21,6 @@ const visitorFillTimeMs = 3_000;
 
 async function sendTheContactForm(harness) {
   const page = await harness.newVisitorPage();
-  const opened = Date.now();
   await page.goto(`${harness.origin}/`, { waitUntil: "domcontentloaded" });
   const form = page.locator(".contact-form-section");
   await form.waitFor();
@@ -32,6 +31,9 @@ async function sendTheContactForm(harness) {
     if (attempt > 300) throw new Error("contact_form_never_ready");
     await new Promise((wait) => setTimeout(wait, 100));
   }
+  // The form takes its start time when it renders in the browser, which is
+  // before its fields are enabled. Timing from here keeps the gap long enough.
+  const ready = Date.now();
   await name.fill(sender);
   await form.locator('[name="email"]').fill("ada@example.com");
   await form.locator('[name="message"]').fill(message);
@@ -46,7 +48,7 @@ async function sendTheContactForm(harness) {
     undefined,
     { timeout: 30_000 },
   );
-  const waited = Date.now() - opened;
+  const waited = Date.now() - ready;
   if (waited < visitorFillTimeMs) {
     await new Promise((wait) => setTimeout(wait, visitorFillTimeMs - waited));
   }

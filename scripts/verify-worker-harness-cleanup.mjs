@@ -83,6 +83,11 @@ async function runCase(name) {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+    // Made at once, so an exit that comes straight after the origin line is
+    // not missed.
+    const exited = new Promise((resolveExit) =>
+      child.once("exit", resolveExit),
+    );
     const output = [];
     child.stderr.on("data", (chunk) => output.push(String(chunk)));
     const origin = await new Promise((resolveOrigin, reject) => {
@@ -99,7 +104,7 @@ async function runCase(name) {
 
     let watchdog;
     const code = await Promise.race([
-      new Promise((resolveExit) => child.once("exit", resolveExit)),
+      exited,
       new Promise((resolveExit) => {
         watchdog = setTimeout(() => resolveExit("timeout"), 60_000);
       }),

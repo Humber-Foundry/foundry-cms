@@ -149,8 +149,8 @@ this was a defect, not a decision.
 The boundary now verifies the assertion for every path below `/dash` too, and
 passes the verified identity on. When the assertion is missing or invalid, a
 page below `/dash` still goes on, with no identity and with the raw assertion
-removed (ADR-0005), and answers 404 itself, so
-its 404 keeps the dashboard Content Security Policy that ADR-0049 records.
+removed (ADR-0005). The page then answers 404 itself, so its 404 keeps the
+dashboard Content Security Policy that ADR-0049 records.
 When the Access keys cannot be fetched, a page below `/dash` gets the same 503
 as `/dash`.
 
@@ -161,9 +161,9 @@ source is already built), prepares the database in a new directory under the
 system temporary directory, serves the Worker on `https://127.0.0.1:<port>`,
 launches Chromium and gives the check an origin, a visitor page and a
 signed-in page. It stops the browser and the Worker and removes the directory
-when the check passes, fails or is interrupted.
-`scripts/verify-worker-harness-cleanup.mjs` proves this in Product CI for a
-failed and an interrupted check. `docs/operations/whole-path-browser-checks.md`
+when the check passes, fails or is interrupted. If a clean-up step fails, a
+check that passed fails too. `scripts/verify-worker-harness-cleanup.mjs`
+proves the clean-up in Product CI for a failed and an interrupted check. `docs/operations/whole-path-browser-checks.md`
 explains how to write a check.
 
 The Worker is served over HTTPS with Miniflare's built-in local certificate,
