@@ -65,8 +65,10 @@ of names, and never renders a value, a token, a key or a personal address.
   and its sibling screens by #237): the existing "not connected" note
   in the sending steps is replaced with `<ConnectionStatus kind="email" />`.
   Steps 2 to 4 keep disabling while not connected; only the note changed.
-- **Blog** (`blog-post-controls.tsx`): `<PublishingConnectionStatus />` sits
-  next to the pending-site-publish banner from #166.
+- **Blog** (`blog-post-controls.tsx`, split into `blog-post-list.tsx` and its
+  sibling screens by #230): `<PublishingConnectionStatus />` sits next to the
+  pending-site-publish banner from #166 on the posts list, and above where one
+  post stands on that post's own screen.
 - **Pages** (`content-editor.tsx`): `<PublishingConnectionStatus />` sits at
   the top of the publish panel.
 - **Settings** (`app/dash/settings/page.tsx`): a new Connections section
