@@ -132,6 +132,54 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 }
 
 /**
+ * Returns every `@tiptap/*` entry of a release `dependencies` map. Tiptap
+ * packages declare exact peer versions of each other, but Puck and the
+ * starter kit depend on them with open ranges. The release therefore pins
+ * the whole set at one exact version. Throws when an entry differs from the
+ * `@tiptap/core` version.
+ */
+export function tiptapPins(dependencies) {
+  const pins = Object.fromEntries(
+    Object.entries(dependencies).filter(([name]) => name.startsWith("@tiptap/")),
+  );
+  const expected = pins["@tiptap/core"];
+  for (const [name, version] of Object.entries(pins)) {
+    if (version !== expected) {
+      throw new Error(
+        `foundation_release_tiptap_version_drift:${name}@${version}:expected:${expected}`,
+      );
+    }
+  }
+  return pins;
+}
+
+/**
+ * Checks that an npm lockfile resolves every `@tiptap/*` package, at any
+ * depth, to the version that the release `dependencies` pin. A new upstream
+ * tiptap package or version then fails here, by name, instead of as a
+ * missing export in the build.
+ */
+export function assertTiptapSetPinned({ lock, dependencies }) {
+  const pins = tiptapPins(dependencies);
+  const expected = pins["@tiptap/core"];
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    const match = /(?:^|\/)node_modules\/(@tiptap\/[^/]+)$/u.exec(path);
+    if (match === null) continue;
+    const name = match[1];
+    if (pins[name] === undefined) {
+      throw new Error(
+        `foundation_release_tiptap_unpinned:${name}@${entry.version}:expected:${expected}`,
+      );
+    }
+    if (entry.version !== pins[name]) {
+      throw new Error(
+        `foundation_release_tiptap_version_drift:${name}@${entry.version}:expected:${pins[name]}`,
+      );
+    }
+  }
+}
+
+/**
  * Writes the installation `package.json` and `tsconfig.json` from the target
  * release. Installation scripts are preserved; the foundation's build, engines,
  * tiptap overrides and TypeScript project are set to the target's. This is the
@@ -150,11 +198,7 @@ export async function writeInstallationBuildConfiguration({
   const releasePackage = JSON.parse(
     await readFile(join(packageRoot, "package.json"), "utf8"),
   );
-  targetPackage.overrides = Object.fromEntries(
-    Object.entries(releasePackage.dependencies).filter(([name]) =>
-      /^@tiptap\/(?:core|pm|extension-(?:bubble|floating)-menu)$/u.test(name),
-    ),
-  );
+  targetPackage.overrides = tiptapPins(releasePackage.dependencies);
   targetPackage.scripts = {
     ...(targetPackage.scripts ?? {}),
     build: "next build",

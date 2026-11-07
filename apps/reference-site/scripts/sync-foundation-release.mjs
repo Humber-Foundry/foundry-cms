@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertLockedReleaseExecutable,
+  assertTiptapSetPinned,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
@@ -78,6 +79,10 @@ async function main() {
   for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
     assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
   }
+  const releasePackage = JSON.parse(
+    await readFile(join(packageRoot, "package.json"), "utf8"),
+  );
+  assertTiptapSetPinned({ lock, dependencies: releasePackage.dependencies });
 
   const {
     loadFoundationReleaseDescriptor,
