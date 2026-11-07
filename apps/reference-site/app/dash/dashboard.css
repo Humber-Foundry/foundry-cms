@@ -178,7 +178,7 @@
   color: var(--dash-ink-soft);
 }
 
-/* Each destination separates its sections with space and a rule, so a long
+/* Each destination separates its sections with space and a line, so a long
  * page still reads as distinct jobs rather than one column of text. The
  * editor card and `.panel` are excluded: each is a complete box with its own
  * border on all four sides, so the divider would double the top line and,

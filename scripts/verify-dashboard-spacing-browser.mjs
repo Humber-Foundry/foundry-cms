@@ -8,8 +8,10 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 
 /** The minimum plain reading the owner's acceptance criteria set for #173:
  * no text closer than 8px to a border it sits inside, or to a sibling
- * control; no phone tap target under 44px high. #226 adds one more rule to
- * the same sweep: no destination scrolls sideways at either width. */
+ * control; no phone tap target under 44px high. #226 adds one more check to
+ * the same sweep: no destination scrolls sideways at either width. #254
+ * adds another: the section after the page heading or the settings tabs
+ * draws no second line under it. */
 const minimumTextGap = 8;
 const minimumTapTarget = 44;
 
