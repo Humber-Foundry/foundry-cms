@@ -251,6 +251,82 @@ const collectHorizontalOverflow = () => {
   return { overflow: Math.round(overflow), viewport: limit, culprits: culprits.slice(0, 10) };
 };
 
+/**
+ * The rule between the sections of a screen (#254).
+ *
+ * The page heading and the settings tabs each draw a line under themselves.
+ * The section right after one of them must not draw a second line: it has no
+ * top border, no top padding, and the plain `--dash-gap` margin. Every later
+ * section keeps its own rule: a 1px top border with the section gap above and
+ * below it. A card (`.panel`, `.content-editor`, `.dash-site-card`) draws its
+ * own border on all four sides, so its top border must match its left one.
+ * (On a phone the editor card drops its border on every side, so both are
+ * 0px there, which still matches.)
+ *
+ * This reads computed styles, so it fails whenever the cascade gives the
+ * wrong answer, whatever the selectors say. It runs inside the browser, so
+ * it resolves the two spacing tokens itself.
+ */
+const collectSectionRuleDefects = () => {
+  const main = document.querySelector(".dashboard-main");
+  if (main === null) return [];
+  const tokenPixels = (token) => {
+    const probe = document.createElement("div");
+    probe.style.marginTop = `var(${token})`;
+    main.append(probe);
+    const pixels = getComputedStyle(probe).marginTop;
+    probe.remove();
+    return pixels;
+  };
+  const gap = tokenPixels("--dash-gap");
+  const sectionGap = tokenPixels("--dash-panel-gap");
+  const describe = (el) =>
+    `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className.trim() !== "" ? `.${el.className.trim().split(/\s+/u).join(".")}` : ""}`.slice(0, 120);
+  const topRule = (s) =>
+    s.borderTopStyle === "none" ? "0px" : s.borderTopWidth;
+  const defects = [];
+  for (const section of main.querySelectorAll(":scope > section")) {
+    const s = getComputedStyle(section);
+    const before = section.previousElementSibling;
+    const found = {
+      borderTop: topRule(s),
+      paddingTop: s.paddingTop,
+      marginTop: s.marginTop,
+    };
+    if (section.matches(".panel, .content-editor, .dash-site-card")) {
+      const left = s.borderLeftStyle === "none" ? "0px" : s.borderLeftWidth;
+      if (found.borderTop !== left) {
+        defects.push({ sel: describe(section), kind: "card", left, ...found });
+      }
+    } else if (before?.matches(".page-heading, .dash-tabs")) {
+      if (
+        found.borderTop !== "0px" ||
+        found.paddingTop !== "0px" ||
+        found.marginTop !== gap
+      ) {
+        defects.push({
+          sel: describe(section),
+          kind: `first after ${describe(before)}`,
+          want: { borderTop: "0px", paddingTop: "0px", marginTop: gap },
+          ...found,
+        });
+      }
+    } else if (
+      found.borderTop !== "1px" ||
+      found.paddingTop !== sectionGap ||
+      found.marginTop !== sectionGap
+    ) {
+      defects.push({
+        sel: describe(section),
+        kind: "later section",
+        want: { borderTop: "1px", paddingTop: sectionGap, marginTop: sectionGap },
+        ...found,
+      });
+    }
+  }
+  return defects;
+};
+
 const collectSmallTapTargets = (minimumTapTarget) => {
   const targets = Array.from(
     document.querySelectorAll('a, button, input, select, textarea, [role="button"]'),
@@ -501,6 +577,13 @@ async function checkDestination(page, origin, name, href, viewportLabel) {
     );
   }
 
+  const sectionRules = await page.evaluate(collectSectionRuleDefects);
+  if (sectionRules.length > 0) {
+    throw new Error(
+      `dashboard_spacing_section_rule:${viewportLabel}:${name}:${JSON.stringify(sectionRules)}`,
+    );
+  }
+
   const sideways = await page.evaluate(collectHorizontalOverflow);
   if (sideways !== null) {
     throw new Error(
@@ -599,7 +682,7 @@ async function main() {
     }
 
     process.stdout.write(
-      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination: no text touching a border, no sideways scroll, no small tap target).\n`,
+      `Dashboard spacing acceptance passed at ${origin} (1440px and 390px, every destination: no text touching a border, no doubled section rule, no sideways scroll, no small tap target).\n`,
     );
   } finally {
     await browser?.close();

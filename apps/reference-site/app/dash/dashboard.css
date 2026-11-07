@@ -196,20 +196,26 @@
   margin-top: var(--dash-panel-gap);
   padding-top: var(--dash-panel-gap);
   border-top: 1px solid var(--dash-line);
-}
 
-/* The section right after the page heading would otherwise sit between two
- * rules — the heading's own bottom border, then this section's top border —
- * with nothing but empty space between them. The heading's border is
- * already the one seam a destination needs, so the first section drops its
- * own border and keeps only a plain gap. A card (`.panel`, like the editor
- * card above) keeps its own border on every side instead — see the
- * exclusion note above. */
-.page-heading + section:not(.content-editor):not(.panel),
-.dash-tabs + section:not(.content-editor):not(.panel) {
-  margin-top: var(--dash-gap);
-  padding-top: 0;
-  border-top: 0;
+  /* The section right after the page heading or the settings tabs would
+   * otherwise sit between two rules: the heading's own bottom border, then
+   * this section's top border, with only empty space between them. The
+   * heading's border is already the one seam a destination needs, so the
+   * first section drops its own border and keeps only a plain gap.
+   *
+   * This rule is nested so that `&` carries the whole selector above,
+   * exclusions included. Its specificity is therefore always the rule
+   * above plus one class, so it always wins, and a card excluded above is
+   * excluded here too. Issue #254: this rule used to be a separate selector
+   * with its own copy of the exclusions. #228 added `.dash-site-card` above
+   * only, so the separate rule became less specific and lost, and every
+   * first section drew a second rule. Add a new exclusion above, and only
+   * above. */
+  :is(.page-heading, .dash-tabs) + & {
+    margin-top: var(--dash-gap);
+    padding-top: 0;
+    border-top: 0;
+  }
 }
 
 .dashboard-main > section > p:not(.empty-state) {
@@ -5165,13 +5171,6 @@ ul.media-photo-uses {
 .pages-list {
   display: grid;
   gap: 1rem;
-}
-
-/* The page heading already draws the rule under itself, so the generic rule
- * for a section would draw a second one with an empty strip between them. */
-.dashboard-main > section.pages-list {
-  padding-top: 0;
-  border-top: 0;
 }
 
 /* The one sentence that says where new pages come from. It reads at the
