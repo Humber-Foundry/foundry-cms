@@ -264,8 +264,11 @@ const collectHorizontalOverflow = () => {
  * 0px there, which still matches.)
  *
  * This reads computed styles, so it fails whenever the cascade gives the
- * wrong answer, whatever the selectors say. It runs inside the browser, so
- * it resolves the two spacing tokens itself.
+ * wrong answer, whatever the selectors say.
+ *
+ * This runs inside the browser through `page.evaluate`, so it can call
+ * nothing outside itself. That is why it resolves the two spacing tokens
+ * itself and writes out its own element description.
  */
 const collectSectionRuleDefects = () => {
   const main = document.querySelector(".dashboard-main");
@@ -280,23 +283,34 @@ const collectSectionRuleDefects = () => {
   };
   const gap = tokenPixels("--dash-gap");
   const sectionGap = tokenPixels("--dash-panel-gap");
-  const describe = (el) =>
-    `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className.trim() !== "" ? `.${el.className.trim().split(/\s+/u).join(".")}` : ""}`.slice(0, 120);
-  const topRule = (s) =>
-    s.borderTopStyle === "none" ? "0px" : s.borderTopWidth;
+  const describe = (el) => {
+    let s = el.tagName.toLowerCase();
+    if (typeof el.className === "string" && el.className.trim() !== "") {
+      s += `.${el.className.trim().split(/\s+/u).join(".")}`;
+    }
+    return s.slice(0, 120);
+  };
+  // The width of the line drawn on one side, or 0px when no line is drawn.
+  const edgeRule = (s, side) =>
+    s[`border${side}Style`] === "none" ? "0px" : s[`border${side}Width`];
   const defects = [];
   for (const section of main.querySelectorAll(":scope > section")) {
     const s = getComputedStyle(section);
     const before = section.previousElementSibling;
     const found = {
-      borderTop: topRule(s),
+      borderTop: edgeRule(s, "Top"),
       paddingTop: s.paddingTop,
       marginTop: s.marginTop,
     };
     if (section.matches(".panel, .content-editor, .dash-site-card")) {
-      const left = s.borderLeftStyle === "none" ? "0px" : s.borderLeftWidth;
+      const left = edgeRule(s, "Left");
       if (found.borderTop !== left) {
-        defects.push({ sel: describe(section), kind: "card", left, ...found });
+        defects.push({
+          sel: describe(section),
+          kind: "card",
+          want: { borderTop: left },
+          ...found,
+        });
       }
     } else if (before?.matches(".page-heading, .dash-tabs")) {
       if (
@@ -306,7 +320,8 @@ const collectSectionRuleDefects = () => {
       ) {
         defects.push({
           sel: describe(section),
-          kind: `first after ${describe(before)}`,
+          kind: "first section",
+          after: describe(before),
           want: { borderTop: "0px", paddingTop: "0px", marginTop: gap },
           ...found,
         });
