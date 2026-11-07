@@ -36,6 +36,18 @@ tarball before copying, typechecks and builds the site, builds the OpenNext
 Worker, and runs `wrangler deploy --dry-run`. No Cloudflare, GitHub, npm, or
 client credential is read by this verification.
 
+The install adds no npm overrides, the same as a new installation's first
+install. Puck and the tiptap starter kit depend on tiptap packages with open
+ranges, but tiptap packages need exactly matching versions of each other. So
+the reference-site package lists every resolved `@tiptap/*` package at one
+exact version, and the scaffold and sync write that set as the installation's
+overrides. The scaffold and sync stop with
+`foundation_release_tiptap_unpinned` or
+`foundation_release_tiptap_version_drift` when the lockfile resolves a tiptap
+package outside that set. When a Puck or tiptap upgrade adds a tiptap package,
+add it to `apps/reference-site/package.json` at the shared version; the
+`foundation-release-lib` test fails until you do.
+
 ## Sync an installation to a newer release
 
 The scaffold copies a release's framework source into a new installation once,
