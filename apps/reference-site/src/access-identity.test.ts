@@ -195,16 +195,15 @@ describe("Cloudflare Access team key fetches", () => {
   const keyRefetchCooldownMs = 30_000;
   const keySetUrl = new URL("/cdn-cgi/access/certs", issuer);
   let publishedKeys: JSONWebKeySet;
-  let keyFetches: number;
+  let keyFetchUrls: string[];
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(now);
     publishedKeys = { keys: [publicJwk] };
-    keyFetches = 0;
+    keyFetchUrls = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-      expect(String(input)).toBe(keySetUrl.href);
-      keyFetches += 1;
+      keyFetchUrls.push(String(input));
       return Response.json(publishedKeys);
     });
   });
@@ -212,6 +211,9 @@ describe("Cloudflare Access team key fetches", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    for (const url of keyFetchUrls) {
+      expect(url).toBe(keySetUrl.href);
+    }
   });
 
   async function signedWithNewKey(kid: string) {
@@ -241,7 +243,7 @@ describe("Cloudflare Access team key fetches", () => {
   async function loadedRemoteKeySet() {
     const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
     await validate(await createAssertion(), remoteKeySet);
-    expect(keyFetches).toBe(1);
+    expect(keyFetchUrls).toHaveLength(1);
     return remoteKeySet;
   }
 
@@ -255,7 +257,7 @@ describe("Cloudflare Access team key fetches", () => {
         AccessIdentityError,
       );
     }
-    expect(keyFetches).toBe(2);
+    expect(keyFetchUrls).toHaveLength(2);
   });
 
   it("refetches the team's keys once for simultaneous unknown key ids in a Worker", async () => {
@@ -278,7 +280,7 @@ describe("Cloudflare Access team key fetches", () => {
         result.status === "rejected" ? result.reason : undefined,
       ).toBeInstanceOf(AccessIdentityError);
     }
-    expect(keyFetches).toBe(2);
+    expect(keyFetchUrls).toHaveLength(2);
   });
 
   it("accepts a key the team rotates in once the cooldown has passed", async () => {
@@ -291,7 +293,7 @@ describe("Cloudflare Access team key fetches", () => {
     await expect(
       validate(rotated.assertion, remoteKeySet),
     ).rejects.toBeInstanceOf(AccessIdentityError);
-    expect(keyFetches).toBe(1);
+    expect(keyFetchUrls).toHaveLength(1);
 
     vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
     await expect(validate(rotated.assertion, remoteKeySet)).resolves.toEqual({
@@ -299,6 +301,6 @@ describe("Cloudflare Access team key fetches", () => {
       email: "owner@example.com",
       nonce: "access-nonce",
     });
-    expect(keyFetches).toBe(2);
+    expect(keyFetchUrls).toHaveLength(2);
   });
 });

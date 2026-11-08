@@ -63,14 +63,18 @@ function validateConfiguration({
 
 // An assertion whose `kid` is not in the cached keys refetches the team's
 // keys, because that is how a key Cloudflare Access has just rotated in
-// arrives. Such a refetch starts at most once per cooldown, so a burst of
-// made-up `kid` values causes one fetch, and a rotated key is accepted no more
-// than about 30 seconds after the team publishes it.
+// arrives. Such a refetch starts at most once per cooldown in each isolate.
+// So, once the keys are cached, a burst of made-up `kid` values causes one
+// fetch. A rotated key is accepted no more than 30 seconds plus one key fetch
+// (at most 5 seconds) after the team publishes it.
 //
 // jose's own cooldown counts from the end of a successful fetch. In a Worker,
 // jose does not share an in-flight fetch between requests, so every request
 // that arrives during the fetch would start one more. This key set counts from
 // the start of the refetch instead.
+//
+// Before the first fetch, and when the cached keys are older than
+// `maximumKeyCacheAgeMs`, jose fetches without this cooldown.
 function createRemoteKeySetWithRefetchCooldown(url: URL): JWTVerifyGetKey {
   const remoteKeySet = createRemoteJWKSet(url, {
     cacheMaxAge: maximumKeyCacheAgeMs,
@@ -84,7 +88,8 @@ function createRemoteKeySetWithRefetchCooldown(url: URL): JWTVerifyGetKey {
     // jwtVerify refuses every algorithm except RS256 before it asks for a
     // key, and Cloudflare's keys are RSA signing keys for RS256. So jose
     // refetches exactly when the keys are fresh, its own cooldown is over,
-    // and the `kid` names no cached key.
+    // and the `kid` names no cached key. This copies a rule from jose's
+    // source; the exact jose version in package.json keeps it correct.
     const refetchesForUnknownKey =
       remoteKeySet.fresh &&
       !remoteKeySet.coolingDown &&

@@ -21,7 +21,7 @@ export async function confirmCloudflareRefusesTeam(
     });
   } catch (error) {
     throw new Error(
-      "no_network:team_key_request_got_no_answer:" +
+      "no_network_for_team_key_request:" +
         `${error?.cause?.code ?? error?.name ?? "unknown"}`,
       { cause: error },
     );
@@ -34,5 +34,4 @@ export async function confirmCloudflareRefusesTeam(
   if (response.status !== 404) {
     throw new Error(`cloudflare_did_not_refuse_team:${response.status}`);
   }
-  return { status: response.status };
 }

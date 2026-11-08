@@ -107,9 +107,7 @@ async function main() {
       throw new Error(`control_not_accepted:${accepted.status}`);
     }
 
-    const cloudflare = await confirmCloudflareRefusesTeam(
-      accessStandIn.keySetUrl,
-    );
+    await confirmCloudflareRefusesTeam(accessStandIn.keySetUrl);
     const deployed = await messagesStatus({
       persistTo: state.persistTo,
       accessStandIn,
@@ -134,7 +132,7 @@ async function main() {
       "Access stand-in refused by the deploy build: " +
         `no harness code in the bundle; control ${accepted.status}, ` +
         `deployed network ${deployed.status} (Cloudflare refused the team ` +
-        `with ${cloudflare.status}), other keys ${otherKeys.status}.\n`,
+        `with 404), other keys ${otherKeys.status}.\n`,
     );
   } finally {
     await state.remove();

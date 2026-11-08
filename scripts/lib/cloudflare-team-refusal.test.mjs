@@ -30,7 +30,7 @@ describe("confirming that Cloudflare refuses the harness's Access team", () => {
 
     await expect(
       confirmCloudflareRefusesTeam(keySetUrl, { fetch: network.fetch }),
-    ).resolves.toEqual({ status: 404 });
+    ).resolves.toBeUndefined();
     expect(network.requests).toHaveLength(1);
     expect(network.requests[0].url).toBe(keySetUrl);
     expect(network.requests[0].init.method).toBe("GET");
@@ -47,7 +47,7 @@ describe("confirming that Cloudflare refuses the harness's Access team", () => {
 
     await expect(
       confirmCloudflareRefusesTeam(keySetUrl, { fetch: network.fetch }),
-    ).rejects.toThrow("no_network:team_key_request_got_no_answer:ENOTFOUND");
+    ).rejects.toThrow("no_network_for_team_key_request:ENOTFOUND");
   });
 
   it("fails when something other than Cloudflare answers", async () => {
