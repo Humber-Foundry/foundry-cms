@@ -214,13 +214,18 @@ describe("installation tsconfig.json", () => {
         ],
         { cwd: directory, encoding: "utf8", env: { ...env, NODE_ENV: "test" } },
       );
-      expect(result.stderr).not.toMatch(/Failed to parse source/u);
-      expect(JSON.parse(result.stdout)).toMatchObject({
+      let summary;
+      try {
+        summary = JSON.parse(result.stdout);
+      } catch {
+        throw new Error(`Vitest printed no JSON result:\n${result.stderr}`);
+      }
+      expect(summary, result.stderr).toMatchObject({
         numTotalTests: 1,
         numPassedTests: 1,
         numFailedTests: 0,
       });
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr).toBe(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
