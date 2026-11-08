@@ -188,7 +188,8 @@ the report rule in section 3 holds without a `package-lock.json` line.
   installation whose lock is stale runs the old release's sync. If that
   release predates issue #208, it reports
   `foundation_scaffold_executable_not_locked` and prints no command. The
-  documented step fixes the lock in both cases.
+  `npm install` step in `docs/operations/foundation-release.md` fixes the
+  lock in both cases.
 - An installation pinned to a release that predates the framework manifest
   cannot be three-way synced, because it has no old manifest. Sync fails closed
   with a clear error rather than guessing.
