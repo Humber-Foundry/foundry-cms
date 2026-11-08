@@ -65,8 +65,9 @@ function validateConfiguration({
 // keys, because that is how a key Cloudflare Access has just rotated in
 // arrives. Such a refetch starts at most once per cooldown in each isolate.
 // So, once the keys are cached, a burst of made-up `kid` values causes one
-// fetch. A rotated key is accepted no more than 30 seconds plus two key
-// fetches (at most 40 seconds in all) after the team publishes it.
+// fetch. When both fetches succeed, a rotated key is accepted no more than 30
+// seconds plus two key fetches (at most 40 seconds in all) after the team
+// publishes it.
 //
 // jose's own cooldown counts from the end of a successful fetch. In a Worker,
 // jose does not share an in-flight fetch between requests, so every request
@@ -90,8 +91,9 @@ function createRemoteKeySetWithRefetchCooldown(url: URL): JWTVerifyGetKey {
     // assertion with a `kid`, jose refetches exactly when the keys are fresh,
     // its own cooldown is over, and the `kid` names no cached key. An
     // assertion with no `kid` matches every cached RSA key, so it causes no
-    // refetch while the team publishes one. This copies a rule from jose's
-    // source; the exact jose version in package.json keeps it correct.
+    // refetch as long as the team publishes at least one RSA key. This copies
+    // a rule from jose's source; the exact jose version in package.json keeps
+    // it correct.
     const refetchesForUnknownKey =
       remoteKeySet.fresh &&
       !remoteKeySet.coolingDown &&

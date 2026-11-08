@@ -34,6 +34,7 @@ describe("confirming that Cloudflare refuses the harness's Access team", () => {
     expect(network.requests).toHaveLength(1);
     expect(network.requests[0].url).toBe(keySetUrl);
     expect(network.requests[0].init.method).toBe("GET");
+    expect(network.requests[0].init.redirect).toBe("manual");
   });
 
   it("fails and says the run had no network when the request gets no answer", async () => {

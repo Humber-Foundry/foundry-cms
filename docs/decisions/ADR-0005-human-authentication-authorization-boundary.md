@@ -106,6 +106,12 @@ one immediate refresh for an unknown `kid`. A cached key may bridge a temporary
 JWKS outage for at most 24 hours. Once no non-stale usable key exists, requests
 fail closed with a service-unavailable result and no command executes.
 
+Missing configuration or assertions, unsupported algorithms, malformed claims,
+unknown identities, expired assertions, issuer or audience mismatches, and
+verification failures all fail closed. Authentication middleware creates a
+request-scoped principal; it never forwards the raw JWT into domain commands,
+logs, audit records or browser data.
+
 #### Amendment (issue #263): a cooldown on the refresh for an unknown `kid`
 
 The immediate refresh for an unknown `kid` starts at most once every 30
@@ -116,20 +122,17 @@ team's keys, a burst of made-up `kid` values causes one fetch, also when the
 requests arrive at the same moment.
 
 The cooldown does not cover a fetch before the first successful fetch in an
-isolate, or the fetch that replaces keys older than 24 hours. In a Worker, requests that arrive together
-before such a fetch ends each start a fetch, as they did before this
-amendment.
+isolate, or the fetch that replaces keys older than 24 hours. In a Worker,
+requests that arrive together before such a fetch ends each start a fetch, as
+they did before this amendment.
 
-The cooldown is short so that key rotation still works. A key that Cloudflare
-Access rotates in is accepted at once when no fetch ran in the 30 seconds
-before. In the worst case it is accepted 30 seconds plus two key fetches (at
-most 40 seconds in all) after Cloudflare publishes it.
-
-Missing configuration or assertions, unsupported algorithms, malformed claims,
-unknown identities, expired assertions, issuer or audience mismatches, and
-verification failures all fail closed. Authentication middleware creates a
-request-scoped principal; it never forwards the raw JWT into domain commands,
-logs, audit records or browser data.
+The cooldown is short so that key rotation still works. Cloudflare's "Validate
+JWTs" page says that Access rotates the signing key every 6 weeks by default,
+and signs all new tokens with the current key. So the first assertions after
+a rotation carry a `kid` that a Worker has not cached. Such a key is accepted
+at once when no fetch ran in the 30 seconds before. In the worst case, when
+both fetches succeed, it is accepted 30 seconds plus two key fetches (at most
+40 seconds in all) after Cloudflare publishes it.
 
 ### Installation-local users and authorization
 
