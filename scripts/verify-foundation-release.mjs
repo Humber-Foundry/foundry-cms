@@ -232,9 +232,9 @@ async function main() {
 
     // The sync command refuses to advance when the target release is not the
     // vendored, locked executable.
-    const beforeTamperLock = await readFile(lockPath, "utf8");
+    const originalSyncLock = await readFile(lockPath, "utf8");
     const referenceLockKey = "node_modules/@humber-foundry/reference-site";
-    const notLockedSyncLock = JSON.parse(beforeTamperLock);
+    const notLockedSyncLock = JSON.parse(originalSyncLock);
     notLockedSyncLock.packages[referenceLockKey].version = "0.0.0-not-the-release";
     await writeFile(lockPath, `${JSON.stringify(notLockedSyncLock, null, 2)}\n`);
     expectCommandFailure(
@@ -247,7 +247,7 @@ async function main() {
     // A lock that still holds an older integrity for the target's vendored
     // bytes is stale. The sync names the npm command that relocks them, and
     // that command must make the lock hold the tarball's real integrity.
-    const staleSyncLock = JSON.parse(beforeTamperLock);
+    const staleSyncLock = JSON.parse(originalSyncLock);
     staleSyncLock.packages[referenceLockKey].integrity =
       `sha512-${Buffer.alloc(64).toString("base64")}`;
     await writeFile(lockPath, `${JSON.stringify(staleSyncLock, null, 2)}\n`);
@@ -278,7 +278,7 @@ async function main() {
       throw new Error("foundation_sync_lock_stale_command_did_not_relock");
     }
     await writeFile(packagePath, beforeRelockPackage);
-    await writeFile(lockPath, beforeTamperLock);
+    await writeFile(lockPath, originalSyncLock);
 
     const lock = JSON.parse(await readFile(lockPath, "utf8"));
     if (lock.lockfileVersion !== 3) throw new Error("foundation_release_lockfile_invalid");

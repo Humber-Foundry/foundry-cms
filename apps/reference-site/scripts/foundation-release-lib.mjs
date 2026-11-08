@@ -136,8 +136,8 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 }
 
 // The four packages of one foundation release. The operator exports the same
-// list, but the sync checks the lock before it imports the operator, so that
-// it never loads operator code that is not locked.
+// list as `foundationPackageNames`. The sync checks the lock before it imports
+// the operator, so that it never loads operator code that is not locked.
 const foundationPackageNames = [
   "@humber-foundry/application",
   "@humber-foundry/operator",

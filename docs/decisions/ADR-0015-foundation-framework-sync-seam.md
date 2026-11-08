@@ -160,11 +160,13 @@ So the sync does not write the lock entries itself. A lock edit alone would
 leave the old code installed, and the old code includes the sync command
 itself. Instead:
 
-- The documented re-sync step installs the four vendored tarballs by name.
+- The operations guide, `docs/operations/foundation-release.md`, tells the
+  operator to install the four vendored tarballs by name before the sync.
 - Before it writes anything, the sync checks the lock entry of each of the
   four packages: version, `resolved` file and integrity. A lock entry is
-  **stale** when it names the target version and file, the vendored file at
-  that path holds exactly the target's bytes, and only its integrity differs.
+  **stale** when it names the target version and a `file:` path, the vendored
+  file at that path holds exactly the target's bytes, and only its integrity
+  differs.
   The sync then fails with `foundation_sync_lock_stale`, lists the stale
   packages and prints the exact `npm install` command, with their vendored
   paths, that fixes the lock. Any other mismatch fails with
