@@ -32,7 +32,8 @@ async function sendTheContactForm(harness) {
     await new Promise((wait) => setTimeout(wait, 100));
   }
   // The form takes its start time when it renders in the browser, which is
-  // before its fields are enabled. Timing from here keeps the gap long enough.
+  // before its fields are enabled. Timing from here makes at least
+  // `visitorFillTimeMs` pass between the form's start time and the send.
   const ready = Date.now();
   await name.fill(sender);
   await form.locator('[name="email"]').fill("ada@example.com");

@@ -163,8 +163,8 @@ launches Chromium and gives the check an origin, a visitor page and a
 signed-in page. It stops the browser and the Worker and removes the directory
 when the check passes, fails or is interrupted. If a clean-up step fails, a
 check that passed fails too. `scripts/verify-worker-harness-cleanup.mjs`
-proves the clean-up in Product CI for a failed and an interrupted check. `docs/operations/whole-path-browser-checks.md`
-explains how to write a check.
+proves the clean-up in Product CI for a failed and an interrupted check.
+`docs/operations/whole-path-browser-checks.md` explains how to write a check.
 
 The Worker is served over HTTPS with Miniflare's built-in local certificate,
 because the form route and the mutation checks require an `https:` canonical
