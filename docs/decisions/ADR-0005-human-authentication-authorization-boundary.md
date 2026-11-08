@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
-- **Amended:** 2026-09-18 by issue #148
+- **Amended:** 2026-09-18 by issue #148; 2026-11-07 by issue #263
 
 ## Context
 
@@ -105,6 +105,18 @@ certificate. It caches usable keys, refreshes them periodically and performs
 one immediate refresh for an unknown `kid`. A cached key may bridge a temporary
 JWKS outage for at most 24 hours. Once no non-stale usable key exists, requests
 fail closed with a service-unavailable result and no command executes.
+
+#### Amendment (issue #263): a cooldown on the refresh for an unknown `kid`
+
+The immediate refresh for an unknown `kid` starts at most once every 30
+seconds for each Worker isolate. The 30-second window opens when such a
+refresh starts, and again when any key fetch ends. Inside the window an
+unknown `kid` fails closed with no fetch. So a burst of made-up `kid` values
+causes one fetch, also when the requests arrive at the same moment.
+
+The cooldown is short so that key rotation still works. A key that Cloudflare
+Access rotates in is accepted at once when no fetch ran in the 30 seconds
+before, and in the worst case about 30 seconds after Cloudflare publishes it.
 
 Missing configuration or assertions, unsupported algorithms, malformed claims,
 unknown identities, expired assertions, issuer or audience mismatches, and

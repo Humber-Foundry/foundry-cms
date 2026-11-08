@@ -15,6 +15,7 @@ import {
 
 const clockToleranceSeconds = 60;
 const maximumKeyCacheAgeMs = 24 * 60 * 60 * 1_000;
+const keyRefetchCooldownMs = 30_000;
 
 export type CloudflareAccessConfiguration = Readonly<{
   issuer: string;
@@ -60,15 +61,48 @@ function validateConfiguration({
   return issuerUrl;
 }
 
+// An assertion whose `kid` is not in the cached keys refetches the team's
+// keys, because that is how a key Cloudflare Access has just rotated in
+// arrives. Such a refetch starts at most once per cooldown, so a burst of
+// made-up `kid` values causes one fetch, and a rotated key is accepted no more
+// than about 30 seconds after the team publishes it.
+//
+// jose's own cooldown counts from the end of a fetch. In a Worker, jose does
+// not share an in-flight fetch between requests, so every request that
+// arrives during the fetch would start one more. This key set counts from the
+// start of the refetch instead.
+function createRemoteKeySet(url: URL): JWTVerifyGetKey {
+  const remoteKeySet = createRemoteJWKSet(url, {
+    cacheMaxAge: maximumKeyCacheAgeMs,
+    cooldownDuration: keyRefetchCooldownMs,
+    timeoutDuration: 5_000,
+  });
+  let refetchStartedAt = Number.NEGATIVE_INFINITY;
+
+  return async (protectedHeader, token) => {
+    const { kid } = protectedHeader;
+    // These are the conditions under which jose refetches: fresh keys, no
+    // jose cooldown, and a `kid` that names no cached key.
+    const refetchesForUnknownKey =
+      remoteKeySet.fresh &&
+      !remoteKeySet.coolingDown &&
+      typeof kid === "string" &&
+      !(remoteKeySet.jwks()?.keys ?? []).some((key) => key.kid === kid);
+    if (refetchesForUnknownKey) {
+      if (Date.now() < refetchStartedAt + keyRefetchCooldownMs) {
+        throw new errors.JWKSNoMatchingKey();
+      }
+      refetchStartedAt = Date.now();
+    }
+    return remoteKeySet(protectedHeader, token);
+  };
+}
+
 export function createCloudflareAccessKeySet(
   source: JSONWebKeySet | URL,
 ): JWTVerifyGetKey {
   if (source instanceof URL) {
-    return createRemoteJWKSet(source, {
-      cacheMaxAge: maximumKeyCacheAgeMs,
-      cooldownDuration: 0,
-      timeoutDuration: 5_000,
-    });
+    return createRemoteKeySet(source);
   }
 
   return createLocalJWKSet(source);

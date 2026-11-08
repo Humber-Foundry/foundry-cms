@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { confirmCloudflareRefusesTeam } from "./lib/cloudflare-team-refusal.mjs";
 import {
   createAccessStandIn,
   interruptedExitCode,
@@ -22,7 +23,10 @@ import {
  *    the refusals below could have another cause.
  * 3. The same build, with the same settings and the stand-in's member in its
  *    database, refuses the same assertion when the key request goes out to
- *    the network, as it does from a deployed Worker.
+ *    the network, as it does from a deployed Worker. First this script sends
+ *    the same key request itself and requires Cloudflare's 404 for a team
+ *    that does not exist. If that request gets no answer, the run has no
+ *    network, and the check fails and says so.
  * 4. It also refuses it when the team's keys are keys the harness does not
  *    hold, which is what Cloudflare serves for a real team.
  */
@@ -103,14 +107,17 @@ async function main() {
       throw new Error(`control_not_accepted:${accepted.status}`);
     }
 
+    const cloudflare = await confirmCloudflareRefusesTeam(
+      accessStandIn.keySetUrl,
+    );
     const deployed = await messagesStatus({
       persistTo: state.persistTo,
       accessStandIn,
       outbound: undefined,
     });
-    // 404: the keys Cloudflare served do not verify the assertion.
-    // 503: the key request failed, so no identity could be verified.
-    if (![404, 503].includes(deployed.status) || deployed.showsMessages) {
+    // Cloudflare refused the team's key request, so no identity could be
+    // verified.
+    if (deployed.status !== 503 || deployed.showsMessages) {
       throw new Error(`deployed_build_accepted_stand_in:${deployed.status}`);
     }
 
@@ -126,7 +133,8 @@ async function main() {
     process.stdout.write(
       "Access stand-in refused by the deploy build: " +
         `no harness code in the bundle; control ${accepted.status}, ` +
-        `deployed network ${deployed.status}, other keys ${otherKeys.status}.\n`,
+        `deployed network ${deployed.status} (Cloudflare refused the team ` +
+        `with ${cloudflare.status}), other keys ${otherKeys.status}.\n`,
     );
   } finally {
     await state.remove();

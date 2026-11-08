@@ -1,5 +1,15 @@
-import { errors, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { beforeAll, describe, expect, it } from "vitest";
+import {
+  base64url,
+  errors,
+  exportJWK,
+  exportSPKI,
+  generateKeyPair,
+  SignJWT,
+  type JSONWebKeySet,
+  type JWK,
+  type JWTHeaderParameters,
+} from "jose";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AccessIdentityError,
@@ -12,19 +22,29 @@ const issuer = "https://foundry.cloudflareaccess.com";
 const audience = "reference-application-audience";
 const now = new Date("2026-07-27T04:00:00.000Z");
 let privateKey: CryptoKey;
+let publicJwk: JWK;
+let publicKeyPem: string;
 let keySet: ReturnType<typeof createCloudflareAccessKeySet>;
 
 beforeAll(async () => {
   const keys = await generateKeyPair("RS256", { extractable: true });
   privateKey = keys.privateKey;
-  const publicJwk = await exportJWK(keys.publicKey);
-  keySet = createCloudflareAccessKeySet({
-    keys: [{ ...publicJwk, kid: "key-1", alg: "RS256", use: "sig" }],
-  });
+  publicJwk = {
+    ...(await exportJWK(keys.publicKey)),
+    kid: "key-1",
+    alg: "RS256",
+    use: "sig",
+  };
+  publicKeyPem = await exportSPKI(keys.publicKey);
+  keySet = createCloudflareAccessKeySet({ keys: [publicJwk] });
 });
 
 async function createAssertion(
   overrides: Record<string, unknown> = {},
+  signing: { header: JWTHeaderParameters; key: CryptoKey | Uint8Array } = {
+    header: { alg: "RS256", kid: "key-1" },
+    key: privateKey,
+  },
 ): Promise<string> {
   const issuedAt =
     typeof overrides.iat === "number"
@@ -46,7 +66,7 @@ async function createAssertion(
     type: overrides.type ?? "app",
     identity_nonce: overrides.identity_nonce ?? "access-nonce",
   })
-    .setProtectedHeader({ alg: "RS256", kid: "key-1" })
+    .setProtectedHeader(signing.header)
     .setIssuer(typeof overrides.iss === "string" ? overrides.iss : issuer)
     .setSubject("access-subject")
     .setAudience(
@@ -55,7 +75,7 @@ async function createAssertion(
     .setIssuedAt(issuedAt)
     .setNotBefore(notBefore)
     .setExpirationTime(expiration)
-    .sign(privateKey);
+    .sign(signing.key);
 }
 
 describe("Cloudflare Access identity validation", () => {
@@ -94,6 +114,43 @@ describe("Cloudflare Access identity validation", () => {
     ).rejects.toBeInstanceOf(AccessIdentityError);
   });
 
+  it.each([
+    [
+      "an unsigned assertion (alg none)",
+      async () => {
+        const [, payload] = (await createAssertion()).split(".");
+        const header = base64url.encode(
+          JSON.stringify({ alg: "none", kid: "key-1" }),
+        );
+        return `${header}.${payload}.`;
+      },
+    ],
+    [
+      "an HS256 assertion signed with the public key as its secret",
+      () =>
+        createAssertion(
+          {},
+          {
+            header: { alg: "HS256", kid: "key-1" },
+            key: new TextEncoder().encode(publicKeyPem),
+          },
+        ),
+    ],
+    [
+      "an assertion with no key id",
+      () => createAssertion({}, { header: { alg: "RS256" }, key: privateKey }),
+    ],
+  ])("fails closed for %s", async (_label, buildAssertion) => {
+    await expect(
+      validateCloudflareAccessAssertion({
+        assertion: await buildAssertion(),
+        configuration: { issuer, audience },
+        keySet,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AccessIdentityError);
+  });
+
   it("fails closed for an expired assertion", async () => {
     await expect(
       validateCloudflareAccessAssertion({
@@ -121,5 +178,121 @@ describe("Cloudflare Access identity validation", () => {
         now,
       }),
     ).rejects.toBeInstanceOf(AccessIdentityUnavailableError);
+  });
+});
+
+describe("Cloudflare Access team key fetches", () => {
+  // The specified refetch cooldown for an unknown key id.
+  const keyRefetchCooldownMs = 30_000;
+  const keySetUrl = new URL("/cdn-cgi/access/certs", issuer);
+  let publishedKeys: JSONWebKeySet;
+  let keyFetches: number;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    publishedKeys = { keys: [publicJwk] };
+    keyFetches = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(keySetUrl.href);
+      keyFetches += 1;
+      return Response.json(publishedKeys);
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  async function signedWithNewKey(kid: string) {
+    const keys = await generateKeyPair("RS256", { extractable: true });
+    return {
+      jwk: {
+        ...(await exportJWK(keys.publicKey)),
+        kid,
+        alg: "RS256",
+        use: "sig",
+      },
+      assertion: await createAssertion(
+        {},
+        { header: { alg: "RS256", kid }, key: keys.privateKey },
+      ),
+    };
+  }
+
+  function validate(
+    assertion: string,
+    remoteKeySet: ReturnType<typeof createCloudflareAccessKeySet>,
+  ) {
+    return validateCloudflareAccessAssertion({
+      assertion,
+      configuration: { issuer, audience },
+      keySet: remoteKeySet,
+      now,
+    });
+  }
+
+  it("refetches the team's keys once for a burst of unknown key ids", async () => {
+    const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
+    await validate(await createAssertion(), remoteKeySet);
+    expect(keyFetches).toBe(1);
+
+    vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
+    for (let index = 0; index < 20; index += 1) {
+      const { assertion } = await signedWithNewKey(`bogus-${index}`);
+      await expect(validate(assertion, remoteKeySet)).rejects.toBeInstanceOf(
+        AccessIdentityError,
+      );
+    }
+    expect(keyFetches).toBe(2);
+  });
+
+  it("refetches the team's keys once for simultaneous unknown key ids in a Worker", async () => {
+    // jose shares one in-flight key fetch between callers, except in a
+    // Worker, where one request may not wait on another request's fetch. It
+    // detects a Worker by `WebSocketPair`.
+    vi.stubGlobal("WebSocketPair", class {});
+    const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
+    await validate(await createAssertion(), remoteKeySet);
+    expect(keyFetches).toBe(1);
+
+    vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
+    const assertions = await Promise.all(
+      Array.from({ length: 20 }, (_, index) => signedWithNewKey(`bogus-${index}`)),
+    );
+    const results = await Promise.allSettled(
+      assertions.map(({ assertion }) => validate(assertion, remoteKeySet)),
+    );
+    for (const result of results) {
+      expect(result.status).toBe("rejected");
+      expect(
+        result.status === "rejected" ? result.reason : undefined,
+      ).toBeInstanceOf(AccessIdentityError);
+    }
+    expect(keyFetches).toBe(2);
+  });
+
+  it("accepts a key the team rotates in once the cooldown has passed", async () => {
+    const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
+    await validate(await createAssertion(), remoteKeySet);
+    expect(keyFetches).toBe(1);
+
+    const rotated = await signedWithNewKey("key-2");
+    publishedKeys = { keys: [publicJwk, rotated.jwk] };
+
+    vi.setSystemTime(now.getTime() + keyRefetchCooldownMs - 1);
+    await expect(
+      validate(rotated.assertion, remoteKeySet),
+    ).rejects.toBeInstanceOf(AccessIdentityError);
+    expect(keyFetches).toBe(1);
+
+    vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
+    await expect(validate(rotated.assertion, remoteKeySet)).resolves.toEqual({
+      binding: { issuer, subject: "access-subject" },
+      email: "owner@example.com",
+      nonce: "access-nonce",
+    });
+    expect(keyFetches).toBe(2);
   });
 });
