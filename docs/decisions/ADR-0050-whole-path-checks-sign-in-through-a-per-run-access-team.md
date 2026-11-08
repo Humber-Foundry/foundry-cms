@@ -113,10 +113,17 @@ Worker build. It:
 2. starts the built Worker with the harness's answer for the team's keys and
    requires the assertion to open `/dash/forms`. This is the control: it shows
    the assertion is otherwise valid;
-3. starts the same build, with the same settings and the same member in D1,
-   but lets the key request go out to the network as a deployed Worker's does,
-   and requires `/dash/forms` to be refused (404 for keys that do not verify,
-   or 503 when the key request fails);
+3. sends the team's key request itself and requires Cloudflare's answer for
+   a team that does not exist: HTTP 404 from a server that names itself
+   `cloudflare`. If the request gets no answer, the run has no network, and
+   the check fails and says so. Then it starts the same build, with the same
+   settings and the same member in D1, but lets the key request go out to the
+   network as a deployed Worker's does, and requires `/dash/forms` to answer
+   503: the Worker could not get the team's keys, so no identity could be
+   verified. Without the first request, a run with no network would also give
+   503, and the step would pass with no proof. The first request shows that
+   the run had network and that Cloudflare refuses the team. The check does
+   not see the Worker's own key request;
 4. starts it once more with a team key set the harness does not hold, which is
    what Cloudflare serves for a real team, and requires a 404.
 
@@ -181,8 +188,9 @@ canonical origin the Worker checks, so the route's origin check runs for real.
   more cases.
 - The whole-path check and the refusal check need the network: the browser
   loads the Turnstile widget from Cloudflare, siteverify runs at Cloudflare,
-  and the refusal check's step 3 sends one key request for a team that does
-  not exist. None of these touches a Cloudflare account.
+  and the refusal check's step 3 sends two key requests for a team that does
+  not exist, one from the script and one from the Worker. None of these
+  touches a Cloudflare account.
 - The harness does not prove the Turnstile hostname and action that a real
   widget reports. Only a real site key can do that, on an installation.
 - The harness does not prove Cloudflare Access itself: the login, the cookie
