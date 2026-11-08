@@ -36,21 +36,7 @@ import {
   secondPageSectionId,
   withSecondPage,
 } from "../src/test-support/two-page-site-definition";
-function browserRevision(workspaceId: string) {
-  return {
-    workspaceId,
-    revision: 4,
-    definition: referenceSiteDefinition,
-    inputs: {
-      contentHash: "browser-content-hash",
-      schemaVersion: "1.2.0",
-      rendererVersion: "renderer-browser",
-      productionBase: "published-browser",
-    },
-    createdAt: "2026-07-27T00:00:00.000Z",
-    createdBy: "membership-browser",
-  } as never;
-}
+import { browserRevision } from "../src/test-support/browser-revision";
 
 /**
  * Finds a field's value wherever the owner edits it. Text the renderer edits in
@@ -1630,6 +1616,114 @@ describe("visual component editor browser acceptance", () => {
         "aria-label",
       ),
     ).toBe("Text formatting for Body");
+  });
+
+  it("never sends another workspace's pending draft and keeps it for that workspace", async () => {
+    const workspaceId = "workspace_browser_own_draft";
+    const siteNamePath = `${referenceSiteDefinition.site.id}.name`;
+    const descriptionPath = `${referenceSiteDefinition.site.id}.description`;
+    const footerPath = `${referenceSiteDefinition.site.id}.footer`;
+    // One workspace whose id starts with this one's, with a save attempt that
+    // never finished, and one closed tab of an unrelated workspace.
+    const neighbourEdits = [
+      {
+        path: descriptionPath,
+        baseValue: referenceSiteDefinition.site.description,
+        value: "Neighbour workspace draft",
+      },
+    ];
+    const foreignRecords = [
+      {
+        workspaceId: "workspace_browser_own_draft_neighbour",
+        baseRevision: 4,
+        edits: neighbourEdits,
+        attempt: {
+          body: JSON.stringify({
+            workspaceId: "workspace_browser_own_draft_neighbour",
+            schemaVersion: referenceSiteDefinition.schemaVersion,
+            baseRevision: 4,
+            edits: neighbourEdits,
+          }),
+          idempotencyKey: "neighbour-attempt-0001",
+        },
+      },
+      {
+        workspaceId: "workspace_browser_other_draft::closed-tab",
+        baseRevision: 4,
+        edits: [
+          {
+            path: footerPath,
+            baseValue: referenceSiteDefinition.site.footer,
+            value: "Closed tab of another workspace",
+          },
+        ],
+      },
+    ];
+    for (const record of foreignRecords) {
+      await writeContentEditorOutbox(record);
+    }
+    await writeContentEditorOutbox({
+      workspaceId,
+      baseRevision: 4,
+      edits: [
+        {
+          path: siteNamePath,
+          baseValue: referenceSiteDefinition.site.name,
+          value: "Own workspace draft",
+        },
+      ],
+    });
+    const sentBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (typeof init?.body === "string") {
+          sentBodies.push(JSON.parse(init.body) as unknown);
+        }
+        return new Promise<Response>(() => undefined);
+      }),
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "mutation-token",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview",
+          activeWorkspaceUrl: "/dash",
+        }),
+      );
+    });
+    for (let index = 0; index < 100 && sentBodies.length === 0; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+    // One request is all this editor can send: the stub never answers, so the
+    // save stays in flight and startSave refuses another. Any record recovery
+    // selects appears in that one request.
+
+    expect(sentBodies).toEqual([
+      expect.objectContaining({
+        workspaceId,
+        edits: [
+          expect.objectContaining({
+            path: siteNamePath,
+            value: "Own workspace draft",
+          }),
+        ],
+      }),
+    ]);
+    expect(
+      await listContentEditorOutboxRecords(
+        "workspace_browser_own_draft_neighbour",
+      ),
+    ).toEqual([expect.objectContaining(foreignRecords[0])]);
+    expect(
+      await listContentEditorOutboxRecords("workspace_browser_other_draft"),
+    ).toEqual([expect.objectContaining(foreignRecords[1])]);
   });
 
   it("preserves an incompatible rich-text recovery conflict when use-my-value is rejected", async () => {
