@@ -23,6 +23,9 @@ export default defineConfig({
   },
   test: {
     include: ["**/*.browser.test.tsx"],
+    setupFiles: ["./apps/reference-site/src/test-support/browser-test-setup.ts"],
+    // The setup file's after hook must run after each file's own hooks.
+    sequence: { hooks: "stack" },
     browser: {
       enabled: true,
       headless: true,
