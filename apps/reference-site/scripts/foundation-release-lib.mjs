@@ -1,12 +1,13 @@
 // Shared machinery for the foundation scaffold and sync commands.
 //
 // One classification, one tar reader, one lockfile check and one installation
-// manifest writer serve both the create-only scaffold and the three-way sync,
-// and `isTemplatePath` is also imported by `release:prepare` so the framework
-// manifest it records lists exactly the paths the scaffold and sync manage.
+// `package.json` builder serve both the create-only scaffold and the three-way
+// sync. `release:prepare` imports `isTemplatePath`, so the framework manifest it
+// records lists exactly the paths the scaffold and sync manage, and it imports
+// `installationTsconfigText` to pack the installation's `tsconfig.json`.
 
 import { gunzipSync } from "node:zlib";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -23,6 +24,7 @@ export function isTemplatePath(path) {
       "next-env.d.ts",
       "next.config.ts",
       "open-next.config.ts",
+      "tsconfig.json",
       "wrangler.jsonc",
       "wrangler.recovery.jsonc",
     ].includes(path)
@@ -189,12 +191,62 @@ export function lockedTiptapPackages(lock) {
 }
 
 /**
- * Writes the installation `package.json` and `tsconfig.json` from the target
- * release. Installation scripts are preserved; the foundation's build, engines,
- * tiptap overrides and TypeScript project are set to the target's. This is the
- * one place both scaffold and sync derive those files.
+ * Returns the `tsconfig.json` an installation receives. `release:prepare`
+ * packs it into the reference-site tarball, so it is framework source: the
+ * scaffold copies it once and the sync reconciles it three ways like any other
+ * framework file.
+ *
+ * It already holds every setting Next.js requires or suggests, so `next build`
+ * and `next dev` leave it unchanged. In particular `jsx` is `react-jsx`, which
+ * also lets Vitest parse an installation's own `.tsx` tests.
+ *
+ * Earlier releases wrote a different `tsconfig.json`, and the first
+ * `next build` rewrote it. This file is exactly that rewrite, key order
+ * included. So an installation that has only that rewrite matches this file
+ * byte for byte.
  */
-export async function writeInstallationBuildConfiguration({
+export function installationTsconfigText() {
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: "ES2022",
+        lib: ["DOM", "DOM.Iterable", "ES2023"],
+        strict: true,
+        skipLibCheck: true,
+        noEmit: true,
+        esModuleInterop: true,
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        resolveJsonModule: true,
+        isolatedModules: true,
+        jsx: "react-jsx",
+        paths: { "@/*": ["./*"] },
+        plugins: [{ name: "next" }],
+        allowJs: true,
+        incremental: true,
+      },
+      include: [
+        "next-env.d.ts",
+        "**/*.ts",
+        "**/*.tsx",
+        ".next/types/**/*.ts",
+        ".next/dev/types/**/*.ts",
+      ],
+      exclude: ["node_modules"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+/**
+ * Returns the installation `package.json` for the target release. Installation
+ * scripts and dependencies are preserved; the foundation's build scripts,
+ * engines and tiptap overrides are set to the target's. This is the one place
+ * both scaffold and sync derive that file. The scaffold writes it; the sync
+ * passes it to the operator, which writes and reports it only when it changes.
+ */
+export async function installationPackageText({
   target,
   descriptor,
   packageRoot,
@@ -218,31 +270,5 @@ export async function writeInstallationBuildConfiguration({
       "npm run build:worker && wrangler deploy --dry-run --outdir .foundry/deployment-smoke",
     typecheck: "tsc --noEmit",
   };
-  await writeFile(packagePath, `${JSON.stringify(targetPackage, null, 2)}\n`);
-  await writeFile(
-    join(target, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2022",
-          lib: ["DOM", "DOM.Iterable", "ES2023"],
-          strict: true,
-          skipLibCheck: true,
-          noEmit: true,
-          esModuleInterop: true,
-          module: "ESNext",
-          moduleResolution: "Bundler",
-          resolveJsonModule: true,
-          isolatedModules: true,
-          jsx: "preserve",
-          paths: { "@/*": ["./*"] },
-          plugins: [{ name: "next" }],
-        },
-        include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-        exclude: ["node_modules"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  return `${JSON.stringify(targetPackage, null, 2)}\n`;
 }
