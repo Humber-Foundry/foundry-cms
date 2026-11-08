@@ -72,8 +72,8 @@ function validateConfiguration({
 //
 // jose's own cooldown counts from the end of a successful fetch. In a Worker,
 // jose does not share an in-flight fetch between requests, so every request
-// that arrives during the fetch would start one more. This key set counts from
-// the start of the refetch instead.
+// that arrives during the fetch would start one more. So this key set also
+// opens a cooldown window when a refetch starts. jose's window still applies.
 //
 // Until a fetch succeeds, and when the cached keys are older than
 // `maximumKeyCacheAgeMs`, jose fetches without this cooldown.
