@@ -141,9 +141,10 @@ writing down for every page component.
   envelope through the real route handler: it asks the form's status with
   `GET`, sends with `POST`, and reads the stored message and the "Forms on
   your site" count back. Only the Cloudflare bindings, which hold the migrated
-  test database, and Cloudflare's siteverify answer are stand-ins. No test
-  drives a browser send into the real route and then reads it on the rendered
-  Messages screen; that needs the Cloudflare bindings in the browser run.
+  test database, and Cloudflare's siteverify answer are stand-ins. Since #259,
+  `scripts/verify-contact-form-whole-path-browser.mjs` also drives a browser
+  send into the real route of the built Worker and reads it on the rendered
+  Messages screen (ADR-0050).
 - The editing surfaces are inside `/dash`, so the dashboard Content Security
   Policy (ADR-0049) applies there. The block draws no Turnstile widget and
   loads no script on an editing surface, so the policy has nothing to refuse.

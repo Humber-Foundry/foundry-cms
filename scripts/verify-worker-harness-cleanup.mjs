@@ -1,0 +1,149 @@
+import { execFile, spawn } from "node:child_process";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { connect } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+/**
+ * Proves the worker harness leaves nothing behind when a check fails and when
+ * a check is interrupted (#259). Run it after `npm run build && npm run
+ * build:worker`.
+ *
+ * Each case runs one harness in a child process with its own temporary
+ * directory. The check prints the Worker's origin, then fails or waits to be
+ * interrupted. Afterwards the child must have exited by itself, the temporary
+ * directory must hold nothing but tool caches, nothing may answer on the
+ * Worker's port, and no process may name the directory. The database and the
+ * browser profile both live in that directory, and the browser's command line
+ * names its profile, so a leftover database or browser fails the check. The
+ * closed port shows the Worker runtime has stopped.
+ */
+
+const harnessUrl = pathToFileURL(
+  join(import.meta.dirname, "lib", "worker-harness.mjs"),
+).href;
+
+const childCheck = (ending) => `
+import { withWorkerHarness } from ${JSON.stringify(harnessUrl)};
+await withWorkerHarness({ build: false }, async (harness) => {
+  await (await harness.newSignedInPage()).goto(harness.origin + "/");
+  process.stdout.write("origin " + harness.origin + "\\n");
+  ${ending}
+});
+`;
+
+// Caches that Node and the Wrangler command line keep in the temporary
+// directory on purpose. They hold no harness state.
+const toolCaches = new Set(["node-compile-cache", "update-check"]);
+
+const endings = {
+  failure: 'throw new Error("check_failed_on_purpose");',
+  interrupt: "await new Promise(() => {});",
+};
+
+function portAnswers(origin) {
+  const { hostname, port } = new URL(origin);
+  return new Promise((resolveAnswer) => {
+    const socket = connect({ host: hostname, port: Number(port) });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolveAnswer(true);
+    });
+    socket.once("error", () => resolveAnswer(false));
+  });
+}
+
+/**
+ * Every running process whose command line names `directory`. Chromium names
+ * its profile folder, which the harness puts in the case's directory.
+ */
+function processesNaming(directory) {
+  return new Promise((resolveList, reject) => {
+    execFile("ps", ["-axo", "pid=,command="], (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolveList(
+        stdout.split("\n").filter((line) => line.includes(directory)),
+      );
+    });
+  });
+}
+
+async function runCase(name) {
+  const directory = await mkdtemp(join(tmpdir(), "foundry-harness-cleanup-"));
+  try {
+    const child = spawn(
+      process.execPath,
+      ["--input-type=module", "--eval", childCheck(endings[name])],
+      {
+        env: { ...process.env, TMPDIR: directory },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    // Made at once, so an exit that comes straight after the origin line is
+    // not missed.
+    const exited = new Promise((resolveExit) =>
+      child.once("exit", resolveExit),
+    );
+    const output = [];
+    child.stderr.on("data", (chunk) => output.push(String(chunk)));
+    const origin = await new Promise((resolveOrigin, reject) => {
+      child.stdout.on("data", (chunk) => {
+        output.push(String(chunk));
+        const match = /origin (\S+)/u.exec(output.join(""));
+        if (match !== null) resolveOrigin(match[1]);
+      });
+      child.once("exit", (code) =>
+        reject(new Error(`${name}_exited_before_ready:${code}\n${output.join("")}`)),
+      );
+    });
+    if (name === "interrupt") child.kill("SIGINT");
+
+    let watchdog;
+    const code = await Promise.race([
+      exited,
+      new Promise((resolveExit) => {
+        watchdog = setTimeout(() => resolveExit("timeout"), 60_000);
+      }),
+    ]);
+    clearTimeout(watchdog);
+    if (code === "timeout") {
+      child.kill("SIGKILL");
+      throw new Error(`${name}_child_did_not_exit\n${output.join("")}`);
+    }
+    if (code === 0) {
+      throw new Error(`${name}_child_exited_0\n${output.join("")}`);
+    }
+    const left = (await readdir(directory)).filter(
+      (entry) => !toolCaches.has(entry),
+    );
+    if (left.length > 0) {
+      throw new Error(`${name}_left_temporary_files:${left.join(",")}`);
+    }
+    if (await portAnswers(origin)) {
+      throw new Error(`${name}_left_port_open:${origin}`);
+    }
+    const processes = await processesNaming(directory);
+    if (processes.length > 0) {
+      throw new Error(`${name}_left_processes:\n${processes.join("\n")}`);
+    }
+    return code;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+try {
+  const failure = await runCase("failure");
+  const interrupt = await runCase("interrupt");
+  process.stdout.write(
+    "worker harness clean-up: nothing left after a failed check " +
+      `(exit ${failure}) or an interrupted check (exit ${interrupt}).\n`,
+  );
+} catch (error) {
+  process.stderr.write(`${error?.stack ?? String(error)}\n`);
+  process.exitCode = 1;
+}

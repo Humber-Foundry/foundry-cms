@@ -52,3 +52,4 @@
 | [ADR-0047](ADR-0047-web-traffic-counted-in-the-worker.md) | Web traffic is counted in the Worker request path, with no beacon and no cookie | Accepted | 2026-09-21 |
 | [ADR-0048](ADR-0048-sender-details-are-a-stored-site-setting.md) | The sender details are a stored site setting an Owner edits in Settings, with the environment variables as the per-value fallback | Accepted | 2026-09-22 |
 | [ADR-0049](ADR-0049-dashboard-documents-carry-a-content-security-policy.md) | Every dashboard document carries a Content Security Policy that admits the site's own origin only | Accepted | 2026-09-22 |
+| [ADR-0050](ADR-0050-whole-path-checks-sign-in-through-a-per-run-access-team.md) | Whole-path browser checks run against the built Worker and sign in through an Access team that exists for one run | Accepted | 2026-11-07 |
