@@ -141,6 +141,11 @@ change, after the framework files, and only when the sync is not blocked. The
 report names every file it wrote, added or removed, and the summary counts
 each one. A sync never changes a file that its report does not name.
 
+The installation `tsconfig.json` that the release ships already holds every
+setting Next.js requires or suggests. So `next build` does not rewrite it, and
+a build does not turn it into a local change. Its `jsx` setting is `react-jsx`,
+which also lets Vitest parse an installation's own `.tsx` tests.
+
 ### 4. The sync checks the lock; npm writes it
 
 An installation often vendors the four tarballs at a fixed path and version.
@@ -167,11 +172,6 @@ itself. Instead:
 
 npm is the only writer of `package-lock.json`. The sync never writes it, so
 the report rule in section 3 holds without a `package-lock.json` line.
-
-The installation `tsconfig.json` that the release ships already holds every
-setting Next.js requires or suggests. So `next build` does not rewrite it, and
-a build does not turn it into a local change. Its `jsx` setting is `react-jsx`,
-which also lets Vitest parse an installation's own `.tsx` tests.
 
 ## Consequences
 

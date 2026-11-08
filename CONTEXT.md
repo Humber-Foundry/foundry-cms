@@ -536,6 +536,13 @@ the installation's current file, the pinned old release and the target — and
 preserving installation-owned work. A conflict fails closed unless the operator
 accepts it; migrations are additive-only. See ADR-0015.
 
+**Stale lock** — An installation lockfile entry for a foundation package that
+names the target release's version and vendored file, while that file holds
+the target's bytes, but whose `integrity` is still the replaced tarball's.
+A plain `npm install` leaves it stale. The foundation sync refuses it with
+`foundation_sync_lock_stale` and names the `npm install` command that fixes
+it. See ADR-0015.
+
 ## Owner-facing words
 
 The dashboard is written for a site owner, not a developer. Where this

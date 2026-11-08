@@ -135,7 +135,9 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
   }
 }
 
-// The four packages of one foundation release.
+// The four packages of one foundation release. The operator exports the same
+// list, but the sync checks the lock before it imports the operator, so that
+// it never loads operator code that is not locked.
 const foundationPackageNames = [
   "@humber-foundry/application",
   "@humber-foundry/operator",
@@ -161,7 +163,7 @@ export async function assertSyncReleaseLocked({ descriptor, lock, target }) {
     try {
       assertLockedReleaseExecutable({ descriptor, lock, name });
     } catch (error) {
-      const tarball = await staleVendoredTarball({ descriptor, lock, name, target });
+      const tarball = await staleTarballInstallArgument({ descriptor, lock, name, target });
       if (tarball === null) throw error;
       stale.push({ name, tarball });
     }
@@ -182,7 +184,7 @@ export async function assertSyncReleaseLocked({ descriptor, lock, target }) {
  * lock entry names the target version and file but not its integrity, and the
  * file at that path holds exactly the target's bytes. Returns `null` otherwise.
  */
-async function staleVendoredTarball({ descriptor, lock, name, target }) {
+async function staleTarballInstallArgument({ descriptor, lock, name, target }) {
   const entry = lock.packages?.[`node_modules/${name}`];
   const artifact = descriptor.artifacts?.[name];
   const resolved = entry?.resolved;
@@ -207,6 +209,7 @@ async function staleVendoredTarball({ descriptor, lock, name, target }) {
   return isAbsolute(path) || path.startsWith(".") ? path : `./${path}`;
 }
 
+/** Quotes a word for `sh` when it holds a character outside the safe set. */
 function shellWord(word) {
   return /^[\w@%+=:,./-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
