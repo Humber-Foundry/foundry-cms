@@ -115,15 +115,15 @@ unknown `kid` fails closed with no fetch. So, once an isolate has cached the
 team's keys, a burst of made-up `kid` values causes one fetch, also when the
 requests arrive at the same moment.
 
-The cooldown does not cover the first fetch in an isolate, or the fetch that
-replaces keys older than 24 hours. In a Worker, requests that arrive together
+The cooldown does not cover a fetch before the first successful fetch in an
+isolate, or the fetch that replaces keys older than 24 hours. In a Worker, requests that arrive together
 before such a fetch ends each start a fetch, as they did before this
 amendment.
 
 The cooldown is short so that key rotation still works. A key that Cloudflare
 Access rotates in is accepted at once when no fetch ran in the 30 seconds
-before. In the worst case it is accepted 30 seconds plus one key fetch (at
-most 5 seconds) after Cloudflare publishes it.
+before. In the worst case it is accepted 30 seconds plus two key fetches (at
+most 40 seconds in all) after Cloudflare publishes it.
 
 Missing configuration or assertions, unsupported algorithms, malformed claims,
 unknown identities, expired assertions, issuer or audience mismatches, and

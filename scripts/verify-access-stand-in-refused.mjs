@@ -113,7 +113,7 @@ async function main() {
       accessStandIn,
       outbound: undefined,
     });
-    // Cloudflare refused the team's key request, so no identity could be
+    // The Worker could not get the team's keys, so no identity could be
     // verified.
     if (deployed.status !== 503 || deployed.showsMessages) {
       throw new Error(`deployed_build_accepted_stand_in:${deployed.status}`);
@@ -131,8 +131,8 @@ async function main() {
     process.stdout.write(
       "Access stand-in refused by the deploy build: " +
         `no harness code in the bundle; control ${accepted.status}, ` +
-        `deployed network ${deployed.status} (Cloudflare refused the team ` +
-        `with 404), other keys ${otherKeys.status}.\n`,
+        `deployed network ${deployed.status} (this script's own key request ` +
+        `got Cloudflare's 404), other keys ${otherKeys.status}.\n`,
     );
   } finally {
     await state.remove();

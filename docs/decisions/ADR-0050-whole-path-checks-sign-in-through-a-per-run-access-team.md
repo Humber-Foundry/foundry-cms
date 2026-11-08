@@ -119,9 +119,11 @@ Worker build. It:
    the check fails and says so. Then it starts the same build, with the same
    settings and the same member in D1, but lets the key request go out to the
    network as a deployed Worker's does, and requires `/dash/forms` to answer
-   503: Cloudflare refused the key request, so no identity could be verified.
-   Without the first request, a run with no network would also give 503, and
-   the step would pass with no proof;
+   503: the Worker could not get the team's keys, so no identity could be
+   verified. Without the first request, a run with no network would also give
+   503, and the step would pass with no proof. The first request shows that
+   the run had network and that Cloudflare refuses the team. The check does
+   not see the Worker's own key request;
 4. starts it once more with a team key set the harness does not hold, which is
    what Cloudflare serves for a real team, and requires a 404.
 
