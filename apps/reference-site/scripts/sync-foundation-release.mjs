@@ -15,13 +15,14 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertLockedReleaseExecutable,
-  installationPackageSource,
+  installationPackageText,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
 } from "./foundation-release-lib.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const releasePinNote = "release pin";
 
 async function fileExists(path) {
   try {
@@ -131,14 +132,14 @@ async function main() {
     {
       path: "package.json",
       bytes: Buffer.from(
-        await installationPackageSource({ target, descriptor, packageRoot }),
+        await installationPackageText({ target, descriptor, packageRoot }),
       ),
       note: "build configuration from target release",
     },
     {
       path: ".foundry-foundation-release.json",
       bytes: Buffer.from(`${JSON.stringify(descriptor, null, 2)}\n`),
-      note: "release pin",
+      note: releasePinNote,
     },
   ];
   const bootstrapManifest = await bootstrapManifestWithPin({
@@ -150,7 +151,7 @@ async function main() {
     derivedFiles.push({
       path: ".foundry/installation.json",
       bytes: Buffer.from(bootstrapManifest),
-      note: "release pin",
+      note: releasePinNote,
     });
   }
 

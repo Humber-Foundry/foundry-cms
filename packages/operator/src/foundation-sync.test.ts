@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { isTemplatePath } from "../../../apps/reference-site/scripts/foundation-release-lib.mjs";
+import {
+  changedPaths,
+  installationFileHashes,
+  reportedChanges,
+} from "../../../apps/reference-site/scripts/installation-file-changes.mjs";
 
 import {
   parseFoundationFrameworkManifest,
@@ -434,32 +439,6 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
     expect(report).toContain("migrations/0002_next.sql");
   });
 
-  async function snapshot(): Promise<Map<string, string>> {
-    const result = new Map<string, string>();
-    async function walk(directory: string) {
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory()) await walk(path);
-        else result.set(relative(root, path), sha256(await readFile(path)));
-      }
-    }
-    await walk(root);
-    return result;
-  }
-
-  function changed(before: Map<string, string>, after: Map<string, string>) {
-    return [...new Set([...before.keys(), ...after.keys()])]
-      .filter((path) => before.get(path) !== after.get(path))
-      .sort();
-  }
-
-  function reported(report: string): string[] {
-    return report
-      .split("\n")
-      .flatMap((line) => /^(?:write|add|remove)\s+(\S+)/u.exec(line)?.[1] ?? [])
-      .sort();
-  }
-
   it("names every file it changes, derived files included, in its report", async () => {
     const releaseA = new Map([
       ["app/page.tsx", "A-page"],
@@ -474,7 +453,7 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
     for (const [path, content] of releaseA) await write(path, content);
     await write("package.json", "old-package");
     await write(".foundry-foundation-release.json", "old-pin");
-    const before = await snapshot();
+    const before = await installationFileHashes(root);
 
     const result = await reconcileFoundationFramework({
       installationDir: root,
@@ -494,7 +473,7 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
       ],
     });
 
-    const changes = changed(before, await snapshot());
+    const changes = changedPaths(before, await installationFileHashes(root));
     expect(changes).toEqual([
       ".foundry-foundation-release.json",
       ".foundry/installation.json",
@@ -504,14 +483,14 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
       "src/removed.ts",
       "tsconfig.json",
     ]);
-    expect(reported(result.report)).toEqual(changes);
+    expect(reportedChanges(result.report)).toEqual(changes);
     expect(result.report).toContain("\n6 written, 1 removed,");
   });
 
   it("writes no derived file while a conflict blocks the sync", async () => {
     await write("app/page.tsx", "LOCAL-page");
     await write("package.json", "old-package");
-    const before = await snapshot();
+    const before = await installationFileHashes(root);
 
     const result = await reconcileFoundationFramework({
       installationDir: root,
@@ -524,6 +503,6 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
     });
 
     expect(result.plan.blocked).toBe(true);
-    expect(changed(before, await snapshot())).toEqual([]);
+    expect(changedPaths(before, await installationFileHashes(root))).toEqual([]);
   });
 });

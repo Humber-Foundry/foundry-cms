@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertLockedReleaseExecutable,
   assertTiptapSetAligned,
-  installationPackageSource,
+  installationPackageText,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
@@ -106,7 +106,7 @@ async function main() {
 
   await writeFile(
     join(target, "package.json"),
-    await installationPackageSource({ target, descriptor, packageRoot }),
+    await installationPackageText({ target, descriptor, packageRoot }),
   );
   await writeFile(
     join(target, ".foundry-foundation-release.json"),

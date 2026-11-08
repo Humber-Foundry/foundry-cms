@@ -13,7 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 
 import {
-  installationTsconfigSource,
+  installationTsconfigText,
   isTemplatePath,
   tarEntries,
 } from "../apps/reference-site/scripts/foundation-release-lib.mjs";
@@ -121,7 +121,7 @@ async function stageReferenceSite(version) {
   }
   // The reference site's own tsconfig.json extends the workspace one, so the
   // installation's is generated. Packing it makes it framework source.
-  await writeFile(join(target, "tsconfig.json"), installationTsconfigSource());
+  await writeFile(join(target, "tsconfig.json"), installationTsconfigText());
   const source = await json(join(root, "apps/reference-site/package.json"));
   const rootPackage = await json(join(root, "package.json"));
   return {

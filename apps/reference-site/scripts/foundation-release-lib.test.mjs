@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   alignedTiptapPins,
   assertTiptapSetAligned,
-  installationTsconfigSource,
+  installationTsconfigText,
   lockedTiptapPackages,
 } from "./foundation-release-lib.mjs";
 
@@ -142,12 +142,12 @@ describe("installation tsconfig.json", () => {
   it("is left unchanged by the Next.js build", async () => {
     // If Next.js rewrote it, every build would turn the shipped file into a
     // local change, and the next sync would report a conflict.
-    expect(await afterNextTypeScriptSetup(installationTsconfigSource())).toBe(
-      installationTsconfigSource(),
+    expect(await afterNextTypeScriptSetup(installationTsconfigText())).toBe(
+      installationTsconfigText(),
     );
   });
 
-  it("is what Next.js made of the tsconfig.json earlier releases wrote", async () => {
+  it("equals the Next.js rewrite of the tsconfig.json from earlier releases", async () => {
     // Every release before #139 wrote this file, and the first `next build`
     // rewrote it. An installation that has only that rewrite must match the
     // shipped file, so its first sync reports nothing for tsconfig.json.
@@ -175,7 +175,7 @@ describe("installation tsconfig.json", () => {
       2,
     )}\n`;
     expect(await afterNextTypeScriptSetup(earlierReleaseTsconfig)).toBe(
-      installationTsconfigSource(),
+      installationTsconfigText(),
     );
   });
 
@@ -184,7 +184,7 @@ describe("installation tsconfig.json", () => {
     try {
       await symlink(join(root, "node_modules"), join(directory, "node_modules"), "dir");
       await writeFile(join(directory, "package.json"), '{ "type": "module" }\n');
-      await writeFile(join(directory, "tsconfig.json"), installationTsconfigSource());
+      await writeFile(join(directory, "tsconfig.json"), installationTsconfigText());
       await writeFile(
         join(directory, "page.test.tsx"),
         [

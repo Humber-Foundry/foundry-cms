@@ -30,9 +30,9 @@ export function lockedTiptapPackages(
   lock: unknown,
 ): Array<{ name: string; version: string }>;
 
-export function installationTsconfigSource(): string;
+export function installationTsconfigText(): string;
 
-export function installationPackageSource(args: {
+export function installationPackageText(args: {
   target: string;
   descriptor: unknown;
   packageRoot: string;

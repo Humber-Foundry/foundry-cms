@@ -1,8 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
+
+import {
+  changedPaths,
+  installationFileHashes,
+} from "../apps/reference-site/scripts/installation-file-changes.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const releaseDirectory = join(root, "foundation-release");
@@ -22,32 +27,13 @@ function expectCommandFailure(name, args, cwd, env, expected) {
 }
 
 // Directories a build or install creates. They are not files the sync owns.
-const generatedDirectories = new Set([
+const generatedDirectories = [
   ".foundry-verification-home",
   ".next",
   ".open-next",
   ".wrangler",
   "node_modules",
-]);
-
-// Returns installation-relative path to sha256 for every installation file.
-async function installationFiles(target) {
-  const files = new Map();
-  async function walk(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (directory === target && generatedDirectories.has(entry.name)) continue;
-        await walk(path);
-      } else {
-        const bytes = await readFile(path);
-        files.set(relative(target, path), createHash("sha256").update(bytes).digest("hex"));
-      }
-    }
-  }
-  await walk(target);
-  return files;
-}
+];
 
 async function main() {
   const descriptor = JSON.parse(
@@ -189,16 +175,18 @@ async function main() {
       "--artifacts",
       join(releaseDirectory, "artifacts"),
     ];
-    const filesBeforeSync = await installationFiles(target);
+    const filesBeforeSync = await installationFileHashes(target, {
+      skip: generatedDirectories,
+    });
     const idempotentReport = execFileSync(syncCommand, syncArguments, {
       cwd: target,
       encoding: "utf8",
       env,
     });
-    const filesAfterSync = await installationFiles(target);
-    const changedBySync = [
-      ...new Set([...filesBeforeSync.keys(), ...filesAfterSync.keys()]),
-    ].filter((path) => filesBeforeSync.get(path) !== filesAfterSync.get(path));
+    const changedBySync = changedPaths(
+      filesBeforeSync,
+      await installationFileHashes(target, { skip: generatedDirectories }),
+    );
     if (changedBySync.length > 0) {
       throw new Error(`foundation_sync_idempotent_changed:${changedBySync.join(",")}`);
     }

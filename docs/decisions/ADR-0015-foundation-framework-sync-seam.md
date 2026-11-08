@@ -7,8 +7,8 @@
 > named root config files, so it is framework source and the three-way rule
 > below applies to it. Before this, the scaffold and the sync generated it and
 > the sync overwrote it on every run without a report. The sync also writes
-> files it derives from the target release: the installation's `package.json`
-> build configuration and the release pin files. The report names each of
+> derived files from the target release: the installation's `package.json`
+> build configuration and the release pins. The report names each of
 > these files when the sync changes it. See "The report names every write"
 > below.
 
@@ -54,7 +54,8 @@ different owners.
   `next.config.ts`, `open-next.config.ts`, `tsconfig.json`, `wrangler.jsonc`,
   `wrangler.recovery.jsonc`).
 - **Installation-owned work** is the client's. Sync must never write, remove or
-  report a conflict on it. It is three things:
+  report a conflict on it. It is three things (the derived files in section 3
+  are the one exception to the third):
   1. everything under `foundry/` — the Site Definition, page-component registry,
      published content and forms the installation edits through Foundry;
   2. any file under `public/` that the release does not ship — the client's
@@ -116,8 +117,8 @@ vendored release is the locked executable.
 
 ### 3. The report names every write
 
-The sync writes three more files that are not framework source. It derives
-each one from the target release:
+The sync writes up to three more files that are not framework source. These
+are the **derived files**. The sync derives each one from the target release:
 
 - `package.json`: the foundation's build scripts, engines and tiptap
   overrides. The installation's own scripts and dependencies stay.

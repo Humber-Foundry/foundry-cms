@@ -4,7 +4,7 @@
 // `package.json` builder serve both the create-only scaffold and the three-way
 // sync. `release:prepare` imports `isTemplatePath`, so the framework manifest it
 // records lists exactly the paths the scaffold and sync manage, and it imports
-// `installationTsconfigSource` to pack the installation's `tsconfig.json`.
+// `installationTsconfigText` to pack the installation's `tsconfig.json`.
 
 import { gunzipSync } from "node:zlib";
 import { readFile } from "node:fs/promises";
@@ -198,12 +198,14 @@ export function lockedTiptapPackages(lock) {
  *
  * It already holds every setting Next.js requires or suggests, so `next build`
  * and `next dev` leave it unchanged. In particular `jsx` is `react-jsx`, which
- * also lets Vitest parse an installation's own `.tsx` tests. The key order is
- * the order Next.js produced when it rewrote the file earlier releases wrote,
- * so an installation that only has that rewrite matches this file byte for
- * byte.
+ * also lets Vitest parse an installation's own `.tsx` tests.
+ *
+ * Earlier releases wrote a different `tsconfig.json`, and the first
+ * `next build` rewrote it. This file is exactly that rewrite, key order
+ * included. So an installation that has only that rewrite matches this file
+ * byte for byte.
  */
-export function installationTsconfigSource() {
+export function installationTsconfigText() {
   return `${JSON.stringify(
     {
       compilerOptions: {
@@ -244,7 +246,7 @@ export function installationTsconfigSource() {
  * both scaffold and sync derive that file. The scaffold writes it; the sync
  * passes it to the operator, which writes and reports it only when it changes.
  */
-export async function installationPackageSource({
+export async function installationPackageText({
   target,
   descriptor,
   packageRoot,

@@ -144,6 +144,13 @@ export type DerivedInstallationFile = Readonly<{
   note: string;
 }>;
 
+/** A derived file as the pure planner sees it: the sha256 of its new bytes. */
+export type DerivedFileHash = Readonly<{
+  path: string;
+  sha256: string;
+  note: string;
+}>;
+
 export type FoundationSyncPlan = Readonly<{
   entries: ReadonlyArray<FrameworkReconciliationEntry>;
   toWrite: ReadonlyArray<string>;
@@ -183,9 +190,7 @@ export function planFoundationSync({
   oldFiles: ReadonlyArray<FrameworkManifestFile>;
   newFiles: ReadonlyArray<FrameworkManifestFile>;
   installationHashes: ReadonlyMap<string, string | null>;
-  derivedFiles?: ReadonlyArray<
-    Readonly<{ path: string; sha256: string; note: string }>
-  >;
+  derivedFiles?: ReadonlyArray<DerivedFileHash>;
   acceptConflicts?: boolean;
 }): FoundationSyncPlan {
   const oldMap = toMap(oldFiles);

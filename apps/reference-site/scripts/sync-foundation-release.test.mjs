@@ -10,14 +10,19 @@
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { isTemplatePath } from "./foundation-release-lib.mjs";
+import {
+  changedPaths,
+  installationFileHashes as snapshot,
+  reportedChanges,
+} from "./installation-file-changes.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
 const packageNames = [
@@ -178,26 +183,6 @@ async function writeInstallation(directory, { oldFiles, oldRelease, targetReleas
   }
 }
 
-/** Returns installation-relative path to sha256 for every file under `directory`. */
-async function snapshot(directory) {
-  const result = new Map();
-  async function walk(current) {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) await walk(path);
-      else result.set(relative(directory, path), sha256(await readFile(path)));
-    }
-  }
-  await walk(directory);
-  return result;
-}
-
-function changedPaths(before, after) {
-  return [...new Set([...before.keys(), ...after.keys()])]
-    .filter((path) => before.get(path) !== after.get(path))
-    .sort();
-}
-
 function runSync(installation, release, { acceptConflicts = false } = {}) {
   const result = spawnSync(
     process.execPath,
@@ -216,15 +201,6 @@ function runSync(installation, release, { acceptConflicts = false } = {}) {
     { encoding: "utf8" },
   );
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
-
-/** The paths a report names on a `write`, `add` or `remove` line. */
-function reportedChanges(report) {
-  return report
-    .split("\n")
-    .map((line) => /^(?:write|add|remove)\s+(\S+)/u.exec(line)?.[1])
-    .filter((path) => path !== undefined)
-    .sort();
 }
 
 /**
