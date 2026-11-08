@@ -16,11 +16,12 @@ function command(name, args, cwd, env) {
   execFileSync(name, args, { cwd, stdio: "inherit", env });
 }
 
+// Returns the failed command's stderr.
 function expectCommandFailure(name, args, cwd, env, expected) {
   try {
     execFileSync(name, args, { cwd, encoding: "utf8", env });
   } catch (error) {
-    if (String(error.stderr).includes(expected)) return;
+    if (String(error.stderr).includes(expected)) return String(error.stderr);
     throw error;
   }
   throw new Error("foundation_release_negative_test_did_not_fail");
@@ -232,10 +233,10 @@ async function main() {
     // The sync command refuses to advance when the target release is not the
     // vendored, locked executable.
     const beforeTamperLock = await readFile(lockPath, "utf8");
-    const tamperedSyncLock = JSON.parse(beforeTamperLock);
-    tamperedSyncLock.packages["node_modules/@humber-foundry/reference-site"].integrity =
-      `sha512-${Buffer.alloc(64).toString("base64")}`;
-    await writeFile(lockPath, `${JSON.stringify(tamperedSyncLock, null, 2)}\n`);
+    const referenceLockKey = "node_modules/@humber-foundry/reference-site";
+    const notLockedSyncLock = JSON.parse(beforeTamperLock);
+    notLockedSyncLock.packages[referenceLockKey].version = "0.0.0-not-the-release";
+    await writeFile(lockPath, `${JSON.stringify(notLockedSyncLock, null, 2)}\n`);
     expectCommandFailure(
       syncCommand,
       syncArguments,
@@ -243,6 +244,40 @@ async function main() {
       env,
       "foundation_scaffold_executable_not_locked:@humber-foundry/reference-site",
     );
+    // A lock that still holds an older integrity for the target's vendored
+    // bytes is stale. The sync names the npm command that relocks them, and
+    // that command must make the lock hold the tarball's real integrity.
+    const staleSyncLock = JSON.parse(beforeTamperLock);
+    staleSyncLock.packages[referenceLockKey].integrity =
+      `sha512-${Buffer.alloc(64).toString("base64")}`;
+    await writeFile(lockPath, `${JSON.stringify(staleSyncLock, null, 2)}\n`);
+    const staleError = expectCommandFailure(
+      syncCommand,
+      syncArguments,
+      target,
+      env,
+      "foundation_sync_lock_stale:@humber-foundry/reference-site\n",
+    );
+    const relockCommand = /^ {2}(npm install \S+)$/mu.exec(staleError)?.[1];
+    if (
+      relockCommand === undefined ||
+      !relockCommand.endsWith(
+        `/${descriptor.artifacts["@humber-foundry/reference-site"].filename}`,
+      )
+    ) {
+      throw new Error("foundation_sync_lock_stale_command_missing");
+    }
+    const packagePath = join(target, "package.json");
+    const beforeRelockPackage = await readFile(packagePath, "utf8");
+    command("sh", ["-c", relockCommand], target, env);
+    const relocked = JSON.parse(await readFile(lockPath, "utf8"));
+    if (
+      relocked.packages[referenceLockKey].integrity !==
+      descriptor.artifacts["@humber-foundry/reference-site"].integrity
+    ) {
+      throw new Error("foundation_sync_lock_stale_command_did_not_relock");
+    }
+    await writeFile(packagePath, beforeRelockPackage);
     await writeFile(lockPath, beforeTamperLock);
 
     const lock = JSON.parse(await readFile(lockPath, "utf8"));

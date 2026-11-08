@@ -69,8 +69,40 @@ newer release, use the sync command. It is the counterpart to the scaffold and
 ships in the reference-site package as the `foundry-reference-site-sync` bin.
 
 First vendor the target release's packages in the installation, so its
-`package-lock.json` names the target — the sync refuses to write until the
-target is the locked executable, exactly as the scaffold does. Then run:
+`package-lock.json` names the target. The sync refuses to write until all four
+target packages are locked: same version, same file and same `sha512-`
+integrity as the target's descriptor.
+
+An installation often vendors the four tarballs at a fixed path and version,
+for example `vendor/humber-foundry-reference-site-0.1.0.tgz`. A newer release
+at the same version replaces their bytes at the same path. A plain
+`npm install` does not read the new bytes. It keeps the old `integrity` in
+`package-lock.json`, and it keeps or restores the old code in `node_modules`
+from npm's cache. Deleting `node_modules` does not help. So, after you copy the
+new tarballs into place, install them by name:
+
+```sh
+npm install \
+  ./vendor/humber-foundry-application-<version>.tgz \
+  ./vendor/humber-foundry-operator-<version>.tgz \
+  ./vendor/humber-foundry-reference-site-<version>.tgz \
+  ./vendor/humber-foundry-site-definition-<version>.tgz
+```
+
+Use the paths your `package.json` names. This command reads each tarball,
+writes its real `sha512-` integrity to `package-lock.json` and installs its
+code in `node_modules`. No hand editing of the lock is needed.
+
+If you skip this step, the sync stops with `foundation_sync_lock_stale` and
+lists the packages. This happens when a lock entry names the target version
+and file, and the vendored file holds the target's bytes, but the entry still
+holds an older integrity. The error prints the exact `npm install` command
+for the stale tarballs. Run it in the installation directory, then run the
+sync again. Any other mismatch stops the sync with
+`foundation_scaffold_executable_not_locked`. That means the vendored files are
+not the target release, so vendor them again.
+
+Then run the sync:
 
 ```sh
 foundry-reference-site-sync \
@@ -109,7 +141,8 @@ The sync also writes the target release's build scripts, engines and tiptap
 overrides to the installation's `package.json`, and it moves the release pins
 (`.foundry-foundation-release.json`, and `.foundry/installation.json` when it
 exists) to the target. Run `npm install` after the sync, so the lockfile moves
-to the target's tiptap set.
+to the target's tiptap set. The sync never writes `package-lock.json`. Only
+npm writes it, in the install before the sync and in the install after it.
 
 The command prints a report with one line for every file it writes, adds or
 removes, every local override it keeps and every conflict, with its path.

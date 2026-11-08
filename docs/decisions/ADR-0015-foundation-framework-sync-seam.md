@@ -11,6 +11,12 @@
 > build configuration and the release pins. The report names each of
 > these files when the sync changes it. See "The report names every write"
 > below.
+>
+> **Amended again 2026-11-07 for issue #208.** The sync now checks the lock
+> entries of all four foundation packages, not two. It recognizes a stale
+> lock and names the `npm install` command that fixes it. The sync still never
+> writes `package-lock.json`. See "The sync checks the lock; npm writes it"
+> below.
 
 ## Context
 
@@ -112,8 +118,8 @@ byte-identical to the target release's template, its `.foundry/*` pin files and
 `package-lock.json` name the target, and typecheck and build pass. Sync verifies
 the target's artifacts and descriptor digest with the operator's
 `loadFoundationReleaseDescriptor` and `verifyFoundationReleaseArtifacts` — the
-same trust checks the scaffold uses — and refuses to write anything until the
-vendored release is the locked executable.
+same trust checks the scaffold uses — and refuses to write anything until all
+four vendored release packages are the locked executables.
 
 ### 3. The report names every write
 
@@ -135,6 +141,33 @@ change, after the framework files, and only when the sync is not blocked. The
 report names every file it wrote, added or removed, and the summary counts
 each one. A sync never changes a file that its report does not name.
 
+### 4. The sync checks the lock; npm writes it
+
+An installation often vendors the four tarballs at a fixed path and version.
+A newer release at the same version replaces their bytes at the same path.
+A plain `npm install` then keeps the old `integrity` in `package-lock.json`.
+It also keeps the old code in `node_modules`, or restores it from npm's
+cache, which npm keys by that integrity. Deleting `node_modules` does not
+help. An `npm install` that names the tarballs reads their bytes and writes
+both the lock entry and `node_modules`.
+
+So the sync does not write the lock entries itself. A lock edit alone would
+leave the old code installed, and the old code includes the sync command
+itself. Instead:
+
+- The documented re-sync step installs the four vendored tarballs by name.
+- Before it writes anything, the sync checks the lock entry of each of the
+  four packages: version, `resolved` file and integrity. A lock entry is
+  **stale** when it names the target version and file, the vendored file at
+  that path holds exactly the target's bytes, and only its integrity differs.
+  The sync then fails with `foundation_sync_lock_stale`, lists the stale
+  packages and prints the exact `npm install` command, with their vendored
+  paths, that fixes the lock. Any other mismatch fails with
+  `foundation_scaffold_executable_not_locked`, as before.
+
+npm is the only writer of `package-lock.json`. The sync never writes it, so
+the report rule in section 3 holds without a `package-lock.json` line.
+
 The installation `tsconfig.json` that the release ships already holds every
 setting Next.js requires or suggests. So `next build` does not rewrite it, and
 a build does not turn it into a local change. Its `jsx` setting is `react-jsx`,
@@ -149,6 +182,11 @@ which also lets Vitest parse an installation's own `.tsx` tests.
   (`planFoundationSync`), so every branch is unit-tested without a filesystem.
   The scaffold, sync command and `release:prepare` share one `isTemplatePath`
   and one tar reader; none is forked.
+- The sync that runs is the one in the installed reference-site package. An
+  installation whose lock is stale runs the old release's sync. If that
+  release predates issue #208, it reports
+  `foundation_scaffold_executable_not_locked` and prints no command. The
+  documented step fixes the lock in both cases.
 - An installation pinned to a release that predates the framework manifest
   cannot be three-way synced, because it has no old manifest. Sync fails closed
   with a clear error rather than guessing.

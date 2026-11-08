@@ -71,20 +71,29 @@ function packTarball(files) {
   return gzipSync(Buffer.concat(blocks));
 }
 
+function sha512Integrity(bytes) {
+  return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+}
+
 /**
- * Writes one release to `directory`. `files` is the reference-site tarball
- * content; its framework manifest is derived through the shared
- * `isTemplatePath`, exactly as `release:prepare` derives it.
+ * Writes one release to `directory`. Each artifact is a real npm tarball that
+ * npm can install. `files` is the reference-site tarball content; its
+ * framework manifest is derived through the shared `isTemplatePath`, exactly
+ * as `release:prepare` derives it. `label` makes each other artifact's bytes
+ * differ between two releases of the same version.
  */
-async function writeRelease(directory, { version, files }) {
+async function writeRelease(directory, { version, files, label }) {
   const artifactDirectory = join(directory, "artifacts");
   await mkdir(artifactDirectory, { recursive: true });
   const artifacts = {};
   for (const name of packageNames) {
-    const bytes =
+    const content =
       name === "@humber-foundry/reference-site"
-        ? packTarball(files)
-        : Buffer.from(`artifact:${name}:${version}`);
+        ? files
+        : new Map([["index.js", `export const release = "${label}";\n`]]);
+    const bytes = packTarball(
+      new Map([["package.json", JSON.stringify({ name, version })], ...content]),
+    );
     const filename = `${name.slice(1).replace("/", "-")}-${version}.tgz`;
     await writeFile(join(artifactDirectory, filename), bytes);
     artifacts[name] = {
@@ -92,7 +101,7 @@ async function writeRelease(directory, { version, files }) {
       version,
       filename,
       size: bytes.byteLength,
-      integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+      integrity: sha512Integrity(bytes),
       sha256: sha256(bytes),
     };
   }
@@ -164,7 +173,7 @@ async function writeInstallation(directory, { oldFiles, oldRelease, targetReleas
     )}\n`,
   );
   const lockPackages = {};
-  for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
+  for (const name of packageNames) {
     const artifact = targetRelease.descriptor.artifacts[name];
     lockPackages[`node_modules/${name}`] = {
       version: targetRelease.descriptor.version,
@@ -208,7 +217,12 @@ function runSync(installation, release, { acceptConflicts = false } = {}) {
  * pinned to the old one. `oldFiles` and `targetFiles` add to a shared base of
  * framework files.
  */
-async function syncCase({ oldFiles = [], targetFiles = [], installationFiles = [] }) {
+async function syncCase({
+  oldFiles = [],
+  targetFiles = [],
+  installationFiles = [],
+  targetVersion = "0.2.0",
+}) {
   caseNumber += 1;
   const directory = join(work, `case-${caseNumber}`);
   const base = [
@@ -221,10 +235,12 @@ async function syncCase({ oldFiles = [], targetFiles = [], installationFiles = [
   const oldRelease = await writeRelease(join(directory, "old"), {
     version: "0.1.0",
     files: oldContent,
+    label: "old",
   });
   const targetRelease = await writeRelease(join(directory, "target"), {
-    version: "0.2.0",
+    version: targetVersion,
     files: targetContent,
+    label: "target",
   });
   const installation = join(directory, "installation");
   await mkdir(installation, { recursive: true });
@@ -234,6 +250,57 @@ async function syncCase({ oldFiles = [], targetFiles = [], installationFiles = [
     targetRelease,
     files: installationFiles,
   });
+  return { installation, oldRelease, targetRelease };
+}
+
+/** Runs npm offline, isolated from the user's npm configuration. */
+function runNpm(installation, commandLine) {
+  return spawnSync("sh", ["-c", commandLine], {
+    cwd: installation,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NPM_CONFIG_CACHE: join(work, "npm-cache"),
+      NPM_CONFIG_USERCONFIG: join(work, "npmrc"),
+      NPM_CONFIG_OFFLINE: "true",
+      NPM_CONFIG_AUDIT: "false",
+      NPM_CONFIG_FUND: "false",
+    },
+  });
+}
+
+/**
+ * Builds an installation that vendors the four foundation tarballs at a fixed
+ * path and version, as issue #208 describes. npm installs the old release's
+ * tarballs. Then the target release, at the same version, replaces their
+ * bytes at the same path, and nothing runs npm again.
+ */
+async function revendoredCase() {
+  const { installation, oldRelease, targetRelease } = await syncCase({
+    targetVersion: "0.1.0",
+    targetFiles: [["app/page.tsx", "export default function Page() { return 1; }\n"]],
+  });
+  const vendor = join(installation, "vendor");
+  await mkdir(vendor, { recursive: true });
+  const dependencies = {};
+  for (const name of packageNames) {
+    const { filename } = oldRelease.descriptor.artifacts[name];
+    await cp(join(oldRelease.artifactDirectory, filename), join(vendor, filename));
+    dependencies[name] = `file:vendor/${filename}`;
+  }
+  const manifest = JSON.parse(await readFile(join(installation, "package.json"), "utf8"));
+  await writeFile(
+    join(installation, "package.json"),
+    `${JSON.stringify({ ...manifest, dependencies }, null, 2)}\n`,
+  );
+  await rm(join(installation, "package-lock.json"));
+  const install = runNpm(installation, "npm install");
+  expect(install.stderr).not.toMatch(/ERR!/u);
+  expect(install.status).toBe(0);
+  for (const name of packageNames) {
+    const { filename } = targetRelease.descriptor.artifacts[name];
+    await cp(join(targetRelease.artifactDirectory, filename), join(vendor, filename));
+  }
   return { installation, targetRelease };
 }
 
@@ -259,6 +326,7 @@ const installationTsconfig = `${JSON.stringify(
 
 beforeAll(async () => {
   work = await mkdtemp(join(tmpdir(), "foundry-sync-command-"));
+  await writeFile(join(work, "npmrc"), "");
   const installed = join(work, "packages/node_modules/@humber-foundry");
   const operator = join(installed, "operator");
   await build({
@@ -410,4 +478,54 @@ describe("foundry-reference-site-sync report", () => {
     expect(changedPaths(before, await installationFileHashes(installation))).toEqual([]);
     expect(result.stdout).toMatch(/^0 written, 0 removed,/mu);
   });
+});
+
+describe("foundry-reference-site-sync and a re-vendored release at the same version", () => {
+  const generated = ["node_modules"];
+
+  it("refuses a lock that still holds the replaced tarballs' integrity and names the command that fixes it", async () => {
+    const { installation, targetRelease } = await revendoredCase();
+    const before = await installationFileHashes(installation, { skip: generated });
+
+    const result = runSync(installation, targetRelease);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "foundation_sync_lock_stale:@humber-foundry/application,@humber-foundry/operator," +
+        "@humber-foundry/reference-site,@humber-foundry/site-definition",
+    );
+    expect(result.stderr).toMatch(
+      /^ {2}npm install \.\/vendor\/humber-foundry-application-0\.1\.0\.tgz \.\/vendor\/humber-foundry-operator-0\.1\.0\.tgz \.\/vendor\/humber-foundry-reference-site-0\.1\.0\.tgz \.\/vendor\/humber-foundry-site-definition-0\.1\.0\.tgz$/mu,
+    );
+    expect(
+      changedPaths(before, await installationFileHashes(installation, { skip: generated })),
+    ).toEqual([]);
+  }, 60_000);
+
+  it("locks each new tarball's real sha512 with the named command, and then syncs", async () => {
+    const { installation, targetRelease } = await revendoredCase();
+    const refused = runSync(installation, targetRelease);
+    const fix = /^ {2}(npm install .+)$/mu.exec(refused.stderr)?.[1];
+    expect(fix).toBeDefined();
+
+    const install = runNpm(installation, fix);
+
+    expect(install.status).toBe(0);
+    const lock = JSON.parse(await readFile(join(installation, "package-lock.json"), "utf8"));
+    for (const name of packageNames) {
+      const { filename } = targetRelease.descriptor.artifacts[name];
+      const vendored = await readFile(join(installation, "vendor", filename));
+      expect(lock.packages[`node_modules/${name}`].integrity).toBe(sha512Integrity(vendored));
+    }
+    expect(
+      await readFile(
+        join(installation, "node_modules/@humber-foundry/application/index.js"),
+        "utf8",
+      ),
+    ).toContain('"target"');
+    const result = runSync(installation, targetRelease);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(await readFile(join(installation, "app/page.tsx"), "utf8")).toContain("return 1;");
+  }, 60_000);
 });
