@@ -20,11 +20,10 @@ export async function confirmCloudflareRefusesTeam(
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
-    throw new Error(
-      "no_network_for_team_key_request:" +
-        `${error?.cause?.code ?? error?.name ?? "unknown"}`,
-      { cause: error },
-    );
+    const reason = error?.cause?.code ?? error?.name ?? "unknown";
+    throw new Error(`no_network_for_team_key_request:${reason}`, {
+      cause: error,
+    });
   }
   await response.body?.cancel();
 

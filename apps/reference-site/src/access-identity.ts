@@ -16,6 +16,7 @@ import {
 const clockToleranceSeconds = 60;
 const maximumKeyCacheAgeMs = 24 * 60 * 60 * 1_000;
 const keyRefetchCooldownMs = 30_000;
+const keyFetchTimeoutMs = 5_000;
 
 export type CloudflareAccessConfiguration = Readonly<{
   issuer: string;
@@ -62,12 +63,12 @@ function validateConfiguration({
 }
 
 // An assertion whose `kid` is not in the cached keys refetches the team's
-// keys, because that is how a key Cloudflare Access has just rotated in
-// arrives. Such a refetch starts at most once per cooldown in each isolate.
-// So, once the keys are cached, a burst of made-up `kid` values causes one
-// fetch. When both fetches succeed, a rotated key is accepted no more than 30
-// seconds plus two key fetches (at most 40 seconds in all) after the team
-// publishes it.
+// keys, because that is how the Worker gets a new signing key after
+// Cloudflare Access rotates its keys. Such a refetch starts at most once per
+// cooldown in each isolate. So, once the keys are cached, a burst of made-up
+// `kid` values causes one fetch. When both fetches succeed, a rotated key is
+// accepted no more than 30 seconds plus two key fetches (at most 40 seconds in
+// all) after the team publishes it.
 //
 // jose's own cooldown counts from the end of a successful fetch. In a Worker,
 // jose does not share an in-flight fetch between requests, so every request
@@ -80,7 +81,7 @@ function createRemoteKeySetWithRefetchCooldown(url: URL): JWTVerifyGetKey {
   const remoteKeySet = createRemoteJWKSet(url, {
     cacheMaxAge: maximumKeyCacheAgeMs,
     cooldownDuration: keyRefetchCooldownMs,
-    timeoutDuration: 5_000,
+    timeoutDuration: keyFetchTimeoutMs,
   });
   let refetchStartedAt = Number.NEGATIVE_INFINITY;
 
