@@ -8,10 +8,10 @@ import { fileURLToPath } from "node:url";
 import {
   assertLockedReleaseExecutable,
   assertTiptapSetAligned,
+  installationPackageSource,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
-  writeInstallationBuildConfiguration,
 } from "./foundation-release-lib.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -104,7 +104,10 @@ async function main() {
     `${JSON.stringify(emptyProductionSite, null, 2)}\n`,
   );
 
-  await writeInstallationBuildConfiguration({ target, descriptor, packageRoot });
+  await writeFile(
+    join(target, "package.json"),
+    await installationPackageSource({ target, descriptor, packageRoot }),
+  );
   await writeFile(
     join(target, ".foundry-foundation-release.json"),
     `${JSON.stringify(descriptor, null, 2)}\n`,

@@ -1,7 +1,16 @@
 # ADR-0015: The framework/installation-owned seam and three-way foundation sync
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-11-07
 - **Date:** 2026-08-17
+
+> **Amended 2026-11-07 for issue #139.** `tsconfig.json` is now one of the
+> named root config files, so it is framework source and the three-way rule
+> below applies to it. Before this, the scaffold and the sync generated it and
+> the sync overwrote it on every run without a report. The sync also writes
+> files it derives from the target release: the installation's `package.json`
+> build configuration and the release pin files. The report names each of
+> these files when the sync changes it. See "The report names every write"
+> below.
 
 ## Context
 
@@ -42,7 +51,7 @@ different owners.
   `isTemplatePath` classifies: everything under `app/`, `components/`, `src/`,
   `migrations/`, `public/` and `foundry/`, plus the named root config files
   (`custom-worker.ts`, `cloudflare-email.d.ts`, `next-env.d.ts`,
-  `next.config.ts`, `open-next.config.ts`, `wrangler.jsonc`,
+  `next.config.ts`, `open-next.config.ts`, `tsconfig.json`, `wrangler.jsonc`,
   `wrangler.recovery.jsonc`).
 - **Installation-owned work** is the client's. Sync must never write, remove or
   report a conflict on it. It is three things:
@@ -105,6 +114,31 @@ the target's artifacts and descriptor digest with the operator's
 same trust checks the scaffold uses — and refuses to write anything until the
 vendored release is the locked executable.
 
+### 3. The report names every write
+
+The sync writes three more files that are not framework source. It derives
+each one from the target release:
+
+- `package.json`: the foundation's build scripts, engines and tiptap
+  overrides. The installation's own scripts and dependencies stay.
+- `.foundry-foundation-release.json`: the release pin.
+- `.foundry/installation.json`: the release pin in the bootstrap manifest,
+  when the installation has one.
+
+These files are not reconciled three ways, because the installation and the
+release each own part of `package.json`, and a pin must always name the target.
+But they follow the same reporting rule as framework files. The operator's
+`reconcileFoundationFramework` is the only code that writes or removes an
+installation file during a sync. It writes a derived file only when its bytes
+change, after the framework files, and only when the sync is not blocked. The
+report names every file it wrote, added or removed, and the summary counts
+each one. A sync never changes a file that its report does not name.
+
+The installation `tsconfig.json` that the release ships already holds every
+setting Next.js requires or suggests. So `next build` does not rewrite it, and
+a build does not turn it into a local change. Its `jsx` setting is `react-jsx`,
+which also lets Vitest parse an installation's own `.tsx` tests.
+
 ## Consequences
 
 - Adopting a new release is one command, not a hand-merge. Installation work is
@@ -121,3 +155,11 @@ vendored release is the locked executable.
   `release:prepare` produces carries it; the descriptor parser rejects a
   descriptor without it, and rejects a manifest path that is not a well-formed
   member of the framework set.
+- A release before the amendment does not list `tsconfig.json` in its
+  framework manifest. When an installation syncs from such a release, the
+  three-way rule has no old side for `tsconfig.json`. If the installation's
+  file matches the target's, nothing happens. That is the case for an
+  installation whose file differs from the earlier generated one only by the
+  rewrite Next.js made on its first build, because the new file is exactly
+  that rewrite. Any other difference is reported as a conflict, and the
+  installation keeps its file.

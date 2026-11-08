@@ -506,8 +506,8 @@ The value is never part of the record.
 
 **Framework source** — The foundation's code an installation receives from a
 release: everything under `app/`, `components/`, `src/`, `migrations/`,
-`public/` and `foundry/`, plus the named root config files. It is the
-`isTemplatePath` set. The release owns it; the scaffold copies it once and sync
+`public/` and `foundry/`, plus the named root config files, `tsconfig.json`
+among them. It is the `isTemplatePath` set. The release owns it; the scaffold copies it once and sync
 updates it.
 
 **Installation-owned work** — The files an installation owns and sync never

@@ -37,7 +37,7 @@ const sha256Pattern = /^[0-9a-f]{64}$/u;
  * re-states the migration path shape.
  */
 const frameworkPathPattern =
-  /^(?:(?:app|components|foundry|migrations|public|src)\/.+|custom-worker\.ts|cloudflare-email\.d\.ts|next-env\.d\.ts|next\.config\.ts|open-next\.config\.ts|wrangler\.jsonc|wrangler\.recovery\.jsonc)$/u;
+  /^(?:(?:app|components|foundry|migrations|public|src)\/.+|custom-worker\.ts|cloudflare-email\.d\.ts|next-env\.d\.ts|next\.config\.ts|open-next\.config\.ts|tsconfig\.json|wrangler\.jsonc|wrangler\.recovery\.jsonc)$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -122,16 +122,32 @@ export type FrameworkFileDisposition =
   | "migration-added"
   | "migration-present"
   | "migration-removed-upstream-kept"
-  | "migration-mismatch";
+  | "migration-mismatch"
+  | "derived-written"
+  | "derived-unchanged";
 
 export type FrameworkReconciliationEntry = Readonly<{
   path: string;
   disposition: FrameworkFileDisposition;
+  note?: string;
+}>;
+
+/**
+ * A file the sync derives from the target release instead of copying it from
+ * the framework source: the installation's `package.json` build configuration
+ * and the release pin files. It is written only when its bytes change, and
+ * every write is reported like a framework write.
+ */
+export type DerivedInstallationFile = Readonly<{
+  path: string;
+  bytes: Uint8Array;
+  note: string;
 }>;
 
 export type FoundationSyncPlan = Readonly<{
   entries: ReadonlyArray<FrameworkReconciliationEntry>;
   toWrite: ReadonlyArray<string>;
+  derivedWrites: ReadonlyArray<string>;
   toRemove: ReadonlyArray<string>;
   conflicts: ReadonlyArray<string>;
   keptOverrides: ReadonlyArray<string>;
@@ -151,27 +167,45 @@ function toMap(
 }
 
 /**
- * The pure three-way rule. `installationHashes` maps every union path to the
- * installation's current sha256, or `null` when the file is absent. Nothing
- * here touches the filesystem, so every branch is exhaustively testable.
+ * The pure three-way rule. `installationHashes` maps every union path, and
+ * every derived path, to the installation's current sha256, or `null` when the
+ * file is absent. `derivedFiles` lists the files the sync derives from the
+ * target release, each with the sha256 of its new bytes. Nothing here touches
+ * the filesystem, so every branch is exhaustively testable.
  */
 export function planFoundationSync({
   oldFiles,
   newFiles,
   installationHashes,
+  derivedFiles = [],
   acceptConflicts = false,
 }: {
   oldFiles: ReadonlyArray<FrameworkManifestFile>;
   newFiles: ReadonlyArray<FrameworkManifestFile>;
   installationHashes: ReadonlyMap<string, string | null>;
+  derivedFiles?: ReadonlyArray<
+    Readonly<{ path: string; sha256: string; note: string }>
+  >;
   acceptConflicts?: boolean;
 }): FoundationSyncPlan {
   const oldMap = toMap(oldFiles);
   const newMap = toMap(newFiles);
   const paths = [...new Set([...oldMap.keys(), ...newMap.keys()])].sort();
+  // A derived file is never framework source. If a manifest listed one, the
+  // three-way rule and the derived write would both claim the same path.
+  if (
+    new Set(derivedFiles.map((file) => file.path)).size !==
+      derivedFiles.length ||
+    derivedFiles.some(
+      (file) => oldMap.has(file.path) || newMap.has(file.path),
+    )
+  ) {
+    throw new FoundationSyncError("foundation_sync_derived_path_invalid");
+  }
 
   const entries: FrameworkReconciliationEntry[] = [];
   const toWrite: string[] = [];
+  const derivedWrites: string[] = [];
   const toRemove: string[] = [];
   const conflicts: string[] = [];
   const keptOverrides: string[] = [];
@@ -250,6 +284,20 @@ export function planFoundationSync({
     conflicts.push(path);
   }
 
+  for (const file of derivedFiles) {
+    const current = installationHashes.get(file.path) ?? null;
+    if (current === file.sha256) {
+      entries.push({ path: file.path, disposition: "derived-unchanged" });
+      continue;
+    }
+    entries.push({
+      path: file.path,
+      disposition: "derived-written",
+      note: file.note,
+    });
+    derivedWrites.push(file.path);
+  }
+
   const blocked =
     migrationMismatches.length > 0 ||
     (conflicts.length > 0 && !acceptConflicts);
@@ -257,6 +305,7 @@ export function planFoundationSync({
   return Object.freeze({
     entries: Object.freeze(entries),
     toWrite: Object.freeze(toWrite),
+    derivedWrites: Object.freeze(derivedWrites),
     toRemove: Object.freeze(toRemove),
     conflicts: Object.freeze(conflicts),
     keptOverrides: Object.freeze(keptOverrides),
@@ -295,18 +344,25 @@ export type FoundationSyncResult = Readonly<{
  * the target release's framework bytes keyed by installation-relative path, and
  * must match `newFiles` exactly; a mismatch means the packed source and the
  * recorded manifest disagree and sync fails closed.
+ *
+ * `derivedFiles` are written after the framework files, in order, and only
+ * when their bytes change. This function is the only place the sync writes or
+ * removes an installation file, so the report it returns names every file the
+ * sync changed.
  */
 export async function reconcileFoundationFramework({
   installationDir,
   targetFiles,
   oldFiles,
   newFiles,
+  derivedFiles = [],
   acceptConflicts = false,
 }: {
   installationDir: string;
   targetFiles: ReadonlyMap<string, Uint8Array>;
   oldFiles: ReadonlyArray<FrameworkManifestFile>;
   newFiles: ReadonlyArray<FrameworkManifestFile>;
+  derivedFiles?: ReadonlyArray<DerivedInstallationFile>;
   acceptConflicts?: boolean;
 }): Promise<FoundationSyncResult> {
   // The manifest is authoritative: every non-owned target file must be present
@@ -336,11 +392,22 @@ export async function reconcileFoundationFramework({
       await hashInstallationFile(installationDir, path),
     );
   }
+  for (const file of derivedFiles) {
+    installationHashes.set(
+      file.path,
+      await hashInstallationFile(installationDir, file.path),
+    );
+  }
 
   const plan = planFoundationSync({
     oldFiles,
     newFiles,
     installationHashes,
+    derivedFiles: derivedFiles.map((file) => ({
+      path: file.path,
+      sha256: createHash("sha256").update(file.bytes).digest("hex"),
+      note: file.note,
+    })),
     acceptConflicts,
   });
 
@@ -356,6 +423,12 @@ export async function reconcileFoundationFramework({
     }
     for (const path of plan.toRemove) {
       await rm(join(installationDir, path), { force: true });
+    }
+    for (const file of derivedFiles) {
+      if (!plan.derivedWrites.includes(file.path)) continue;
+      const destination = join(installationDir, file.path);
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, file.bytes);
     }
   }
 
@@ -381,6 +454,8 @@ export function renderFoundationSyncReport(plan: FoundationSyncPlan): string {
     "migration-present": "unchanged",
     "migration-removed-upstream-kept": "keep    ",
     "migration-mismatch": "mismatch",
+    "derived-written": "write   ",
+    "derived-unchanged": "unchanged",
   };
   const note: Partial<Record<FrameworkFileDisposition, string>> = {
     "kept-override": " (local override; unchanged in target)",
@@ -399,15 +474,18 @@ export function renderFoundationSyncReport(plan: FoundationSyncPlan): string {
     "unchanged",
     "absent",
     "skipped-installation-owned",
+    "derived-unchanged",
   ]);
   const lines = plan.entries
     .filter((entry) => !silent.has(entry.disposition))
-    .map(
-      (entry) =>
-        `${label[entry.disposition]} ${entry.path}${note[entry.disposition] ?? ""}`,
-    );
+    .map((entry) => {
+      const detail =
+        entry.note === undefined ? note[entry.disposition] : ` (${entry.note})`;
+      return `${label[entry.disposition]} ${entry.path}${detail ?? ""}`;
+    });
+  const written = plan.toWrite.length + plan.derivedWrites.length;
   const summary =
-    `${plan.toWrite.length} written, ${plan.toRemove.length} removed, ` +
+    `${written} written, ${plan.toRemove.length} removed, ` +
     `${plan.keptOverrides.length} kept as override, ` +
     `${plan.conflicts.length} conflict(s), ` +
     `${plan.removedButModified.length} kept after upstream removal, ` +

@@ -9,16 +9,16 @@
 // See docs/decisions/ADR-0015-foundation-framework-sync-seam.md.
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   assertLockedReleaseExecutable,
+  installationPackageSource,
   isTemplatePath,
   parseReleaseArguments,
   tarEntries,
-  writeInstallationBuildConfiguration,
 } from "./foundation-release-lib.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,9 +32,11 @@ async function fileExists(path) {
   }
 }
 
-async function updateBootstrapManifestPin({ target, descriptor, digest }) {
+// Returns the bootstrap manifest with its foundation pin moved to the target
+// release, or `null` when the installation has no bootstrap manifest.
+async function bootstrapManifestWithPin({ target, descriptor, digest }) {
   const manifestPath = join(target, ".foundry/installation.json");
-  if (!(await fileExists(manifestPath))) return;
+  if (!(await fileExists(manifestPath))) return null;
   const { parseBootstrapManifest, serializeBootstrapManifest } = await import(
     "@humber-foundry/operator"
   );
@@ -45,7 +47,7 @@ async function updateBootstrapManifestPin({ target, descriptor, digest }) {
   };
   // Re-parse to re-derive and re-validate every field before writing it back.
   const validated = await parseBootstrapManifest(JSON.stringify(updated));
-  await writeFile(manifestPath, serializeBootstrapManifest(validated));
+  return serializeBootstrapManifest(validated);
 }
 
 async function main() {
@@ -121,11 +123,45 @@ async function main() {
     if (isTemplatePath(path)) targetFiles.set(path, bytes);
   }
 
+  // Every file the sync writes besides framework source. The operator writes
+  // them after the framework files, only when their bytes change, and names
+  // each write in the report. The pins come last, so an interrupted sync never
+  // advances a pin past files it has not written.
+  const derivedFiles = [
+    {
+      path: "package.json",
+      bytes: Buffer.from(
+        await installationPackageSource({ target, descriptor, packageRoot }),
+      ),
+      note: "build configuration from target release",
+    },
+    {
+      path: ".foundry-foundation-release.json",
+      bytes: Buffer.from(`${JSON.stringify(descriptor, null, 2)}\n`),
+      note: "release pin",
+    },
+  ];
+  const bootstrapManifest = await bootstrapManifestWithPin({
+    target,
+    descriptor,
+    digest: options["descriptor-digest"],
+  });
+  if (bootstrapManifest !== null) {
+    derivedFiles.push({
+      path: ".foundry/installation.json",
+      bytes: Buffer.from(bootstrapManifest),
+      note: "release pin",
+    });
+  }
+
+  // The operator is the only writer: this command never writes an
+  // installation file itself, so the report names every file the sync changed.
   const { plan, report } = await reconcileFoundationFramework({
     installationDir: target,
     targetFiles,
     oldFiles: oldDescriptor.framework.files,
     newFiles: descriptor.framework.files,
+    derivedFiles,
     acceptConflicts,
   });
 
@@ -139,14 +175,6 @@ async function main() {
     }
     throw new Error("foundation_sync_conflicts_unresolved");
   }
-
-  await writeInstallationBuildConfiguration({ target, descriptor, packageRoot });
-  await writeFile(pinPath, `${JSON.stringify(descriptor, null, 2)}\n`);
-  await updateBootstrapManifestPin({
-    target,
-    descriptor,
-    digest: options["descriptor-digest"],
-  });
 }
 
 main().catch((error) => {

@@ -30,8 +30,10 @@ export function lockedTiptapPackages(
   lock: unknown,
 ): Array<{ name: string; version: string }>;
 
-export function writeInstallationBuildConfiguration(args: {
+export function installationTsconfigSource(): string;
+
+export function installationPackageSource(args: {
   target: string;
   descriptor: unknown;
   packageRoot: string;
-}): Promise<void>;
+}): Promise<string>;

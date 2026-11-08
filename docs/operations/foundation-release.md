@@ -26,8 +26,16 @@ binds consumers to the exact descriptor bytes.
 The framework manifest is every path in the packed reference-site tarball that
 the scaffold's `isTemplatePath` classifies as framework source — everything
 under `app/`, `components/`, `src/`, `migrations/`, `public/` and `foundry/`,
-plus the named root config files. It is what lets an installation be synced to a
-newer release without a hand-merge.
+plus the named root config files, `tsconfig.json` among them. It is what lets
+an installation be synced to a newer release without a hand-merge.
+
+The reference site's own `tsconfig.json` extends the workspace configuration,
+so preparation packs a generated installation `tsconfig.json` in its place.
+That file already holds every setting Next.js requires or suggests, so
+`next build` leaves it unchanged. Its `jsx` setting is `react-jsx`, so an
+installation that adds Vitest can run its own `.tsx` tests. Verification fails
+with `foundation_scaffold_tsconfig_rewritten_by_build` if the build changes
+it.
 
 Verification creates a new temporary directory outside the workspace. It
 installs the four tarballs, generates a lockfile, rejects workspace links,
@@ -89,15 +97,29 @@ Migrations are additive-only: the sync adds new migrations, keeps every existing
 one byte-for-byte, never deletes a past migration, and fails closed if an
 already-present migration does not match the target's bytes.
 
-The sync also writes the target release's tiptap overrides to the
-installation's `package.json`. Run `npm install` after the sync, so the
-lockfile moves to the target's tiptap set.
+`tsconfig.json` is framework source, so the same three-way rule applies to it.
+An installation that changed its `tsconfig.json` keeps the change: the report
+shows it as `keep` when the target did not change the file, or as a
+`conflict` when the target did. A release before issue #139 did not list
+`tsconfig.json`. When you sync from such a release, an installation's
+`tsconfig.json` that differs from the target's is a conflict. Review it, then
+pass `--accept-conflicts` to keep the installation's file.
 
-The command prints a report of every file written, added, removed, kept as an
-override and every conflict with its path. After a clean, conflict-free sync
-and `npm install`, the installation's framework files are byte-identical to
-the target's template, its `.foundry/*` pin files and `package-lock.json` name
-the target, and typecheck and build pass. See
+The sync also writes the target release's build scripts, engines and tiptap
+overrides to the installation's `package.json`, and it moves the release pins
+(`.foundry-foundation-release.json`, and `.foundry/installation.json` when it
+exists) to the target. Run `npm install` after the sync, so the lockfile moves
+to the target's tiptap set.
+
+The command prints a report with one line for every file it writes, adds or
+removes, every local override it keeps and every conflict, with its path.
+`package.json` and the pin files appear as `write` lines when their bytes
+change. The summary counts every write and removal. The sync never changes a
+file that the report does not name, so after a sync `git status` lists only
+files the report names, plus any you changed yourself. After a clean,
+conflict-free sync and `npm install`, the installation's framework files are
+byte-identical to the target's template, its `.foundry/*` pin files and
+`package-lock.json` name the target, and typecheck and build pass. See
 [ADR-0015](../decisions/ADR-0015-foundation-framework-sync-seam.md).
 
 ## Publication boundary

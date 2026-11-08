@@ -1,4 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -6,10 +10,12 @@ import { describe, expect, it } from "vitest";
 import {
   alignedTiptapPins,
   assertTiptapSetAligned,
+  installationTsconfigSource,
   lockedTiptapPackages,
 } from "./foundation-release-lib.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
+const require = createRequire(import.meta.url);
 
 function readJson(path) {
   return JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -105,4 +111,105 @@ describe("installed tiptap set", () => {
       ),
     ).toEqual([]);
   });
+});
+
+// Runs the pinned Next.js tsconfig check, the one `next build` and `next dev`
+// run, on `source`, and returns the file it leaves behind.
+async function afterNextTypeScriptSetup(source) {
+  const { writeConfigurationDefaults } = require(
+    "next/dist/lib/typescript/writeConfigurationDefaults.js",
+  );
+  const directory = await mkdtemp(join(tmpdir(), "foundry-installation-tsconfig-"));
+  try {
+    const path = join(directory, "tsconfig.json");
+    await writeFile(path, source);
+    await writeConfigurationDefaults(
+      require("typescript").version,
+      path,
+      false,
+      true,
+      ".next",
+      false,
+      false,
+    );
+    return await readFile(path, "utf8");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+describe("installation tsconfig.json", () => {
+  it("is left unchanged by the Next.js build", async () => {
+    // If Next.js rewrote it, every build would turn the shipped file into a
+    // local change, and the next sync would report a conflict.
+    expect(await afterNextTypeScriptSetup(installationTsconfigSource())).toBe(
+      installationTsconfigSource(),
+    );
+  });
+
+  it("is what Next.js made of the tsconfig.json earlier releases wrote", async () => {
+    // Every release before #139 wrote this file, and the first `next build`
+    // rewrote it. An installation that has only that rewrite must match the
+    // shipped file, so its first sync reports nothing for tsconfig.json.
+    const earlierReleaseTsconfig = `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          lib: ["DOM", "DOM.Iterable", "ES2023"],
+          strict: true,
+          skipLibCheck: true,
+          noEmit: true,
+          esModuleInterop: true,
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          resolveJsonModule: true,
+          isolatedModules: true,
+          jsx: "preserve",
+          paths: { "@/*": ["./*"] },
+          plugins: [{ name: "next" }],
+        },
+        include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+        exclude: ["node_modules"],
+      },
+      null,
+      2,
+    )}\n`;
+    expect(await afterNextTypeScriptSetup(earlierReleaseTsconfig)).toBe(
+      installationTsconfigSource(),
+    );
+  });
+
+  it("lets Vitest run an installation's own .tsx test", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "foundry-installation-vitest-"));
+    try {
+      await symlink(join(root, "node_modules"), join(directory, "node_modules"), "dir");
+      await writeFile(join(directory, "package.json"), '{ "type": "module" }\n');
+      await writeFile(join(directory, "tsconfig.json"), installationTsconfigSource());
+      await writeFile(
+        join(directory, "page.test.tsx"),
+        [
+          'import { renderToStaticMarkup } from "react-dom/server";',
+          'import { expect, it } from "vitest";',
+          "",
+          'it("renders JSX", () => {',
+          '  expect(renderToStaticMarkup(<p>Hello</p>)).toBe("<p>Hello</p>");',
+          "});",
+          "",
+        ].join("\n"),
+      );
+      // The child must not inherit this run's Vitest worker state.
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => !name.startsWith("VITEST")),
+      );
+      const result = spawnSync(
+        process.execPath,
+        [join(root, "node_modules/vitest/vitest.mjs"), "run", "--root", directory],
+        { cwd: directory, encoding: "utf8", env: { ...env, NODE_ENV: "test" } },
+      );
+      expect(`${result.stdout}${result.stderr}`).toMatch(/Tests\s+1 passed/u);
+      expect(result.status).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

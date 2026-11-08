@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const releaseDirectory = join(root, "foundation-release");
@@ -18,6 +19,34 @@ function expectCommandFailure(name, args, cwd, env, expected) {
     throw error;
   }
   throw new Error("foundation_release_negative_test_did_not_fail");
+}
+
+// Directories a build or install creates. They are not files the sync owns.
+const generatedDirectories = new Set([
+  ".foundry-verification-home",
+  ".next",
+  ".open-next",
+  ".wrangler",
+  "node_modules",
+]);
+
+// Returns installation-relative path to sha256 for every installation file.
+async function installationFiles(target) {
+  const files = new Map();
+  async function walk(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (directory === target && generatedDirectories.has(entry.name)) continue;
+        await walk(path);
+      } else {
+        const bytes = await readFile(path);
+        files.set(relative(target, path), createHash("sha256").update(bytes).digest("hex"));
+      }
+    }
+  }
+  await walk(target);
+  return files;
 }
 
 async function main() {
@@ -133,6 +162,18 @@ async function main() {
     command("npm", ["run", "build"], target, env);
     command("npm", ["run", "smoke:deployment"], target, env);
 
+    // The shipped tsconfig.json must survive the Next.js build unchanged. If
+    // the build rewrote it, the next sync would see a local change.
+    const shippedTsconfig = descriptor.framework.files.find(
+      (file) => file.path === "tsconfig.json",
+    );
+    const builtTsconfig = createHash("sha256")
+      .update(await readFile(join(target, "tsconfig.json")))
+      .digest("hex");
+    if (shippedTsconfig === undefined || builtTsconfig !== shippedTsconfig.sha256) {
+      throw new Error("foundation_scaffold_tsconfig_rewritten_by_build");
+    }
+
     // Exercise the real sync command against the release the installation is
     // already pinned to. A same-release sync must be a clean no-op that never
     // touches an installation-owned file, and it must fail closed exactly like
@@ -148,11 +189,19 @@ async function main() {
       "--artifacts",
       join(releaseDirectory, "artifacts"),
     ];
+    const filesBeforeSync = await installationFiles(target);
     const idempotentReport = execFileSync(syncCommand, syncArguments, {
       cwd: target,
       encoding: "utf8",
       env,
     });
+    const filesAfterSync = await installationFiles(target);
+    const changedBySync = [
+      ...new Set([...filesBeforeSync.keys(), ...filesAfterSync.keys()]),
+    ].filter((path) => filesBeforeSync.get(path) !== filesAfterSync.get(path));
+    if (changedBySync.length > 0) {
+      throw new Error(`foundation_sync_idempotent_changed:${changedBySync.join(",")}`);
+    }
     const pinnedAfterSync = JSON.parse(
       await readFile(join(target, ".foundry-foundation-release.json"), "utf8"),
     );
