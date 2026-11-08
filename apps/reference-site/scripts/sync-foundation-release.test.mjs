@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isTemplatePath } from "./foundation-release-lib.mjs";
 import {
   changedPaths,
-  installationFileHashes as snapshot,
+  installationFileHashes,
   reportedChanges,
 } from "./installation-file-changes.mjs";
 
@@ -315,13 +315,13 @@ describe("foundry-reference-site-sync and tsconfig.json", () => {
       targetFiles: [["tsconfig.json", shippedTsconfig]],
       installationFiles: [["tsconfig.json", installationTsconfig]],
     });
-    const before = await snapshot(installation);
+    const before = await installationFileHashes(installation);
 
     const result = runSync(installation, targetRelease);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("foundation_sync_conflicts_unresolved");
-    expect(changedPaths(before, await snapshot(installation))).toEqual([]);
+    expect(changedPaths(before, await installationFileHashes(installation))).toEqual([]);
   });
 
   it("keeps a local tsconfig.json override the target release did not change", async () => {
@@ -382,12 +382,12 @@ describe("foundry-reference-site-sync report", () => {
         ["tsconfig.json", changedShippedTsconfig],
       ],
     });
-    const before = await snapshot(installation);
+    const before = await installationFileHashes(installation);
 
     const result = runSync(installation, targetRelease);
 
     expect(result.status).toBe(0);
-    const changed = changedPaths(before, await snapshot(installation));
+    const changed = changedPaths(before, await installationFileHashes(installation));
     expect(changed.length).toBeGreaterThan(0);
     expect(reportedChanges(result.stdout)).toEqual(changed);
     const summary = /^(\d+) written, (\d+) removed,/mu.exec(result.stdout);
@@ -402,12 +402,12 @@ describe("foundry-reference-site-sync report", () => {
     });
     // A first sync advances the pin and writes the build configuration.
     expect(runSync(installation, targetRelease).status).toBe(0);
-    const before = await snapshot(installation);
+    const before = await installationFileHashes(installation);
 
     const result = runSync(installation, targetRelease);
 
     expect(result.status).toBe(0);
-    expect(changedPaths(before, await snapshot(installation))).toEqual([]);
+    expect(changedPaths(before, await installationFileHashes(installation))).toEqual([]);
     expect(result.stdout).toMatch(/^0 written, 0 removed,/mu);
   });
 });
