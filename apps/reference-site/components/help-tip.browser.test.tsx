@@ -63,7 +63,12 @@ describe("HelpTip, keyboard, touch and screen-reader reachability", () => {
   });
 
   it("opens and closes from the keyboard alone — Tab, Enter, Escape", async () => {
-    renderHelpTip();
+    const helpTipHost = renderHelpTip();
+    // Start the Tab from just before the help tip. An earlier test can leave
+    // focus outside the test iframe, and a Tab from there never reaches the
+    // button.
+    helpTipHost.tabIndex = -1;
+    helpTipHost.focus();
     await userEvent.tab();
     const trigger = page.getByRole("button", { name: "What's a revision?" });
     expect(trigger.element()).toBe(document.activeElement);
