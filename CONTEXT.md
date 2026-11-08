@@ -506,14 +506,25 @@ The value is never part of the record.
 
 **Framework source** — The foundation's code an installation receives from a
 release: everything under `app/`, `components/`, `src/`, `migrations/`,
-`public/` and `foundry/`, plus the named root config files. It is the
-`isTemplatePath` set. The release owns it; the scaffold copies it once and sync
-updates it.
+`public/` and `foundry/`, plus the named root config files, `tsconfig.json`
+among them. It is the `isTemplatePath` set. The release owns it; the scaffold
+copies it once and sync updates it.
 
 **Installation-owned work** — The files an installation owns and sync never
 touches: everything under `foundry/`, any `public/` file the release does not
-ship (client media), and any file the release does not list. `foundry/` is
-seeded once by the scaffold and owned by the installation thereafter.
+ship (client media), and any other file the release does not list, except the
+derived files. `foundry/` is seeded once by the scaffold and owned by the
+installation thereafter.
+
+**Derived file** — A file the sync writes from the target release but does not
+copy from its framework source: the installation's `package.json` build
+configuration and the release pins. The sync writes a derived file only when
+its bytes change, and its report names each write. See ADR-0015.
+
+**Release pin** — The record of the foundation release an installation runs:
+`.foundry-foundation-release.json`, and the `foundationRelease` field of
+`.foundry/installation.json` when that file exists. The sync moves both to the
+target release.
 
 **Framework manifest** — The list in a release descriptor of every framework
 path with its sha256. It lets sync tell a local change apart from a foundation

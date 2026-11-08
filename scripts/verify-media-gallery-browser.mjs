@@ -88,6 +88,43 @@ async function drawPhoto(page, name, width, height) {
   );
 }
 
+/**
+ * Records every thumbnail response the page receives from now on. The gallery
+ * can request a thumbnail before the check reaches the line that wants it, so
+ * a listener started at that line would wait for an event that already
+ * happened. Start this before the action that makes the gallery request one.
+ */
+function watchThumbnails(page) {
+  const seen = [];
+  const waiting = new Set();
+  page.on("response", (response) => {
+    if (!response.url().includes("variant=thumbnail")) return;
+    seen.push(response);
+    for (const notify of waiting) notify(response);
+  });
+  return {
+    /** The thumbnail response for one asset, whether it came before or after. */
+    forAsset(assetId) {
+      const isAsset = (response) => response.url().includes(assetId);
+      const early = seen.find(isAsset);
+      if (early) return Promise.resolve(early);
+      return new Promise((resolveResponse, reject) => {
+        const notify = (response) => {
+          if (!isAsset(response)) return;
+          clearTimeout(timer);
+          waiting.delete(notify);
+          resolveResponse(response);
+        };
+        const timer = setTimeout(() => {
+          waiting.delete(notify);
+          reject(new Error(`media_gallery_thumbnail_timeout:${assetId}`));
+        }, 30_000);
+        waiting.add(notify);
+      });
+    },
+  };
+}
+
 async function main() {
   const port = await availablePort();
   const origin = `http://127.0.0.1:${port}`;
@@ -173,7 +210,9 @@ async function main() {
     await page.goto(`${origin}/dash/media?workspace=${workspace}`);
     await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
 
-    // Upload a real photo through the real media route.
+    // Upload a real photo through the real media route. The thumbnail watcher
+    // starts first, so the thumbnail request the upload causes cannot be missed.
+    const thumbnails = watchThumbnails(page);
     const sourceBytes = await drawPhoto(page, "jetty.png", 1400, 1000);
     const uploaded = page.waitForResponse(
       (response) =>
@@ -203,11 +242,7 @@ async function main() {
       });
     const tile = libraryTile("jetty.png");
     await tile.waitFor({ state: "visible" });
-    const thumbnail = await page.waitForResponse(
-      (response) =>
-        response.url().includes("variant=thumbnail") &&
-        response.url().includes(asset.assetId),
-    );
+    const thumbnail = await thumbnails.forAsset(asset.assetId);
     if (thumbnail.status() !== 200) {
       throw new Error(
         `media_gallery_thumbnail_status:${thumbnail.status()}:${await thumbnail.text()}`,

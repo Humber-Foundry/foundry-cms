@@ -6,6 +6,11 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { isTemplatePath } from "../../../apps/reference-site/scripts/foundation-release-lib.mjs";
+import {
+  changedPaths,
+  installationFileHashes,
+  reportedChanges,
+} from "../../../apps/reference-site/scripts/installation-file-changes.mjs";
 
 import {
   parseFoundationFrameworkManifest,
@@ -268,6 +273,59 @@ describe("planFoundationSync three-way reconciliation", () => {
   });
 });
 
+describe("planFoundationSync derived files", () => {
+  const manifest = [file("app/page.tsx", "A")];
+  const hashes = (entries: Array<[string, string | null]>) =>
+    new Map<string, string | null>([["app/page.tsx", sha256("A")], ...entries]);
+
+  it("writes and reports a derived file whose bytes change", () => {
+    const plan = planFoundationSync({
+      oldFiles: manifest,
+      newFiles: manifest,
+      installationHashes: hashes([["package.json", sha256("old")]]),
+      derivedFiles: [
+        { path: "package.json", sha256: sha256("new"), note: "build configuration" },
+      ],
+    });
+    expect(plan.derivedWrites).toEqual(["package.json"]);
+    expect(plan.entries).toContainEqual({
+      path: "package.json",
+      disposition: "derived-written",
+      note: "build configuration",
+    });
+    expect(renderFoundationSyncReport(plan)).toContain(
+      "write    package.json (build configuration)\n1 written,",
+    );
+  });
+
+  it("leaves out a derived file whose bytes are already current", () => {
+    const plan = planFoundationSync({
+      oldFiles: manifest,
+      newFiles: manifest,
+      installationHashes: hashes([["package.json", sha256("same")]]),
+      derivedFiles: [
+        { path: "package.json", sha256: sha256("same"), note: "build configuration" },
+      ],
+    });
+    expect(plan.derivedWrites).toEqual([]);
+    expect(renderFoundationSyncReport(plan)).toBe(
+      "0 written, 0 removed, 0 kept as override, 0 conflict(s), " +
+        "0 kept after upstream removal, 0 migration mismatch(es)\n",
+    );
+  });
+
+  it("rejects a derived file that is also framework source", () => {
+    expect(() =>
+      planFoundationSync({
+        oldFiles: manifest,
+        newFiles: manifest,
+        installationHashes: hashes([]),
+        derivedFiles: [{ path: "app/page.tsx", sha256: sha256("B"), note: "x" }],
+      }),
+    ).toThrow(/foundation_sync_derived_path_invalid/u);
+  });
+});
+
 describe("reconcileFoundationFramework applied to a fixture installation", () => {
   let root: string;
 
@@ -379,5 +437,72 @@ describe("reconcileFoundationFramework applied to a fixture installation", () =>
     expect(report).toContain("src/conflict.ts");
     expect(report).toContain("app/added.tsx");
     expect(report).toContain("migrations/0002_next.sql");
+  });
+
+  it("names every file it changes, derived files included, in its report", async () => {
+    const releaseA = new Map([
+      ["app/page.tsx", "A-page"],
+      ["src/removed.ts", "A-removed"],
+      ["tsconfig.json", "A-tsconfig"],
+    ]);
+    const releaseB = new Map([
+      ["app/page.tsx", "B-page"],
+      ["app/added.tsx", "B-added"],
+      ["tsconfig.json", "B-tsconfig"],
+    ]);
+    for (const [path, content] of releaseA) await write(path, content);
+    await write("package.json", "old-package");
+    await write(".foundry-foundation-release.json", "old-pin");
+    const before = await installationFileHashes(root);
+
+    const result = await reconcileFoundationFramework({
+      installationDir: root,
+      targetFiles: new Map(
+        [...releaseB].map(([path, content]) => [path, Buffer.from(content)]),
+      ),
+      oldFiles: [...releaseA].map(([path, content]) => file(path, content)),
+      newFiles: [...releaseB].map(([path, content]) => file(path, content)),
+      derivedFiles: [
+        { path: "package.json", bytes: Buffer.from("new-package"), note: "build" },
+        {
+          path: ".foundry-foundation-release.json",
+          bytes: Buffer.from("new-pin"),
+          note: "release pin",
+        },
+        { path: ".foundry/installation.json", bytes: Buffer.from("pin"), note: "release pin" },
+      ],
+    });
+
+    const changes = changedPaths(before, await installationFileHashes(root));
+    expect(changes).toEqual([
+      ".foundry-foundation-release.json",
+      ".foundry/installation.json",
+      "app/added.tsx",
+      "app/page.tsx",
+      "package.json",
+      "src/removed.ts",
+      "tsconfig.json",
+    ]);
+    expect(reportedChanges(result.report)).toEqual(changes);
+    expect(result.report).toContain("\n6 written, 1 removed,");
+  });
+
+  it("writes no derived file while a conflict blocks the sync", async () => {
+    await write("app/page.tsx", "LOCAL-page");
+    await write("package.json", "old-package");
+    const before = await installationFileHashes(root);
+
+    const result = await reconcileFoundationFramework({
+      installationDir: root,
+      targetFiles: new Map([["app/page.tsx", Buffer.from("B-page")]]),
+      oldFiles: [file("app/page.tsx", "A-page")],
+      newFiles: [file("app/page.tsx", "B-page")],
+      derivedFiles: [
+        { path: "package.json", bytes: Buffer.from("new-package"), note: "build" },
+      ],
+    });
+
+    expect(result.plan.blocked).toBe(true);
+    expect(changedPaths(before, await installationFileHashes(root))).toEqual([]);
   });
 });
