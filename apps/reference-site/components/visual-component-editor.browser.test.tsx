@@ -1702,8 +1702,8 @@ describe("visual component editor browser acceptance", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 20));
     }
     // One request is all this editor can send: the stub never answers, so the
-    // save stays in flight and startSave refuses another. Recovery merges
-    // every record it accepts into that one request.
+    // save stays in flight and startSave refuses another. Any record recovery
+    // selects appears in that one request.
 
     expect(sentBodies).toEqual([
       expect.objectContaining({
