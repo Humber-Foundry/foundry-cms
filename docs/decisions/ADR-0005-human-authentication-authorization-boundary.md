@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
-- **Amended:** 2026-09-18 by issue #148
+- **Amended:** 2026-09-18 by issue #148; 2026-11-07 by issue #263
 
 ## Context
 
@@ -111,6 +111,28 @@ unknown identities, expired assertions, issuer or audience mismatches, and
 verification failures all fail closed. Authentication middleware creates a
 request-scoped principal; it never forwards the raw JWT into domain commands,
 logs, audit records or browser data.
+
+#### Amendment (issue #263): a cooldown on the refresh for an unknown `kid`
+
+The immediate refresh for an unknown `kid` starts at most once every 30
+seconds for each Worker isolate. The 30-second window opens when such a
+refresh starts, and again when any key fetch succeeds. Inside the window an
+unknown `kid` fails closed with no fetch. So, once an isolate has cached the
+team's keys, a burst of made-up `kid` values causes one fetch, also when the
+requests arrive at the same moment.
+
+The cooldown does not cover a fetch before the first successful fetch in an
+isolate, or the fetch that replaces keys older than 24 hours. In a Worker,
+requests that arrive together before such a fetch ends each start a fetch, as
+they did before this amendment.
+
+The cooldown is short so that key rotation still works. Cloudflare's "Validate
+JWTs" page says that Access rotates the signing key every 6 weeks by default,
+and signs all new tokens with the current key. So the first assertions after
+a rotation carry a `kid` that a Worker has not cached. Such a key is accepted
+at once when no fetch ran in the 30 seconds before. In the worst case, when
+both fetches succeed, it is accepted 30 seconds plus two key fetches (at most
+40 seconds in all) after Cloudflare publishes it.
 
 ### Installation-local users and authorization
 

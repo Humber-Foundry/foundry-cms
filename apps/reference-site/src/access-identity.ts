@@ -15,6 +15,8 @@ import {
 
 const clockToleranceSeconds = 60;
 const maximumKeyCacheAgeMs = 24 * 60 * 60 * 1_000;
+const keyRefetchCooldownMs = 30_000;
+const keyFetchTimeoutMs = 5_000;
 
 export type CloudflareAccessConfiguration = Readonly<{
   issuer: string;
@@ -60,15 +62,59 @@ function validateConfiguration({
   return issuerUrl;
 }
 
+// An assertion whose `kid` is not in the cached keys refetches the team's
+// keys, because that is how the Worker gets a new signing key after
+// Cloudflare Access rotates its keys. Such a refetch starts at most once per
+// cooldown in each isolate. So, once the keys are cached, a burst of made-up
+// `kid` values causes one fetch. When both fetches succeed, a rotated key is
+// accepted no more than 30 seconds plus two key fetches (at most 40 seconds in
+// all) after the team publishes it.
+//
+// jose's own cooldown counts from the end of a successful fetch. In a Worker,
+// jose does not share an in-flight fetch between requests, so every request
+// that arrives during the fetch would start one more. So this key set also
+// opens a cooldown window when a refetch starts. jose's window still applies.
+//
+// Until a fetch succeeds, and when the cached keys are older than
+// `maximumKeyCacheAgeMs`, jose fetches without this cooldown.
+function createRemoteKeySetWithRefetchCooldown(url: URL): JWTVerifyGetKey {
+  const remoteKeySet = createRemoteJWKSet(url, {
+    cacheMaxAge: maximumKeyCacheAgeMs,
+    cooldownDuration: keyRefetchCooldownMs,
+    timeoutDuration: keyFetchTimeoutMs,
+  });
+  let refetchStartedAt = Number.NEGATIVE_INFINITY;
+
+  return async (protectedHeader, token) => {
+    const { kid } = protectedHeader;
+    // jwtVerify refuses every algorithm except RS256 before it asks for a
+    // key, and Cloudflare's keys are RSA signing keys for RS256. So, for an
+    // assertion with a `kid`, jose refetches exactly when the keys are fresh,
+    // its own cooldown is over, and the `kid` names no cached key. An
+    // assertion with no `kid` matches every cached RSA key, so it causes no
+    // refetch as long as the team publishes at least one RSA key. This copies
+    // a rule from jose's source; the exact jose version in package.json keeps
+    // it correct.
+    const refetchesForUnknownKey =
+      remoteKeySet.fresh &&
+      !remoteKeySet.coolingDown &&
+      typeof kid === "string" &&
+      !(remoteKeySet.jwks()?.keys ?? []).some((key) => key.kid === kid);
+    if (refetchesForUnknownKey) {
+      if (Date.now() < refetchStartedAt + keyRefetchCooldownMs) {
+        throw new errors.JWKSNoMatchingKey();
+      }
+      refetchStartedAt = Date.now();
+    }
+    return remoteKeySet(protectedHeader, token);
+  };
+}
+
 export function createCloudflareAccessKeySet(
   source: JSONWebKeySet | URL,
 ): JWTVerifyGetKey {
   if (source instanceof URL) {
-    return createRemoteJWKSet(source, {
-      cacheMaxAge: maximumKeyCacheAgeMs,
-      cooldownDuration: 0,
-      timeoutDuration: 5_000,
-    });
+    return createRemoteKeySetWithRefetchCooldown(source);
   }
 
   return createLocalJWKSet(source);
