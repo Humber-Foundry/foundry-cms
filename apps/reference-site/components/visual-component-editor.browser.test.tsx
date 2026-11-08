@@ -1701,10 +1701,9 @@ describe("visual component editor browser acceptance", () => {
     for (let index = 0; index < 100 && sentBodies.length === 0; index += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 20));
     }
-    // Give a second save time to start. The autosave starts 250 ms after a
-    // change and retries every 500 ms, so 750 ms covers a first try and one
-    // retry.
-    await new Promise((resolve) => window.setTimeout(resolve, 750));
+    // One request is all this editor can send: the stub never answers, so the
+    // save stays in flight and startSave refuses another. Recovery merges
+    // every record it accepts into that one request.
 
     expect(sentBodies).toEqual([
       expect.objectContaining({

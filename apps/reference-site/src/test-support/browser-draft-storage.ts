@@ -7,8 +7,9 @@
  *
  * Left alone, such a save lands in the next test. It writes an outbox record
  * after that test began, and its request reaches whatever `fetch` the next
- * test stubbed. The browser setup file calls this before and after every
- * test, so each test starts with no save waiting to send and empty storage.
+ * test stubbed. The browser setup file calls `settleBrowserDraftStorage`
+ * before and after every test, so each test starts with no save waiting to
+ * send and with empty storage.
  */
 const settleLimitMilliseconds = 2_000;
 

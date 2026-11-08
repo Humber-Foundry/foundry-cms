@@ -94,7 +94,9 @@ describe("browser draft storage between tests", () => {
       const { pending = [] } = await navigator.locks.query();
       return pending.some(({ name }) => name === lockName) ? true : undefined;
     });
-    flushSync(() => mounted.splice(0).forEach((editor) => editor.unmount()));
+    for (const editorRoot of mounted.splice(0)) {
+      flushSync(() => editorRoot.unmount());
+    }
     window.setTimeout(releaseLock, 100);
 
     await settleBrowserDraftStorage();
