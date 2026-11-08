@@ -20,6 +20,12 @@ export function assertLockedReleaseExecutable(args: {
   name: string;
 }): void;
 
+export function assertSyncReleaseLocked(args: {
+  descriptor: unknown;
+  lock: unknown;
+  target: string;
+}): Promise<void>;
+
 export function alignedTiptapPins(
   dependencies: Readonly<Record<string, string>>,
 ): Record<string, string>;

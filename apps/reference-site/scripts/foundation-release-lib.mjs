@@ -6,9 +6,10 @@
 // records lists exactly the paths the scaffold and sync manage, and it imports
 // `installationTsconfigText` to pack the installation's `tsconfig.json`.
 
+import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 /**
  * The framework classification. A path is framework source the foundation owns
@@ -118,7 +119,8 @@ export function tarEntries(archive) {
 /**
  * Proves the installation's lockfile pins the exact release executable — same
  * version, integrity and resolved filename the descriptor names. Scaffold and
- * sync both refuse to write a foundation file until this holds.
+ * sync both refuse to write a foundation file until this holds. The sync runs
+ * it for all four packages through `assertSyncReleaseLocked`.
  */
 export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
   const entry = lock.packages?.[`node_modules/${name}`];
@@ -131,6 +133,85 @@ export function assertLockedReleaseExecutable({ descriptor, lock, name }) {
   ) {
     throw new Error(`foundation_scaffold_executable_not_locked:${name}`);
   }
+}
+
+// The four packages of one foundation release. The operator exports the same
+// list as `foundationPackageNames`. The sync checks the lock before it imports
+// the operator, so that it never loads operator code that is not locked.
+const foundationPackageNames = [
+  "@humber-foundry/application",
+  "@humber-foundry/operator",
+  "@humber-foundry/reference-site",
+  "@humber-foundry/site-definition",
+];
+
+/**
+ * Proves the installation's lockfile pins all four release executables. The
+ * sync runs this before it writes anything.
+ *
+ * An installation can vendor the tarballs at a fixed path and version. When a
+ * newer release replaces their bytes, a plain `npm install` keeps the old
+ * `integrity` in the lockfile and the old code in `node_modules`. Only an
+ * `npm install` that names the tarballs reads their new bytes. When the
+ * vendored tarballs at the locked paths already hold the target's bytes, the
+ * lock is stale, and the error names that exact command. Any other mismatch
+ * throws `foundation_scaffold_executable_not_locked`.
+ */
+export async function assertSyncReleaseLocked({ descriptor, lock, target }) {
+  const stale = [];
+  for (const name of foundationPackageNames) {
+    try {
+      assertLockedReleaseExecutable({ descriptor, lock, name });
+    } catch (error) {
+      const tarball = await staleTarballInstallArgument({ descriptor, lock, name, target });
+      if (tarball === null) throw error;
+      stale.push({ name, tarball });
+    }
+  }
+  if (stale.length === 0) return;
+  throw new Error(
+    [
+      `foundation_sync_lock_stale:${stale.map(({ name }) => name).join(",")}`,
+      "package-lock.json still holds the integrity of the tarballs that the vendored files replaced.",
+      "Run this command in the installation directory, then run the sync again:",
+      `  npm install ${stale.map(({ tarball }) => shellWord(tarball)).join(" ")}`,
+    ].join("\n"),
+  );
+}
+
+/**
+ * Returns the vendored tarball path, as the `npm install` argument, when the
+ * lock entry names the target version and file but not its integrity, and the
+ * file at that path holds exactly the target's bytes. Returns `null` otherwise.
+ */
+async function staleTarballInstallArgument({ descriptor, lock, name, target }) {
+  const entry = lock.packages?.[`node_modules/${name}`];
+  const artifact = descriptor.artifacts?.[name];
+  const resolved = entry?.resolved;
+  if (
+    typeof artifact?.filename !== "string" ||
+    entry?.version !== descriptor.version ||
+    typeof resolved !== "string" ||
+    !resolved.startsWith("file:") ||
+    !resolved.endsWith(artifact.filename)
+  ) {
+    return null;
+  }
+  const path = resolved.slice("file:".length);
+  let bytes;
+  try {
+    bytes = await readFile(resolve(target, path));
+  } catch {
+    return null;
+  }
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  if (integrity !== artifact.integrity) return null;
+  return isAbsolute(path) || path.startsWith(".") ? path : `./${path}`;
+}
+
+/** Quotes a word for `sh` when it holds a character outside the safe set. */
+function shellWord(word) {
+  return /^[\w@%+=:,./-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 /**

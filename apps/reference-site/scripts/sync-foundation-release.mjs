@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertLockedReleaseExecutable,
+  assertSyncReleaseLocked,
   installationPackageText,
   isTemplatePath,
   parseReleaseArguments,
@@ -74,13 +74,10 @@ async function main() {
   }
 
   const untrustedDescriptor = JSON.parse(descriptorSource);
-  // The target packages must already be vendored — same trust check the
-  // scaffold uses — so the installation cannot advance its pin past the code it
-  // actually runs.
+  // All four target packages must already be vendored and locked, so the
+  // installation cannot advance its pin past the code it actually runs.
   const lock = JSON.parse(await readFile(join(target, "package-lock.json"), "utf8"));
-  for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
-    assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
-  }
+  await assertSyncReleaseLocked({ descriptor: untrustedDescriptor, lock, target });
 
   const {
     loadFoundationReleaseDescriptor,
