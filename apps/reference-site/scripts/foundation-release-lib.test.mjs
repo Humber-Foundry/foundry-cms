@@ -201,12 +201,25 @@ describe("installation tsconfig.json", () => {
       const env = Object.fromEntries(
         Object.entries(process.env).filter(([name]) => !name.startsWith("VITEST")),
       );
+      // The JSON reporter gives counts that do not depend on colour or layout.
+      // CI turns colour on, and colour codes break a match on the text output.
       const result = spawnSync(
         process.execPath,
-        [join(root, "node_modules/vitest/vitest.mjs"), "run", "--root", directory],
+        [
+          join(root, "node_modules/vitest/vitest.mjs"),
+          "run",
+          "--root",
+          directory,
+          "--reporter=json",
+        ],
         { cwd: directory, encoding: "utf8", env: { ...env, NODE_ENV: "test" } },
       );
-      expect(`${result.stdout}${result.stderr}`).toMatch(/Tests\s+1 passed/u);
+      expect(result.stderr).not.toMatch(/Failed to parse source/u);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        numTotalTests: 1,
+        numPassedTests: 1,
+        numFailedTests: 0,
+      });
       expect(result.status).toBe(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
