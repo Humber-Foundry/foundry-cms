@@ -110,7 +110,7 @@ fail closed with a service-unavailable result and no command executes.
 
 The immediate refresh for an unknown `kid` starts at most once every 30
 seconds for each Worker isolate. The 30-second window opens when such a
-refresh starts, and again when any key fetch ends. Inside the window an
+refresh starts, and again when any key fetch succeeds. Inside the window an
 unknown `kid` fails closed with no fetch. So a burst of made-up `kid` values
 causes one fetch, also when the requests arrive at the same moment.
 

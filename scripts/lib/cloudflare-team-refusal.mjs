@@ -1,6 +1,6 @@
 /**
- * Send the request a deployed Worker sends for the Access team's keys, and
- * confirm that Cloudflare refuses it (ADR-0050).
+ * Ask for the Access team's keys with the URL, method and redirect mode a
+ * deployed Worker uses, and confirm that Cloudflare refuses (ADR-0050).
  *
  * Cloudflare answers a team that does not exist with HTTP 404. The Worker
  * then cannot get the team's keys and answers 503. A run with no network

@@ -26,15 +26,24 @@ let publicJwk: JWK;
 let publicKeyPem: string;
 let keySet: ReturnType<typeof createCloudflareAccessKeySet>;
 
-beforeAll(async () => {
+/** A signing key pair, and its public key as the team's key set lists it. */
+async function teamSigningKey(kid: string) {
   const keys = await generateKeyPair("RS256", { extractable: true });
-  privateKey = keys.privateKey;
-  publicJwk = {
-    ...(await exportJWK(keys.publicKey)),
-    kid: "key-1",
-    alg: "RS256",
-    use: "sig",
+  return {
+    ...keys,
+    jwk: {
+      ...(await exportJWK(keys.publicKey)),
+      kid,
+      alg: "RS256",
+      use: "sig",
+    },
   };
+}
+
+beforeAll(async () => {
+  const keys = await teamSigningKey("key-1");
+  privateKey = keys.privateKey;
+  publicJwk = keys.jwk;
   publicKeyPem = await exportSPKI(keys.publicKey);
   keySet = createCloudflareAccessKeySet({ keys: [publicJwk] });
 });
@@ -206,14 +215,9 @@ describe("Cloudflare Access team key fetches", () => {
   });
 
   async function signedWithNewKey(kid: string) {
-    const keys = await generateKeyPair("RS256", { extractable: true });
+    const keys = await teamSigningKey(kid);
     return {
-      jwk: {
-        ...(await exportJWK(keys.publicKey)),
-        kid,
-        alg: "RS256",
-        use: "sig",
-      },
+      jwk: keys.jwk,
       assertion: await createAssertion(
         {},
         { header: { alg: "RS256", kid }, key: keys.privateKey },
@@ -233,10 +237,16 @@ describe("Cloudflare Access team key fetches", () => {
     });
   }
 
-  it("refetches the team's keys once for a burst of unknown key ids", async () => {
+  /** A remote key set that fetched the team's keys once, at `now`. */
+  async function loadedRemoteKeySet() {
     const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
     await validate(await createAssertion(), remoteKeySet);
     expect(keyFetches).toBe(1);
+    return remoteKeySet;
+  }
+
+  it("refetches the team's keys once for a burst of unknown key ids", async () => {
+    const remoteKeySet = await loadedRemoteKeySet();
 
     vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
     for (let index = 0; index < 20; index += 1) {
@@ -253,9 +263,7 @@ describe("Cloudflare Access team key fetches", () => {
     // Worker, where one request may not wait on another request's fetch. It
     // detects a Worker by `WebSocketPair`.
     vi.stubGlobal("WebSocketPair", class {});
-    const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
-    await validate(await createAssertion(), remoteKeySet);
-    expect(keyFetches).toBe(1);
+    const remoteKeySet = await loadedRemoteKeySet();
 
     vi.setSystemTime(now.getTime() + keyRefetchCooldownMs);
     const assertions = await Promise.all(
@@ -274,9 +282,7 @@ describe("Cloudflare Access team key fetches", () => {
   });
 
   it("accepts a key the team rotates in once the cooldown has passed", async () => {
-    const remoteKeySet = createCloudflareAccessKeySet(keySetUrl);
-    await validate(await createAssertion(), remoteKeySet);
-    expect(keyFetches).toBe(1);
+    const remoteKeySet = await loadedRemoteKeySet();
 
     const rotated = await signedWithNewKey("key-2");
     publishedKeys = { keys: [publicJwk, rotated.jwk] };
